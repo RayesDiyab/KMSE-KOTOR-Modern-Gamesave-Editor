@@ -12,13 +12,28 @@ CHANGELOG.
   and `assets/kmse-logo.png`). Settings and backups move from `KMRP\Save Editor` to
   `KOTOR Modern Gamesave Editor` on the first start. Builds, tests and the GitHub workflow work from the
   repository's root.
+- **A save opened without the game** (2026-10-24). On a PC without KotOR, a save from an
+  added folder now shows what it holds instead of empty tabs: the eight skills, class names,
+  levels and XP (the games' XP table is a formula), companions, items by tag, owned feats
+  and powers by number, quests by tag and stage, body, voice and gender by number. Edits
+  that need the game's rules or files (class and level changes, the most Health and Force,
+  new items and equipping, Skip Ahead, Go Back, travel, spawning, companions brought in)
+  are refused with a message saying why; the current Health and Force can still be set
+  (`tests/no_game.rs`). Not yet seen on a PC without the game.
+- **Lighter program** (2026-10-24). 13.5 MB instead of 22.8 MB: the quest databases are
+  carried with their white space taken out and deflated (build.rs), unpacked once. An edit
+  in Story refills only the section on screen instead of all six; the game's journal is
+  read once per game; the map's arrow is cached; Skip Ahead no longer copies every
+  chapter's data on each click. Measured: about 50 MB in memory after start, no work while
+  idle.
 - **Kerned text and larger sizes** (2026-10-24). The window is set in KMRP's fonts as kerned
   that day (a modder saw the small a stand apart: "Aw areness", "G a m" in Gamesave). In
   Settings, Medium text is what Large was and Large is larger still.
 - **Copy and rename** (2026-10-24). A Copy button (two pages) beside a save's name on the
   saves page and beside Settings in the editor copies the save as it is on disk into the
   next free slot, under a name asked for ("<name> - Copy"); changes not saved yet stay out
-  of it. A pen at the name's top right turns the name into a text box: Enter or the save
+  of it; its folder carries that name after the slot's number ("000913 - Game26 - Copy"),
+  as does a save made with Save as a New Save. A pen at the name's top right turns the name into a text box: Enter or the save
   icon renames the save on the game's Load screen (backed up first), Escape cancels. The
   character, time played and date sit on the party's row. Save as a New Save is greyed
   out until something is changed, like Save Changes, which is wider now with its arrow in

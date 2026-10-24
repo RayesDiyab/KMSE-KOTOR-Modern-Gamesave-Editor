@@ -68,6 +68,21 @@ impl GameData {
         }
     }
 
+    /// No game files at all: a save opened on a PC without the game (2026-10-24). Every
+    /// table is empty and every string and texture missing; the editor shows what the save
+    /// itself holds.
+    pub fn none(game: Game) -> GameData {
+        GameData {
+            game,
+            root: PathBuf::new(),
+            key: None,
+            tlk: None,
+            overrides: HashMap::new(),
+            tables: Mutex::new(HashMap::new()),
+            gui_textures: Mutex::new(None),
+        }
+    }
+
     pub fn is_usable(&self) -> bool {
         self.key.is_some() && self.tlk.is_some()
     }

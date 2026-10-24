@@ -63,23 +63,36 @@ pub struct Step {
     pub found: std::collections::HashMap<String, crate::formats::gff::Gff>,
 }
 
-/// The databases the editor carries, by game.
-const FILES: &[(Game, &str)] = include!(concat!(env!("OUT_DIR"), "/quest_files.rs"));
+/// The databases the editor carries, by game: whether the file is a chapter's milestones or
+/// rewards (the rest are its quests), and its text, deflated by build.rs.
+const FILES: &[(Game, bool, &[u8])] = include!(concat!(env!("OUT_DIR"), "/quest_files.rs"));
+
+fn text(packed: &[u8]) -> String {
+    let bytes = miniz_oxide::inflate::decompress_to_vec(packed).unwrap_or_default();
+    String::from_utf8(bytes).unwrap_or_default()
+}
 
 /// The quest files (data/quests/*.json read as quest data), parsed once: the editor asks
 /// for them on every refresh of the story, and parsing the 13 MB each time made it slow.
 fn quest_files() -> &'static [(Game, File)] {
     static CACHE: std::sync::OnceLock<Vec<(Game, File)>> = std::sync::OnceLock::new();
-    CACHE.get_or_init(|| FILES.iter().filter_map(|(g, t)| serde_json::from_str::<File>(t).ok().map(|f| (*g, f))).collect())
+    CACHE.get_or_init(|| {
+        FILES
+            .iter()
+            .filter(|(_, kept, _)| !kept)
+            .filter_map(|(g, _, t)| serde_json::from_str::<File>(&text(t)).ok().map(|f| (*g, f)))
+            .collect()
+    })
 }
 
-/// The chapters' milestones and rewards as JSON, parsed once (the other files are not kept).
+/// The chapters' milestones and rewards as JSON, parsed once.
 fn json_files() -> &'static [(Game, serde_json::Value)] {
     static CACHE: std::sync::OnceLock<Vec<(Game, serde_json::Value)>> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| {
         FILES
             .iter()
-            .filter_map(|(g, t)| serde_json::from_str::<serde_json::Value>(t).ok().map(|v| (*g, v)))
+            .filter(|(_, kept, _)| *kept)
+            .filter_map(|(g, _, t)| serde_json::from_str::<serde_json::Value>(&text(t)).ok().map(|v| (*g, v)))
             .filter(|(_, v)| v.get("next_chapter").is_some() || v.get("xp_at_end").is_some())
             .collect()
     })

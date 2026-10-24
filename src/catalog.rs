@@ -331,7 +331,48 @@ impl Catalog {
             .filter_map(|r| x.int(r, "xp").filter(|&v| v >= 0 && v < u32::MAX as i64))
             .collect();
 
-        Catalog { game: data.game, classes, feats, powers, skills, portraits, npc_names, appearances, soundsets, genders, xp_table }
+        let mut cat = Catalog { game: data.game, classes, feats, powers, skills, portraits, npc_names, appearances, soundsets, genders, xp_table };
+        if !data.is_usable() {
+            cat.without_game();
+        }
+        cat
+    }
+
+    /// Without the game's files (2026-10-24): the names and numbers that are the same in
+    /// every copy of the game, so a save can be read. The classes carry their names only:
+    /// their dice and level-up grants are the game's, and the editor does not change levels
+    /// or classes without them (`Catalog::has_rules`).
+    fn without_game(&mut self) {
+        let game = self.game;
+        if self.skills.is_empty() {
+            let names = ["Computer Use", "Demolitions", "Stealth", "Awareness", "Persuade", "Repair", "Security", "Treat Injury"];
+            self.skills = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| Entry { id: i as i64, name: n.to_string(), description: String::new(), icon: String::new(), group: String::new(), group_order: 0 })
+                .collect();
+        }
+        if self.classes.is_empty() {
+            let mut names = vec!["Soldier", "Scout", "Scoundrel", "Jedi Guardian", "Jedi Consular", "Jedi Sentinel", "Combat Droid", "Expert Droid", "Minion"];
+            if game == Game::K2 {
+                names.extend(["Tech Specialist", "Bounty Hunter", "Jedi Weapon Master", "Jedi Master", "Jedi Watchman", "Sith Marauder", "Sith Lord", "Sith Assassin"]);
+            }
+            self.classes = names
+                .iter()
+                .enumerate()
+                .map(|(i, n)| Class { id: i as i64, name: n.to_string(), hit_die: 0, force_die: 0, droid: i == 6 || i == 7, game, grants: LevelGrants::default() })
+                .collect();
+        }
+        if self.xp_table.is_empty() {
+            // exptable.2da in both games: level n needs 500 n (n - 1); 20 levels, KotOR II 50
+            let top = if game == Game::K2 { 50 } else { 20 };
+            self.xp_table = (1..=top).map(|n: i64| 500 * n * (n - 1)).collect();
+        }
+    }
+
+    /// Whether the class rules are the game's own (read from its files).
+    pub fn has_rules(&self) -> bool {
+        self.classes.iter().any(|c| c.hit_die > 0)
     }
 
     pub fn class(&self, id: i64) -> Option<&Class> {

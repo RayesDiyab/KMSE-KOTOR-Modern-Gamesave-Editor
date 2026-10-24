@@ -225,7 +225,7 @@ fn build_game(game: Game, path: &Path, with_items: bool) -> Game_ {
     let data = Arc::new(GameData::open(game, path));
     let catalog = Arc::new(Catalog::build(&data));
     let items = with_items.then(|| Arc::new(catalog::item_templates(&data)));
-    Game_ { data, catalog, items }
+    Game_ { data, catalog, items, journal: Default::default() }
 }
 
 #[derive(Clone)]
@@ -238,6 +238,8 @@ struct Game_ {
     data: Arc<GameData>,
     catalog: Arc<Catalog>,
     items: Option<Arc<Vec<ItemTemplate>>>,
+    /// The game's journal (global.jrl), read on first use: every quest's name and stages.
+    journal: std::sync::OnceLock<Arc<Vec<kse_core::quests::Quest>>>,
 }
 
 struct State {
@@ -351,7 +353,26 @@ impl State {
         }
         if let Some(install) = self.installs.iter().find(|i| i.game == game) {
             self.games.insert(game, build_game(game, &install.path, false));
+        } else {
+            // a save opened without the game on this PC: what the save holds is still shown
+            let data = Arc::new(GameData::none(game));
+            let catalog = Arc::new(Catalog::build(&data));
+            self.games.insert(game, Game_ { data, catalog, items: None, journal: Default::default() });
         }
+    }
+
+    /// The game's journal, read once (it was read again and every stage's text decoded on
+    /// each refresh of the story).
+    fn journal(&self) -> Arc<Vec<kse_core::quests::Quest>> {
+        match self.current() {
+            Some(g) => g.journal.get_or_init(|| Arc::new(kse_core::quests::all(&g.data))).clone(),
+            None => Arc::new(Vec::new()),
+        }
+    }
+
+    /// Whether the game's own files are here: names, icons, maps and the class rules.
+    fn has_game_files(&self) -> bool {
+        self.data().map_or(false, |d| d.is_usable())
     }
 
     fn portrait(&mut self, resref: &str) -> Option<Image> {
@@ -436,13 +457,18 @@ impl State {
     }
 
     fn item_name(&self, item: &Struct) -> String {
-        let Some(data) = self.data() else { return String::new() };
+        let Some(data) = self.data() else { return item.string("Tag").unwrap_or_default() };
         let name = match item.get("LocalizedName") {
             Some(Value::LocString(l)) => data.loc(l),
             _ => String::new(),
         };
         if name.trim().is_empty() {
-            item.string("Tag").unwrap_or_default()
+            let tag = item.string("Tag").unwrap_or_default();
+            if tag.is_empty() {
+                item.string("TemplateResRef").unwrap_or_default()
+            } else {
+                tag
+            }
         } else {
             name.replace('\n', " ")
         }
@@ -845,7 +871,9 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     app.set_min1hp(creature::min1hp(&c));
     app.set_min1hp_changed(creature::min1hp(&c) != creature::min1hp(&o));
     let pick = |list: &[kse_core::catalog::Entry], id: Option<i64>| {
-        id.and_then(|i| list.iter().find(|e| e.id == i)).map(|e| e.name.clone()).unwrap_or_else(|| id.map(|i| format!("{} (from a mod)", i)).unwrap_or_default())
+        id.and_then(|i| list.iter().find(|e| e.id == i))
+            .map(|e| e.name.clone())
+            .unwrap_or_else(|| id.map(|i| if list.is_empty() { format!("Number {}", i) } else { format!("{} (from a mod)", i) }).unwrap_or_default())
     };
     app.set_body_name(s(pick(&cat.appearances, c.int("Appearance_Type"))));
     app.set_voice_name(s(pick(&cat.soundsets, c.int("SoundSetFile"))));
@@ -919,6 +947,7 @@ fn named(rows: impl Iterator<Item = (i64, String, String)>) -> ModelRc<Named> {
 /// creature has is lit. Entries it has that the game's list lacks (a removed mod) come
 /// last, so they can still be removed.
 fn ability_rows(st: &mut State, list: &[kse_core::catalog::Entry], have: &[i64], before: &[i64], query: &str, fallback_name: &str) -> Vec<Named> {
+    let game_files = st.has_game_files();
     let q = query.trim().to_lowercase();
     let mut out = Vec::new();
     let mut group = String::new();
@@ -942,7 +971,7 @@ fn ability_rows(st: &mut State, list: &[kse_core::catalog::Entry], have: &[i64],
     }
     let unknown: Vec<i64> = have.iter().copied().filter(|id| !list.iter().any(|e| e.id == *id)).collect();
     if !unknown.is_empty() && q.is_empty() {
-        out.push(Named { header: true, ..row(-1, "NOT IN THE GAME'S LIST", "") });
+        out.push(Named { header: true, ..row(-1, if game_files { "NOT IN THE GAME'S LIST" } else { "IN THE SAVE (NAMES NEED THE GAME)" }, "") });
         for id in unknown {
             out.push(Named { owned: true, ..row(id, format!("{} {}", fallback_name, id), "From a mod that is no longer installed, or hidden") });
         }
@@ -1282,9 +1311,9 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
     let chapters = skip_chapters(st);
     let Some(c) = chapters.iter().find(|c| c.index == i) else { return };
     let path = skip_path(&chapters, i);
-    let all = kse_core::questdb::milestones(st.game);
+    let all = kse_core::questdb::milestones_ref(st.game); // not copied: only the chapters used are
     let jedi = path.iter().any(|k| all.get(*k as usize).map_or(false, |(_, m)| m.get("jedi_class").is_some()));
-    let picked: Vec<serde_json::Value> = path.iter().filter_map(|k| all.get(*k as usize).map(|(_, m)| m.clone())).collect();
+    let picked: Vec<serde_json::Value> = path.iter().filter_map(|k| all.get(*k as usize).map(|(_, m)| (*m).clone())).collect();
     let side = kse_core::questdb::side_matters(st.game, &picked);
     // The side the player leans to now comes first.
     let leans_dark = st.save.as_ref().and_then(|s| s.player()).map_or(false, |p| kse_core::creature::alignment(p) < 50);
@@ -1292,7 +1321,7 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
     let mut title = format!("Skip to: {}", c.title);
     // a quest's stage inside the chapter: the story up to it, that quest as if played
     if let Some((tag, stage)) = st.skip_stage.clone() {
-        let q = st.data().and_then(|d| kse_core::quests::all(&d).into_iter().find(|q| q.tag.eq_ignore_ascii_case(&tag)));
+        let q = st.journal().iter().find(|q| q.tag.eq_ignore_ascii_case(&tag)).cloned();
         let name = q.as_ref().map(|q| q.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or(tag.clone());
         let text = q.as_ref().and_then(|q| q.stage(stage)).map(|x| x.text.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         title = format!("Skip to: {}", name);
@@ -1339,7 +1368,7 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let stage = (!tag.is_empty() && stage > 0).then(|| (tag.to_string(), stage as i64));
     let mut title = format!("Go back to: {}", c.title);
     if let Some((t, sid)) = &stage {
-        let q = st.data().and_then(|d| kse_core::quests::all(&d).into_iter().find(|q| q.tag.eq_ignore_ascii_case(t)));
+        let q = st.journal().iter().find(|q| q.tag.eq_ignore_ascii_case(t)).cloned();
         let name = q.as_ref().map(|q| q.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or(t.clone());
         let text = q.as_ref().and_then(|q| q.stage(*sid)).map(|x| x.text.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         title = format!("Go back to: {}", name);
@@ -1600,7 +1629,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             rows.push(row(5, "The beginning of the chapter".into(), "", state, index, String::new(), "", 0, false));
             height += 44.0;
         }
-        let journal = st.data().map(|d| kse_core::quests::all(&d)).unwrap_or_default();
+        let journal = st.journal();
         let have = st.save.as_ref().map(|s| s.quests()).unwrap_or_default();
         let stage_of = |tag: &str| have.iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map_or(-1, |(_, v)| *v);
         // The chapter's own quests: the main story first (its milestone's journal), then the
@@ -1670,10 +1699,17 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
 fn fill_story(ui: &AppWindow, st: &mut State) {
     let app = ui.global::<App>();
     app.set_story_section(st.story);
-    fill_skip(ui, st);
-    fill_globals(ui, st);
-    fill_area(ui, st);
-    fill_more(ui, st);
+    // only the section on screen (2026-10-24): every edit filled all six, the timeline and
+    // the globals list the heaviest; switching sections comes back here for the new one
+    match st.story {
+        0 => {
+            fill_globals(ui, st);
+            fill_more(ui, st); // the save's name, time played and cheat mark sit above the globals
+        }
+        1 => fill_area(ui, st),
+        5 => fill_skip(ui, st),
+        _ => fill_more(ui, st), // creatures, quests, galaxy map and Pazaak
+    }
 }
 
 fn fill_globals(ui: &AppWindow, st: &State) {
@@ -2108,8 +2144,19 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
     let app = ui.global::<App>();
     let Some(save) = st.save.as_ref() else { return };
     let Some(data) = st.data() else { return };
-    let all = kse_core::quests::all(&data);
     let have = save.quests();
+    let mut all = (*st.journal()).clone();
+    if !data.is_usable() {
+        // the journal's names and texts are the game's: the save keeps a tag and a number
+        all = have
+            .iter()
+            .map(|(tag, v)| kse_core::quests::Quest {
+                tag: tag.clone(),
+                name: tag.clone(),
+                stages: vec![kse_core::quests::Stage { id: *v, end: false, text: format!("Stage {}", v), xp: 0 }],
+            })
+            .collect();
+    }
     let before = st.original.as_ref().map(|o| o.quests()).unwrap_or_default();
     let stage_of = |tag: &str| have.iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map(|(_, v)| *v);
     // A quest is done when its journal entry is one of its endings.
@@ -2206,8 +2253,10 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
 /// reaches it (to the player and the party pool), once.
 fn set_quest_stage(st: &mut State, tag: &str, id: i64) {
     let xp = st
-        .data()
-        .and_then(|d| kse_core::quests::all(&d).into_iter().find(|q| q.tag.eq_ignore_ascii_case(tag)))
+        .journal()
+        .iter()
+        .find(|q| q.tag.eq_ignore_ascii_case(tag))
+        .cloned()
         .and_then(|q| q.stage(id).map(|x| x.xp))
         .unwrap_or(0);
     let before = st.save.as_ref().and_then(|s| s.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map(|(_, v)| v));
@@ -2387,6 +2436,7 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
     if st.map.is_none() {
         load_map(st, None);
     }
+    let arrow = st.portrait("mm_barrow");
     let Some(area) = st.map.as_ref() else { return };
     let Some(data) = st.data() else { return };
     let save = st.save.as_ref().unwrap();
@@ -2435,9 +2485,9 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
             }
         }
     }
-    match st.portraits.get("mm_barrow").cloned().flatten().or_else(|| {
-        data.texture("mm_barrow").and_then(|(b, tpc)| if tpc { tpc::decode(&b) } else { tga::decode(&b) }).map(|i| image(&i))
-    }) {
+    // the "you are here" arrow, through the texture cache (it was read and decoded again on
+    // every map click: looked up there but never stored)
+    match arrow {
         Some(img) => {
             app.set_map_arrow(img);
             app.set_has_arrow(true);
@@ -3054,6 +3104,36 @@ fn edit_who(ui: &AppWindow, st: &mut State, key: &str, f: impl Fn(&mut Struct)) 
     refresh_after_edit(ui, st);
 }
 
+/// Without the game's files (a save opened on a PC without the game), the edits that need the
+/// game's rules or its files are refused with a word why: class and level changes and the most
+/// Health and Force (the classes' dice), new items (the game's templates), Skip Ahead, Go Back
+/// and travel (its quests' items and areas), spawning and companions brought in (its
+/// creatures). Everything the save holds can still be seen and its numbers changed
+/// (2026-10-24, the maintainer).
+fn needs_game(ui: &AppWindow, st: &State) -> bool {
+    if st.has_game_files() {
+        return false;
+    }
+    let title = st.save.as_ref().map_or(st.game, |s| s.game).title();
+    message(
+        ui,
+        &format!("This needs {} on this PC", title),
+        &format!(
+            "It uses the game's own rules and files, which are not here. Pick the game's folder in Settings, or open this save on a PC with {} installed.",
+            title
+        ),
+    );
+    true
+}
+
+/// Whether a typed Health or Force pair changes the most, not only the current value.
+fn most_changes(st: &State, force: bool, most: i64) -> bool {
+    let who = st.who();
+    let Some(c) = st.save.as_ref().and_then(|s| s.creature(who)) else { return false };
+    let now_most = if force { creature::force(c, st.game).1 } else { creature::health(c).1 };
+    most != now_most
+}
+
 /// The save Copy copies: the one open in the editor, or on the saves page the one picked.
 fn copy_source(ui: &AppWindow, st: &State) -> Option<(Game, PathBuf)> {
     if ui.global::<App>().get_page() == 1 {
@@ -3073,8 +3153,11 @@ fn pick_save(ui: &AppWindow, st: &mut State, folder: &Path) {
 }
 
 /// The folder for a new save beside `folder`: the next number after the highest in its saves
-/// folder, named the way the game names its own ("000135 - Game134").
-fn next_save_folder(folder: &Path) -> Option<PathBuf> {
+/// folder, then the save's name ("000913 - Game26 - Copy"; the game reads the number and lets
+/// the rest be any name, as "000900 - KMRPTest" shows). A name with nothing usable in a folder
+/// name falls back to the game's own pattern ("000135 - Game134"). Until 2026-10-24 it was
+/// always the game's pattern, so a copy's folder said nothing of what it was (the maintainer).
+fn next_save_folder(folder: &Path, name: &str) -> Option<PathBuf> {
     let parent = folder.parent()?;
     let highest = std::fs::read_dir(parent)
         .ok()?
@@ -3083,7 +3166,14 @@ fn next_save_folder(folder: &Path) -> Option<PathBuf> {
         .max()
         .unwrap_or(0);
     let n = highest + 1;
-    let target = parent.join(format!("{:06} - Game{}", n, n.saturating_sub(1)));
+    // what Windows, macOS and Linux all allow in a folder name, no dot or space at the end
+    let clean: String = name.chars().filter(|c| !c.is_control() && !r#"<>:"/\|?*"#.contains(*c)).collect();
+    let clean = clean.trim().trim_end_matches('.').trim().to_string();
+    let target = if clean.is_empty() {
+        parent.join(format!("{:06} - Game{}", n, n.saturating_sub(1)))
+    } else {
+        parent.join(format!("{:06} - {}", n, clean))
+    };
     (!target.exists()).then_some(target)
 }
 
@@ -3536,6 +3626,9 @@ fn main() {
         fill_editor(&u, st);
     });
     on!(ui, state, on_open_add_class, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some(cat) = st.catalog() else { return };
         let Some(c) = st.save.as_ref().and_then(|s| s.creature(st.who())).cloned() else { return };
         let have: Vec<i64> = creature::classes(&c).iter().map(|(id, _)| *id).collect();
@@ -3654,6 +3747,9 @@ fn main() {
         fill_inventory(&u, st);
     });
     on!(ui, state, on_open_add_item, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         open_items_picker(&u, st, Target::Inventory, "Add an Item");
     });
 
@@ -3683,6 +3779,9 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_import_npc, |u, st, i: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let name = st.npc_name(i.max(0) as usize);
         open_save_picker(
             &u,
@@ -3809,6 +3908,9 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_add_box_item, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         open_items_picker(&u, st, Target::Container, "Add an Item Here");
     });
     on!(ui, state, on_set_planet, |u, st, i: i32, on: bool| {
@@ -4000,22 +4102,36 @@ fn main() {
         fill_saves(&u, st);
     });
     on!(ui, state, on_set_hp, |u, st, now: i32, most: i32| {
+        if most_changes(st, false, most as i64) && needs_game(&u, st) {
+            fill_character(&u, st);
+            return;
+        }
         if !ask_pool(&u, st, false, now as i64, most as i64) {
             set_pool(&u, st, false, now as i64, most as i64);
         }
     });
     on!(ui, state, on_set_fp, |u, st, now: i32, most: i32| {
+        if most_changes(st, true, most as i64) && needs_game(&u, st) {
+            fill_character(&u, st);
+            return;
+        }
         if !ask_pool(&u, st, true, now as i64, most as i64) {
             set_pool(&u, st, true, now as i64, most as i64);
         }
     });
     // the out-of-reach pop-up: the nearest value at this level, or the level change
     on!(ui, state, on_pool_set, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         u.global::<App>().set_overlay(0);
         let Some(a) = st.pool_ask.take() else { return };
         set_pool(&u, st, a.force, a.now, a.nearest);
     });
     on!(ui, state, on_pool_level, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         u.global::<App>().set_overlay(0);
         let Some(a) = st.pool_ask.take() else { return };
         let Some(levels) = a.levels else { return };
@@ -4066,6 +4182,9 @@ fn main() {
         u.global::<App>().set_overlay(6);
     });
     on!(ui, state, on_set_class_level, |u, st, index: i32, level: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some(cat) = st.catalog() else { return };
         let Some((id, _)) = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::classes(c).get(index.max(0) as usize).copied()) else { return };
         let Some(class) = cat.class(id).cloned() else { return };
@@ -4078,6 +4197,9 @@ fn main() {
         u.global::<App>().set_overlay(6);
     });
     on!(ui, state, on_change_class, |u, st, index: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some(cat) = st.catalog() else { return };
         let Some(c) = st.save.as_ref().and_then(|s| s.creature(st.who())).cloned() else { return };
         let have: Vec<i64> = creature::classes(&c).iter().map(|(id, _)| *id).collect();
@@ -4091,6 +4213,9 @@ fn main() {
         open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "The class takes the old one's place at the same level; Health and Force follow the new class's dice. Leaving a Force class takes its powers away.", rows);
     });
     on!(ui, state, on_remove_class, |u, st, index: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some(cat) = st.catalog() else { return };
         let Some((id, _)) = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::classes(c).get(index.max(0) as usize).copied()) else { return };
         let Some(class) = cat.class(id).cloned() else { return };
@@ -4109,6 +4234,9 @@ fn main() {
         fill_inventory(&u, st);
     });
     on!(ui, state, on_equip_item, |u, st, index: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let (Some(slot), who) = (st.equip_slot, st.who()) else { return };
         if let Some(save) = st.save.as_mut() {
             save.equip(who, slot, index.max(0) as usize);
@@ -4241,6 +4369,9 @@ fn main() {
         fill_map(&u, st);
     });
     on!(ui, state, on_spawn_here, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some(MapPick::Floor(spot)) = st.map_pick.clone() else { return };
         // Facing the player, so the new arrival is seen at once.
         let player = st.save.as_ref().and_then(|s| s.player()).map(area::position).unwrap_or(spot);
@@ -4286,6 +4417,9 @@ fn main() {
         fill_skip(&u, st);
     });
     on!(ui, state, on_ask_skip_stage, |u, st, i: i32, tag: SharedString, stage: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         st.skip_stage = Some((tag.to_string(), stage as i64));
         ask_skip(&u, st, i);
     });
@@ -4327,17 +4461,23 @@ fn main() {
         }
     });
     on!(ui, state, on_ask_back, |u, st, i: i32, tag: SharedString, stage: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         ask_back(&u, st, i, &tag, stage);
     });
     on!(ui, state, on_do_back, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         let app = u.global::<App>();
         let keep = app.get_back_keep() == 0;
         let Some((i, stage)) = st.back_to.take() else { return };
         let chapters = skip_chapters(st);
         let Some(c) = chapters.iter().find(|c| c.index == i) else { return };
         let current = chapters.iter().position(|y| !y.played).map(|p| chapters[p].index);
-        let all = kse_core::questdb::milestones(st.game);
-        let pick = |x: &Chapter| all.get(x.index as usize).map(|(_, m)| m.clone());
+        let all = kse_core::questdb::milestones_ref(st.game); // not copied: only the chapters used are
+        let pick = |x: &Chapter| all.get(x.index as usize).map(|(_, m)| (*m).clone());
         // undone: this chapter and every later one the save has played or is in
         let undo: Vec<serde_json::Value> = chapters.iter().filter(|x| x.order >= c.order && (x.played || Some(x.index) == current)).filter_map(pick).collect();
         let kept: Vec<serde_json::Value> = chapters.iter().filter(|x| x.order < c.order && x.played).filter_map(pick).collect();
@@ -4362,10 +4502,16 @@ fn main() {
         }
     });
     on!(ui, state, on_ask_skip, |u, st, i: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         st.skip_stage = None;
         ask_skip(&u, st, i);
     });
     on!(ui, state, on_do_skip, |u, st| {
+        if needs_game(&u, st) {
+            return;
+        }
         let app = u.global::<App>();
         let i = app.get_skip_asked();
         let class = app.get_skip_jedi().then(|| app.get_skip_class().clamp(0, 2) as usize);
@@ -4377,8 +4523,8 @@ fn main() {
         });
         let chapters = skip_chapters(st);
         let path = skip_path(&chapters, i);
-        let all = kse_core::questdb::milestones(st.game);
-        let milestones: Vec<serde_json::Value> = path.iter().filter_map(|k| all.get(*k as usize).map(|(_, m)| m.clone())).collect();
+        let all = kse_core::questdb::milestones_ref(st.game); // not copied: only the chapters used are
+        let milestones: Vec<serde_json::Value> = path.iter().filter_map(|k| all.get(*k as usize).map(|(_, m)| (*m).clone())).collect();
         let title = chapters.iter().find(|c| c.index == i).map(|c| c.title.clone()).unwrap_or_default();
         let Some(data) = st.data() else { return };
         app.set_overlay(0);
@@ -4402,6 +4548,9 @@ fn main() {
         }
     });
     on!(ui, state, on_travel, |u, st, i: i32| {
+        if needs_game(&u, st) {
+            return;
+        }
         let Some((tag, _)) = st.travel_ways.get(i.max(0) as usize).cloned() else { return };
         let Some(area) = st.map.as_ref() else { return };
         let (module, name) = (area.module.clone(), area.name.clone());
@@ -4518,7 +4667,7 @@ fn main() {
             message(&u, &format!("{} is running", game.title()), "Close the game first: it can overwrite a save folder it did not expect.");
             return;
         }
-        let Some(target) = next_save_folder(&folder) else {
+        let Some(target) = next_save_folder(&folder, &name) else {
             message(&u, "Nothing was copied", "No free save slot was found beside this save.");
             return;
         };
@@ -4594,7 +4743,7 @@ fn main() {
             message(&u, &format!("{} is running", game.title()), "Close the game first: it can overwrite a save folder it did not expect.");
             return;
         }
-        let Some(target) = st.save.as_ref().and_then(|s| next_save_folder(&s.folder)) else {
+        let Some(target) = st.save.as_ref().and_then(|s| next_save_folder(&s.folder, &name)) else {
             st.status = ("Nothing was changed: no free save slot was found beside this save".to_string(), true);
             fill_bar(&u, st);
             return;

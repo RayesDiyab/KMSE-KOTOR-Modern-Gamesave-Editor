@@ -84,6 +84,31 @@ fn yavin_station(here: &Path, out: &Path) -> Option<PathBuf> {
     (ok && target.is_file()).then_some(target)
 }
 
+/// JSON without the white space between its tokens; strings (and the order of everything)
+/// exactly as written.
+fn minify(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let (mut in_string, mut escaped) = (false, false);
+    for ch in text.chars() {
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+        } else if ch == '"' {
+            in_string = true;
+            out.push(ch);
+        } else if !ch.is_whitespace() {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 fn main() {
     // read when the script runs, not fixed when it was compiled: a moved or renamed checkout
     // would otherwise look for its fonts and art in the old folder
@@ -93,18 +118,26 @@ fn main() {
     println!("cargo:rerun-if-changed=fonts");
     println!("cargo:rerun-if-env-changed=KMRP_FONTS");
 
-    // The quest databases in data/quests (k1-*.json, k2-*.json), compiled in; questdb.rs
-    // includes the list written here.
+    // The quest databases in data/quests (k1-*.json, k2-*.json), compiled in: the white space
+    // outside strings taken out and the rest deflated (9.8 MB of text was 15.6 MB of the 22.8 MB
+    // program; deflated it is about half a megabyte, 2026-10-24). questdb.rs includes the list
+    // written here, each file with whether it is a chapter's milestones or rewards.
     println!("cargo:rerun-if-changed=data/quests");
     let mut files: Vec<PathBuf> = std::fs::read_dir(here.join("data").join("quests"))
         .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().map_or(false, |x| x == "json")).collect())
         .unwrap_or_default();
     files.sort();
+    let packed = out.join("quests");
+    std::fs::create_dir_all(&packed).unwrap();
     let mut list = String::from("&[\n");
     for f in &files {
         let name = f.file_name().unwrap().to_string_lossy().to_lowercase();
         let game = if name.starts_with("k2") { "Game::K2" } else { "Game::K1" };
-        list.push_str(&format!("    ({}, include_str!({:?})),\n", game, f.display().to_string()));
+        let kept = name.ends_with("-milestone.json") || name.ends_with("-rewards.json");
+        let text = minify(&std::fs::read_to_string(f).unwrap());
+        let bin = packed.join(name.replace(".json", ".bin"));
+        std::fs::write(&bin, miniz_oxide::deflate::compress_to_vec(text.as_bytes(), 9)).unwrap();
+        list.push_str(&format!("    ({}, {}, include_bytes!({:?})),\n", game, kept, bin.display().to_string()));
     }
     list.push_str("]\n");
     std::fs::write(out.join("quest_files.rs"), list).unwrap();
