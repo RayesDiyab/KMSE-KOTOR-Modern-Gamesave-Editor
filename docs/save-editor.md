@@ -1,9 +1,10 @@
 # KOTOR Modern Gamesave Editor: what it reads, what it writes, field by field
 
-Reference, 2026-10-22, following the [documentation standard](../../docs/documentation-standard.md).
-This covers the KOTOR Modern Gamesave Editor in [`save-editor`](../README.md): a
+Reference, 2026-10-22, following the [documentation standard](documentation-standard.md).
+This covers the KOTOR Modern Gamesave Editor (KMSE, this repository; [README](../README.md)): a
 separate program, not part of the KMRP installer or patch, that opens KotOR 1 and KotOR 2
-saves and changes them. The save format itself (every file, struct and field, with where
+saves and changes them. Until 2026-10-24 it was the KMRP Save Editor in KMRP's
+`save-editor/` folder; the paths below are this repository's since it moved here that day. The save format itself (every file, struct and field, with where
 each fact was measured) is in [save-editor-format.md](save-editor-format.md); this document
 says which of those fields the editor changes, under which rules, and how that was checked.
 
@@ -18,12 +19,12 @@ bugs they reported. Untested parts are marked **untested** where they are descri
 
 | | |
 | --- | --- |
-| Source | `save-editor` (Rust 2021, Slint 1.18 with its software renderer and the winit backend) |
+| Source | this repository (Rust 2021, Slint 1.18 with its software renderer and the winit backend) |
 | Toolchain | rustc 1.99.1 (2026-10-13), cargo 1.99.1 |
-| Windows build | `save-editor\dist\KOTOR Modern Gamesave Editor.exe` from `save-editor\build.ps1` (size and SHA-256 printed by the script) |
-| Linux and macOS builds | `save-editor/build.sh`; **not built or run yet** (no Linux or Mac machine here) |
-| Fonts | the KMRP Original HD fonts ([fonts/](../../fonts/README.md), SIL OFL 1.1): Menu, MenuMedium, MenuSmallB and Descriptions, committed in `save-editor/fonts` and embedded at build time ([build.rs](../build.rs)). *Corrected 2026-10-22:* until then they were the traced OTFs from `tools/build_hd_original_otf.py`, made from the game's atlases and never committed |
-| KotOR 1 tested | Steam, `swkotor`, with KMRP and K1CP 1.10.0; and the KPM test copy `build/party-roster-kpm-check/game` |
+| Windows build | `dist\KOTOR Modern Gamesave Editor.exe` from `build.ps1` (size and SHA-256 printed by the script) |
+| Linux and macOS builds | `build.sh`; **not built or run yet** (no Linux or Mac machine here) |
+| Fonts | the KMRP Original HD fonts (KMRP's [fonts/](https://github.com/RayesDiyab/KMRP-KOTOR-Modern-Restoration-Patch/blob/master/fonts/README.md), SIL OFL 1.1, [licence](../fonts/OFL.txt)): Menu, MenuMedium, MenuSmallB and Descriptions, committed in `fonts/` and embedded at build time ([build.rs](../build.rs)). *Corrected 2026-10-22:* until then they were the traced OTFs from `tools/build_hd_original_otf.py`, made from the game's atlases and never committed |
+| KotOR 1 tested | Steam, `swkotor`, with KMRP and K1CP 1.10.0; and a KOTOR Patch Manager test copy of the game in KMRP's build folder |
 | KotOR 2 tested | Steam, German release, TSLRCM 1.8.6, saves in `cloudsaves\<account>` |
 
 ## 1. What the engine does with a save
@@ -281,7 +282,7 @@ gives no Force (no Jedi class) is told so. Tested: the ends set exactly and a va
 stops there, for every creature in every save (`the_ends_of_a_level_set_exactly`).
 
 The data pipeline caches each script's analysis on disk (`ncsvm.run_script`, in
-`save-editor/build/questdb-cache`, keyed on the script, its parameters, the interpreter's
+`build/questdb-cache`, keyed on the script, its parameters, the interpreter's
 settings and its code), so a chapter rebuild takes minutes, and `rewards.py` works out the
 chapters' credits in parallel.
 
@@ -398,13 +399,18 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
 
 * `MaxHitPoints`, `MaxForcePoints`, saving throws, `ArmorClass`, item `Cost`, `CombatInfo`:
   recomputed by the game (section 1).
-* `EffectList`: equipment bonuses are effects created by the items; changing one without the
-  other would leave the stats out of step. Equipment is not listed or changed; the game
-  equips (an earlier build listed it read only; the maintainer asked why, and it went).
-* The active party (`PT_MEMBERS`, `PT_NUM_MEMBERS`): who stands with the player is the
-  game's to arrange; Recruited and Can be picked decide who can be chosen.
-* Removing a class, lowering a level: no reliable way to undo what the level-ups granted.
-* `ObjectId`s of existing objects, `Mod_NextObjId`, struct ids, field order, labels.
+* `EffectList`, beyond equipping: equipment bonuses are effects created by the items, so the
+  editor only removes the effects of an item it takes off (section 3a) and never edits an
+  effect on its own.
+* `ObjectId`s of existing objects, struct ids, field order, labels. `Mod_NextObjId0` moves
+  on only when the editor gives a new object an id (section 3a).
+
+*Corrected 2026-10-24:* this list also said that equipment, the active party
+(`PT_MEMBERS`, `PT_NUM_MEMBERS`), removing a class and lowering a level are not changed, and
+that `Mod_NextObjId` is never touched. That was true when the section was written on
+2026-10-22; the editor has done all of them since (section 3a: Equipped, With you, Classes;
+`equip`, `unequip` and the party list in `src/save.rs`, `remove_class` and
+`set_class_level` in `src/creature.rs`; the level rules in `tests/levels.rs`).
 * Stale player copies in the other modules' `Module.ifo`: the game reads the last module's.
 * Steam Cloud: nothing in Steam is touched; Steam sends the changed files itself.
 
@@ -420,7 +426,7 @@ Rejected along the way, and why:
 
 ## 8. Verifying by hand, and what was verified
 
-Automated (`cargo test --release` in `save-editor`, all passing 2026-10-22):
+Automated (`cargo test --release` in KMRP's `save-editor/`, all passing 2026-10-22; since 2026-10-24 `build.ps1` runs the same tests as `cargo test --profile tests`, and `build.sh` and the GitHub workflow as `cargo test --release`):
 
 | Test | What it checks |
 | --- | --- |
@@ -481,12 +487,14 @@ The interface was checked at 1600x900 in dark and light mode, KotOR and KotOR II
 every tab and the pop-ups, by screenshots.
 
 **Settings** (2026-10-22): the gear at the top right, on the list of saves and in the editor,
-opens one pop-up, kept in `settings.txt` in `<data>/KMRP/Save Editor` (`%LOCALAPPDATA%` on
-Windows, `~/Library/Application Support` on macOS, `$XDG_DATA_HOME` or `~/.local/share` on Linux):
+opens one pop-up, kept in `settings.txt` in `<data>/KOTOR Modern Gamesave Editor` (`%LOCALAPPDATA%` on
+Windows, `~/Library/Application Support` on macOS, `$XDG_DATA_HOME` or `~/.local/share` on Linux).
+*Corrected 2026-10-24:* until that day the folder was `<data>/KMRP/Save Editor`; the editor
+moves it to the new name on its first start (`games::data_dir`).
 
 | Setting | What it does |
 | --- | --- |
-| Text Size | Small (the first release's sizes), Medium (1.1 times, the default), Large (1.2 times); every text grows, the boxes around names and labels with it |
+| Text Size | Small (the first release's sizes), Medium (1.2 times, the default), Large (1.32 times); every text grows, the boxes around names and labels with it. *Corrected 2026-10-24:* Medium was 1.1 and Large 1.2 until that day (`ui/theme.slint`) |
 | Appearance | Dark or Light; it replaced the round moon and sun button at the bottom right, which took a footer's height |
 | Game Folders | the KotOR and KotOR II folders in use, each with Change (as KSE's `kse.ini` keeps `K1_Path` and `K2_Path`) |
 | Save Folders | the folders added by hand, each with Remove, and Add a Save Folder (KSE's `K1_SavePath`, `K2_SavePath`, `K2_SavePathCloud`; the editor finds the usual ones itself) |
@@ -496,11 +504,12 @@ open save. Edges of buttons and fields were raised to about 3:1 against the fiel
 (they were about 1.8:1 and hard to see). Checked by screenshots at all three sizes, every tab
 at Large. *Corrected 2026-10-22:* Large was first 1.3 times; at that size the Character
 tab's labels, the attribute names and the Inventory headings ran into each other, so the
-steps are 1.0, 1.1 and 1.2. **Untested**: other window sizes than 1600x900
+steps became 1.0, 1.1 and 1.2 (since 2026-10-24 they are 1.0, 1.2 and 1.32, with the
+kerned fonts; Large at 1.32 has not been checked by screenshot on every tab). **Untested**: other window sizes than 1600x900
 (the minimum is 1280x780), Linux and macOS, every place in section 2 marked untested,
 importing a party member and comparing globals in the game itself, containers and stores in
 the game.
 
-To check a save by hand: open it in the editor, change one value, Save Changes; the bottom
-bar names the backup folder. Open the save in the game. To undo, copy the backup's files over
+To check a save by hand: open it in the editor, change one value, Save Changes; the line
+under Save Changes names the backup folder (it was a bottom bar until 2026-10-22). Open the save in the game. To undo, copy the backup's files over
 the save folder.

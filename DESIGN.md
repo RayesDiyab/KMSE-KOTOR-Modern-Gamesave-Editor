@@ -37,7 +37,7 @@ colors:
 typography:
   display:
     fontFamily: "KMRP Original HD Menu, system-ui"
-    fontSize: "46px"
+    fontSize: "40px"
     letterSpacing: "1px"
   headline:
     fontFamily: "KMRP Original HD Menu, system-ui"
@@ -145,7 +145,7 @@ components:
 
 **Creative North Star: "The Ebon Hawk's Console"**
 
-The editor is a piece of the game's own interface brought to the desktop. The first screen reads like KotOR's Load screen: a list of saves with their screenshots on the left, the chosen save's picture, party and Open button on the right. The editor reads like the in-game menu: tabs across the top, the party down the left, and every value changed in the place it is shown. It belongs to the KMRP family and carries the KMRP Font Converter's crest header, colours and type unchanged.
+The editor is a piece of the game's own interface brought to the desktop. The first screen reads like KotOR's Load screen: a list of saves with their screenshots on the left, the chosen save's picture, party and Open button on the right. The editor reads like the in-game menu: tabs across the top, the party down the left, and every value changed in the place it is shown. It belongs to the KMRP family and carries the KMRP Font Converter's colours and type unchanged, with a crest header made the same way: since 2026-10-24 the KMSE crest (the KMRP sigil over KMSE, `assets/kmse-logo.png`) and the program's name beside it.
 
 The world is dark navy glass lit by holo cyan for KotOR, and the same structure in teal-green for KotOR II (the sequel's own GUI text colour). Each game has a dark and a light mode; switching games switches the whole palette. Surfaces are hairline-edged panels on a deep window with one soft radial glow behind the header. Density is high but calm: rows separated by single hairlines, no cards inside cards, no tiles, nothing animated.
 
@@ -197,7 +197,7 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 
 ## Typography
 
-**Display Font:** KMRP Original HD Menu (falls back to the system font when the game's files are missing at build time)
+**Display Font:** KMRP Original HD Menu (all four cuts fall back to the system font when the fonts are not in `fonts/` or `KMRP_FONTS` at build time; *corrected 2026-10-24:* this said the game's files, which the fonts have not needed since 2026-10-22)
 **List Font:** KMRP Original HD Menu Medium (the game's save list font)
 **Label Font:** KMRP Original HD Menu Small B
 **Body Font:** KMRP Original HD Descriptions
@@ -205,7 +205,7 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 **Character:** the Menu cuts are the game's own small-capital menu lettering, wide and engraved; the Descriptions cut is a plain, slightly spaced reading face for anything longer than a name.
 
 ### Hierarchy
-- **Display** (Menu, 46px, 1px tracking): "Save Editor" beside the crest. Once per window.
+- **Display** (Menu, 40px, 1px tracking): "KOTOR Modern Gamesave Editor" beside the crest, "Gamesave Editor" with a save open. Once per window. (*Corrected 2026-10-24:* this said 46px and "Save Editor"; `Brand` in `ui/widgets.slint` draws the name at 40px.)
 - **Headline** (Menu, 24 to 30px): dialog titles, the previewed save's name, the change count, empty-state titles.
 - **Title** (Menu Medium, 20px): main tabs and button captions (18px on All Saves, 16px on small buttons and story sub-tabs).
 - **List** (Menu Medium, 17 to 21px): save names (21px), field labels and stat names (19px), party names and picker rows (17 to 18px).
@@ -224,7 +224,7 @@ A fixed desktop canvas: preferred 1600 by 900, minimum 1280 by 780. Everything h
 
 Saves screen: two panels from y 200px, the list taking 47% of the width, a 24px gutter, the preview taking the rest. The preview stacks the screenshot (half its width tall), name and details, party portraits, and an action row pinned 22px from the bottom.
 
-Editor: tab bar at y 170px; a 262px party rail on the left; the tab panel from x 342px to the right margin; a bottom bar 64px tall holding the change count, the backup status box, Revert (170px) and Save Changes (330px). Inside the tab panel, content falls into three equal columns with 34px gaps, each led by a section label, with rows on hairlines.
+Editor: tab bar at y 170px; a 262px party rail on the left; the tab panel from x 342px to the right margin. Revert (150px) and Save Changes with its arrow for Save as a New Save (318px) sit at the top right, 52px from the top, beside Copy and the settings button (`ui/editor.slint`). *Corrected 2026-10-24:* this said a bottom bar 64px tall held the change count, the backup status box, Revert (170px) and Save Changes (330px); the bar went on 2026-10-22, as the Layout paragraph above says. Inside the tab panel, content falls into three equal columns with 34px gaps, each led by a section label, with rows on hairlines.
 
 Rhythm: rows are 44 to 60px tall with a 1px hairline beneath; controls inside a row are 12px apart; list items are 4 to 6px apart; panel content is inset 22 to 26px.
 

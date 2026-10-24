@@ -1,0 +1,23 @@
+# Cargo and GitHub Actions.
+#
+# Cargo.lock is committed, so Dependabot can propose crate updates; an update still has to
+# pass the tests and build.ps1 here before it is merged. Actions are pinned by version in
+# the workflows, and an out-of-date action is a supply-chain risk too.
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+    labels:
+      - "dependencies"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels:
+      - "dependencies"

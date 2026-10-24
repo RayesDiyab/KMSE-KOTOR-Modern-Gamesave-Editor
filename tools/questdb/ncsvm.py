@@ -831,7 +831,7 @@ def run_script(data, routines, params=None):
 # KotOR 2 chapter build take an hour). The key holds everything the result depends on: the
 # script's bytes, its parameters, the engine routine table, RELEVANT, the step limits and this
 # file's own code, so a change to the interpreter starts a fresh cache. KMRP_NCS_CACHE=0 turns
-# it off; the folder is save-editor/build/questdb-cache (ignored by git).
+# it off; the folder is build/questdb-cache (ignored by git).
 import hashlib  # noqa: E402
 import os  # noqa: E402
 import pickle  # noqa: E402

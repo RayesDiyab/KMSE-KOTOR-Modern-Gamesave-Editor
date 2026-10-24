@@ -1,0 +1,79 @@
+name: Bug report
+description: The editor shows a save wrongly, an edit does not work, or a save no longer loads in the game.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If the problem can damage saves, please report it privately
+        instead (see "Security or damaged-save report" on the previous page).
+
+        **Your save is backed up.** Before every write the editor copies the whole save
+        folder to `Save Editor Backup` in the folder that holds your saves (for a KotOR 2
+        Steam Cloud save, to `Save Editor Backup` in the game's local `saves` folder). With a
+        save open, Settings (the gear, top right) shows the folder and has an Open Backups
+        Folder button. To undo an edit, copy the backup's files over the save folder.
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options:
+        - KotOR 1
+        - KotOR 2 (The Sith Lords)
+    validations:
+      required: true
+  - type: input
+    id: release
+    attributes:
+      label: Which release of the game, and mods
+      description: Steam, GOG, disc, the Aspyr Mac or Linux port, a phone or Switch save; and mods such as K1CP or TSLRCM.
+      placeholder: "Steam, with K1 Community Patch"
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Where the editor runs
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Steam Deck or Proton
+        - Somewhere else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Editor version
+      description: Shown at the bottom left of the saves page, and in Settings.
+      placeholder: "v1.0"
+    validations:
+      required: true
+  - type: textarea
+    id: what-edited
+    attributes:
+      label: What was edited
+      description: The tab and the values you changed, and whether you used Save Changes or Save as a New Save.
+      placeholder: |
+        Character tab: added a level to Carth, then Save Changes.
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, in the editor or in the game, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: save
+    attributes:
+      label: The save
+      description: |
+        If you can, attach the save folder as a .zip (drag it into this box), and the backup the
+        editor made of it before the edit. A save is the most useful thing you can add. Please
+        do not attach the game's own files (archives, textures, executables).
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: For anything shown wrongly, a screenshot of the editor, and of the game if it is about the game.

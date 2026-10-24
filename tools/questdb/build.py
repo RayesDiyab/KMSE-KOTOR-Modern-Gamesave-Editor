@@ -2,10 +2,10 @@
 
 Usage:
     python tools/questdb/build.py --game K1 --planet Taris \
-        --out save-editor/data/quests/k1-taris.json [--game-dir <KotOR folder>] [--review <md path>]
+        --out data/quests/k1-taris.json [--game-dir <KotOR folder>] [--review <md path>]
     python tools/questdb/build.py --game K1 --planet "Endar Spire" \
-        --out save-editor/data/quests/k1-endar-spire.json \
-        --milestone save-editor/data/quests/k1-endar-spire-milestone.json
+        --out data/quests/k1-endar-spire.json \
+        --milestone data/quests/k1-endar-spire-milestone.json
 
 Reads the game read-only (default: the Steam folder). Writes the JSON chain described
 in the editor's schema and a review page (default: <out stem>-review.md). The planets

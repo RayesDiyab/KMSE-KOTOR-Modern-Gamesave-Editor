@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security or damaged-save report
+    url: https://github.com/RayesDiyab/KMSE-KOTOR-Modern-Gamesave-Editor/security/advisories/new
+    about: Report privately anything that can damage a save, lose its backup, or a vulnerability in reading save files.

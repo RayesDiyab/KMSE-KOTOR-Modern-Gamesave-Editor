@@ -3,8 +3,9 @@
 # The runners have no KotOR install, so the tests that read real saves find none and
 # pass empty. The window's fonts are committed (fonts/, OFL 1.1), so the
 # builds here are set in KMRP's own fonts like a release; this checks that the editor
-# compiles and its unit tests pass everywhere.
-name: Save Editor
+# compiles and its unit tests pass everywhere. The links job checks that every relative
+# link in the Markdown documents resolves, as KMRP's CI does.
+name: KMSE
 
 on:
   push:
@@ -41,3 +42,14 @@ jobs:
             build/target/release/kotor-modern-gamesave-editor
             build/target/release/kotor-modern-gamesave-editor.exe
           if-no-files-found: ignore
+
+  links:
+    name: Documentation links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Check relative Markdown links resolve
+        run: python .github/scripts/check_links.py

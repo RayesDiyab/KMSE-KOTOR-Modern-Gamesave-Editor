@@ -1,6 +1,6 @@
 # KotOR 1 and KotOR 2 PC savegame format: specification for a Rust save editor
 
-Reference for the [KOTOR Modern Gamesave Editor](save-editor.md), following the [documentation standard](../../docs/documentation-standard.md). The lab record of how the editor was checked against the games is in [save-editor.md](save-editor.md), section 8.
+Reference for the [KOTOR Modern Gamesave Editor](save-editor.md), following the [documentation standard](documentation-standard.md). The lab record of how the editor was checked against the games is in [save-editor.md](save-editor.md), section 8.
 
 Status: research document, 2026-10-22. Written for implementing a new,
 cross-platform save editor. Nothing here is derived from the source code of
@@ -951,7 +951,7 @@ the editor and loaded in the game:
 
 | Fact | Measured |
 | --- | --- |
-| Cloud folder | `<game>\cloudsaves\73340463\`: the Steam **account id** (as in `steam_autocloud.vdf`), not a SteamID64. A local `saves\` folder does not exist until a local save is made; the Load screen has a switch between local and cloud ("Cloud-Speicher"). |
+| Cloud folder | `<game>\cloudsaves\<account id>\`: the Steam **account id** (as in `steam_autocloud.vdf`), not a SteamID64. A local `saves\` folder does not exist until a local save is made; the Load screen has a switch between local and cloud ("Cloud-Speicher"). |
 | SAVEGAME.sav | ERF `MOD `, names in lower case: nested module saves, `availnpc0`, `availnpc6`, `availnpc8`, `inventory` (type 0), **`pc` (2027 utc)**, `repute`. So KotOR 2 does keep a `PC.utc` beside `Mod_PlayerList`; the editor changes both. |
 | savenfo.res | adds `TIMESTAMP` DWORD64, `PCNAME` CExoString, `SAVENUMBER` DWORD, `STORYHINT0..9` BYTE. `CHEATUSED` read 2 while `PT_CHEAT_USED` read 0 in Game3. |
 | PARTYTABLE.res | adds `PT_PCNAME`, `PT_ITEM_COMPONEN` DWORD, `PT_ITEM_CHEMICAL` DWORD (the 16-character labels), `PT_SWOOP1..3`, `PT_NUM_PUPPETS`, `PT_PUPPETS`, `PT_AVAIL_PUPS`, `PT_COM_MSG_LIST`. |

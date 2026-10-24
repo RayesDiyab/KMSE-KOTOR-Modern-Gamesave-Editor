@@ -1,6 +1,6 @@
 # Timeline art
 
-The pictures the Save Editor's timeline draws (Story, Timeline).
+The pictures the KOTOR Modern Gamesave Editor's timeline draws (Story, Timeline).
 
 | File | What | Source |
 | --- | --- | --- |

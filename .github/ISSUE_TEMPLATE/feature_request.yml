@@ -1,0 +1,32 @@
+name: Feature request
+description: Suggest something the editor should show or change.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to do
+      description: What you are trying to change in a save, and why, for example a stuck quest or a missing party member.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like the editor to do
+    validations:
+      required: true
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      multiple: true
+      options:
+        - KotOR 1
+        - KotOR 2 (The Sith Lords)
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: |
+        Optional, but the most useful thing you can add: the save fields or globals involved, a
+        save before and after doing it in the game, or how another editor does it.

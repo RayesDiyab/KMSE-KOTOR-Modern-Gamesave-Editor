@@ -60,7 +60,8 @@ fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from)
 }
 
-/// Where the editor keeps its settings and the backups of every save it writes:
+/// Where the editor keeps its settings (the backups of a save go beside the saves, in
+/// `Save Editor Backup`: save::backup_root; here only when no save is open):
 /// %LOCALAPPDATA%\KOTOR Modern Gamesave Editor, ~/Library/Application Support/KOTOR Modern Gamesave Editor, or
 /// $XDG_DATA_HOME/KOTOR Modern Gamesave Editor. Never inside the game folder. Until 2026-10-24 it was named
 /// KMRP Save Editor and kept them in KMRP\Save Editor there: that folder is moved here the

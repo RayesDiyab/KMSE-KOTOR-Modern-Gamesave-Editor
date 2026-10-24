@@ -54,9 +54,10 @@ KSE is inspiration for what to offer, never a source of code or architecture.
 
 - Name: "KOTOR Modern Gamesave Editor", by RaymanGT, in the KMRP family next to the KMRP installer and
   the KMRP Font Converter.
-- It must look like the KMRP Font Converter (`font-converter/FontConverter.cs`,
-  screenshots in `build/font-converter/screenshots/`): same colours and type, and the
-  same KMRP logo header (the maintainer: "Copy how the kmrp logo in the converter is").
+- It must look like the KMRP Font Converter (in KMRP: `font-converter/FontConverter.cs`,
+  screenshots in KMRP's `build/font-converter/screenshots/`): same colours and type, and a
+  crest header made the same way (the maintainer: "Copy how the kmrp logo in the converter is").
+  Since 2026-10-24 the crest is KMSE's own: the KMRP sigil over KMSE.
   Not tiles (the maintainer turned a tile layout down, 2026-10-22): the editor is shaped
   like the game's in-game menu, tabs with the party down the left.
 - Plain, short language; no em dashes.
@@ -66,9 +67,10 @@ KSE is inspiration for what to offer, never a source of code or architecture.
 - Real KotOR 1 saves in the maintainer's Steam game (`swkotor\saves`), read only for tests.
 - Four KotOR 2 saves (Steam Cloud); no Switch, Android or Xbox saves on hand.
 - The crest in the header: `assets/kmse-logo.png`, the KMRP sigil (`assets/sigil.png`) over KMSE, made the way the KMRP crest is (2026-10-24).
-- The program's icon: a holocron with a datapad in front (`save-editor/assets/icon`, 2026-10-22);
-  `save-editor-icon.png` for the window, `save-editor.ico` for the program file. The header keeps
-  the KMRP logo (the maintainer, 2026-10-22).
+- The program's icon: a holocron with a datapad in front (`assets/icon`, 2026-10-22);
+  `assets/save-editor-icon.png` for the window, `assets/save-editor.ico` for the program file.
+  The header kept the KMRP logo (the maintainer, 2026-10-22) until it became the KMSE crest
+  above on 2026-10-24.
 
 ## Product Principles
 

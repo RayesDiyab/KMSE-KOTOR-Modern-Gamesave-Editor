@@ -8,3 +8,22 @@ data/quests/local/
 Holocron*.png
 # Python caches.
 __pycache__/
+# The games' own files and saves: read from the player's install, never committed.
+*.bif
+*.key
+*.erf
+*.rim
+*.mod
+*.sav
+*.tlk
+*.bik
+*.tpc
+*.tga
+*.2da
+*.gff
+*.utc
+*.uti
+*.ncs
+savenfo.res
+partytable.res
+GLOBALVARS.res
