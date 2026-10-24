@@ -16,8 +16,8 @@ export component Button inherits Rectangle {
     min-height: kind == 3 || compact ? 38px : 50px;
     min-width: label.preferred-width + (kind == 3 ? 32px : 48px);
     border-radius: 5px;
-    border-width: kind == 1 || kind == 3 ? 1px : 0px;
-    border-color: touch.has-hover && enabled ? Theme.accent : Theme.edge;
+    border-width: touch.has-hover && enabled ? 2px : kind == 1 || kind == 3 ? 1px : 0px;
+    border-color: touch.has-hover && enabled ? Theme.hover-edge : Theme.edge;
     background: !enabled ? (kind == 0 ? Theme.selected : Theme.field)
         : kind == 0 ? @linear-gradient(180deg, touch.has-hover ? Theme.fill-hover : Theme.fill-top 0%, Theme.fill-bottom 100%)
         : kind == 2 ? @linear-gradient(180deg, Theme.grey-top 0%, Theme.grey-bottom 100%)
@@ -112,6 +112,10 @@ export component Field inherits Rectangle {
     callback accepted(string);
     // The text when the box was entered, so leaving it unchanged does nothing.
     property <string> at-focus;
+    public function focus-all() {
+        input.focus();
+        input.select-all();
+    }
     height: 40px;
     border-radius: 5px;
     border-width: 1px;
@@ -244,22 +248,90 @@ export component Sun inherits Path {
     commands: "M 12 7.5 A 4.5 4.5 0 1 0 12 16.5 A 4.5 4.5 0 1 0 12 7.5 Z M 12 1.5 L 12 4 M 12 20 L 12 22.5 M 1.5 12 L 4 12 M 20 12 L 22.5 12 M 4.6 4.6 L 6.4 6.4 M 17.6 17.6 L 19.4 19.4 M 4.6 19.4 L 6.4 17.6 M 17.6 6.4 L 19.4 4.6";
 }
 
-// The settings button: the KMRP installer's gear (src/patcher/icons/Settings.png, cropped
-// and made white in assets/settings.png, 64 px), square, the game switch's height.
+// The settings button: the KMRP installer's gear (src/patcher/icons/Settings.png, 2000 px,
+// cropped square around the gear, made white and area-averaged to the 32 px it is drawn at in
+// assets/settings.png: a 64 px picture halved at run time came out hard-edged, 2026-10-24),
+// square, the game switch's height.
 export component SettingsButton inherits Rectangle {
     callback clicked;
     width: 50px;
     height: 50px;
     border-radius: 6px;
-    border-width: 1px;
-    border-color: touch.has-hover ? Theme.accent : Theme.edge;
+    border-width: touch.has-hover ? 2px : 1px;
+    border-color: touch.has-hover ? Theme.hover-edge : Theme.edge;
     background: touch.has-hover ? Theme.hover : Theme.field;
     Image {
-        // 64 px art drawn at 32: an even halving keeps the thin gear lines whole.
         source: @image-url("../assets/settings.png");
         width: 32px;
         height: 32px;
         colorize: touch.has-hover ? Theme.accent : Theme.soft;
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// The copy button, the settings button's twin: two pages, the back one behind the front
+// (the maintainer's icon, 2026-10-24), drawn as lines so it stays smooth at any size.
+export component CopyButton inherits Rectangle {
+    callback clicked;
+    width: 50px;
+    height: 50px;
+    border-radius: 6px;
+    border-width: touch.has-hover ? 2px : 1px;
+    border-color: touch.has-hover ? Theme.hover-edge : Theme.edge;
+    background: touch.has-hover ? Theme.hover : Theme.field;
+    Path {
+        width: 30px;
+        height: 30px;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: touch.has-hover ? Theme.accent : Theme.soft;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        commands: "M 6.6 7 L 11.3 7 L 15.2 10.9 L 15.2 18.5 A 1.6 1.6 0 0 1 13.6 20.1 L 6.6 20.1 A 1.6 1.6 0 0 1 5 18.5 L 5 8.6 A 1.6 1.6 0 0 1 6.6 7 Z M 11.3 7 L 11.3 10.9 L 15.2 10.9 M 8.9 6.6 L 8.9 4.6 A 1.6 1.6 0 0 1 10.5 3 L 15.5 3 L 19.3 6.8 L 19.3 14.7 A 1.6 1.6 0 0 1 17.7 16.3 L 16.6 16.3 M 15.5 3 L 15.5 6.8 L 19.3 6.8";
+    }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+// A small square button with a line icon (a 24-unit path), and words after it when given:
+// the saves page's pen, save and Copy (2026-10-24, the maintainer).
+export component IconButton inherits Rectangle {
+    in property <string> icon;
+    in property <string> text;
+    in property <bool> lit;
+    callback clicked;
+    height: 44px;
+    // as wide as the icon and words need, whatever the layout around it has to spare
+    width: root.text == "" ? self.height : 16px + 22px + 10px + label.preferred-width + 18px;
+    border-radius: 6px;
+    border-width: touch.has-hover ? 2px : 1px;
+    border-color: touch.has-hover ? Theme.hover-edge : lit ? Theme.accent : Theme.edge;
+    background: touch.has-hover ? Theme.hover : Theme.field;
+    HorizontalLayout {
+        padding-left: root.text == "" ? 0 : 16px;
+        padding-right: root.text == "" ? 0 : 18px;
+        spacing: root.text == "" ? 0 : 10px;
+        alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Path {
+                width: 22px;
+                height: 22px;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                stroke: touch.has-hover || lit ? Theme.accent : Theme.soft;
+                stroke-width: 1.8px;
+                stroke-line-cap: round;
+                commands: root.icon;
+            }
+        }
+        label := Text {
+            visible: root.text != "";
+            text: root.text;
+            font-family: Theme.list-font;
+            font-size: 18px * Theme.ts;
+            color: Theme.text;
+            vertical-alignment: center;
+        }
     }
     touch := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
 }
@@ -282,6 +354,9 @@ export component Choice inherits Rectangle {
             property <bool> on: i == current;
             width: root.width / options.length;
             background: on ? @linear-gradient(180deg, Theme.fill-top 0%, Theme.fill-bottom 100%) : ct.has-hover ? Theme.hover : Theme.field;
+            border-width: ct.has-hover && !on ? 2px : 0px;
+            border-color: Theme.hover-edge;
+            border-radius: 6px;
             if i > 0: Rectangle { x: 0; width: 1px; background: Theme.edge; }
             HorizontalLayout {
                 alignment: center;
@@ -295,20 +370,24 @@ export component Choice inherits Rectangle {
     }
 }
 
-// The KMRP crest and the program's name, as on the Font Converter.
+// The crest (the sigil over KMSE, made like KMRP's: tools/build_brand_image.py in KMRP with
+// assets/sigil.png, --text KMSE --tracking 0.12 --whole-crest, then area-averaged to the 142x110
+// it is drawn at: shrunk at run time instead, the renderer left the sigil's edges hard) and the
+// program's name (2026-10-24, the maintainer); with a save open, only "Gamesave Editor".
 export component Brand inherits HorizontalLayout {
+    in property <bool> short;
     spacing: 30px;
     alignment: start;
     Image {
-        source: @image-url("../assets/kmrp-logo.png");
+        source: @image-url("../assets/kmse-logo.png");
         height: 110px;
-        width: self.height * 1.52;
+        width: 142px;
         image-fit: contain;
     }
     Text {
-        text: "Save Editor";
+        text: root.short ? "Gamesave Editor" : "KOTOR Modern Gamesave Editor";
         font-family: Theme.title-font;
-        font-size: 46px;
+        font-size: 40px;
         color: Theme.text;
         vertical-alignment: center;
         letter-spacing: 1px;
@@ -343,7 +422,7 @@ export component BackArrow inherits Rectangle {
     height: 64px;
     border-radius: 32px;
     border-width: 2px;
-    border-color: touch.has-hover ? Theme.accent : Theme.edge;
+    border-color: touch.has-hover ? Theme.hover-edge : Theme.edge;
     background: touch.has-hover ? Theme.hover : Theme.field;
     Path {
         width: 28px;

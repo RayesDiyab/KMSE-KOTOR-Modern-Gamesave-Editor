@@ -1,6 +1,6 @@
 # KotOR 1 and KotOR 2 PC savegame format: specification for a Rust save editor
 
-Reference for the [KMRP Save Editor](save-editor.md), following the [documentation standard](../../docs/documentation-standard.md). The lab record of how the editor was checked against the games is in [save-editor.md](save-editor.md), section 8.
+Reference for the [KOTOR Modern Gamesave Editor](save-editor.md), following the [documentation standard](../../docs/documentation-standard.md). The lab record of how the editor was checked against the games is in [save-editor.md](save-editor.md), section 8.
 
 Status: research document, 2026-10-22. Written for implementing a new,
 cross-platform save editor. Nothing here is derived from the source code of
@@ -540,59 +540,129 @@ KotOR 1 classes.2da [game] (hit die, force die per level, skill point base):
 
 ### 3.4 Hit points and force points: what is stored, what is recomputed [RE][file]
 
+> **Correction, 2026-10-23.** This section said the relative rule below holds "for
+> creatures with IsPC set" and left party members' load rule, the Force maximum and
+> KotOR 2 open. All three are now read from the engines (KotOR 1 and KotOR 2) and checked
+> against every save on the maintainer's PC; the rules below replace the earlier text.
+> One earlier statement was wrong: a party member's current Health is **not** stored
+> relative to the maximum. It is stored relative to `level x Con modifier` (rule B), so
+> "set `CurrentHitPoints = HitPoints`" is full Health only for the player.
+
+Sources. KotOR 1 (1.03): `CSWSCreatureStats::SaveStats` 0x005B1B90, the Health part of
+`ReadStatsFromGff` 0x005B1254, `CSWSCreatureStats::LevelUp` 0x005AABF0 and
+`GetMaxForcePoints` 0x004FD490 from the public decompilation
+[mattlgroff/swkotor1-reconstruction](https://github.com/mattlgroff/swkotor1-reconstruction),
+each checked against a disassembly of the executable made for this section;
+`GetMaxHitPoints` 0x004ED310 from the maintainer's own private reverse engineering. KotOR 2
+(Steam `swkotor2.exe`, decompiled with Ghidra for this section): `GetMaxHitPoints`
+0x0057E8C0, `GetMaxForcePoints` 0x0057ECA0, the load 0x006AFED0, the save 0x006B3D10,
+`LevelUp` 0x006B9870, the Constitution and Wisdom setters 0x006B6850 and 0x006B6960.
+
 | Label | Type | Read on load? | Meaning |
 | --- | --- | --- | --- |
-| HitPoints | SHORT | **Read** | Base maximum HP (engine member at creature+0xE0). |
-| CurrentHitPoints | SHORT | **Read** | Current HP **relative to the base**: saved as `current - (GetMaxHitPoints() - HitPoints)`. |
-| MaxHitPoints | SHORT | **Not read** | Written from GetMaxHitPoints(1). Informational. |
-| PregameCurrent | SHORT | **Not read** | Written from GetCurrentHitPoints(1). |
-| ForcePoints | SHORT | **Read** | Base maximum FP (stats+0x122). |
-| CurrentForce | SHORT | **Read** | Saved as `current + ForcePoints - GetMaxForcePoints()`, the same relative scheme. |
-| MaxForcePoints | SHORT | **Not read** | Written from GetMaxForcePoints. |
+| HitPoints | SHORT | **Read** | Base Health (creature+0xE0 in KotOR 1, +0xE4 in KotOR 2). |
+| CurrentHitPoints | SHORT | **Read** | Current Health, stored by the save as `current - (max - HitPoints)`; read back by rule A or B below. |
+| MaxHitPoints | SHORT | **Not read** | Written from `GetMaxHitPoints(1)`. |
+| PregameCurrent | SHORT | **Not read** | Written from `GetCurrentHitPoints(1)`, the current Health. |
+| ForcePoints | SHORT | **Read** | Base Force (stats+0x122; KotOR 2 +0x12E). |
+| CurrentForce | SHORT | **Read** | Current Force, stored as `current - (max - ForcePoints)`; read back by rule A or B. |
+| MaxForcePoints | SHORT | **Not read** | Written from `GetMaxForcePoints`. |
+| BonusForcePoints | INT | Read (KotOR 2 only) | Added to the Force maximum. |
 
-On load: `current_hp = CurrentHitPoints + (GetMaxHitPoints(1) - HitPoints)`
-(for creatures with IsPC set) and similarly for force [RE: ReadStatsFromGff,
-0x005B1254 to 0x005B135A]. Therefore:
+Neither game ever reads `MaxHitPoints` or `MaxForcePoints`: both maxima are computed
+whenever they are needed, from the rules here.
 
-* **Full health:** set `CurrentHitPoints = HitPoints` and `CurrentForce = ForcePoints`
-  (Galaxy save: 120/120 with MaxHitPoints 124 is a full-health PC).
-* MaxHitPoints and MaxForcePoints can be updated for display but are ignored.
-* Negative CurrentHitPoints are legal in files (dead or bleeding members:
-  Zaalbar -29 in Game133).
+**Which rule.** The engine treats a creature as "the player" when IsPC is set and a
+server-wide field is -1 (+0xF0 of the object `0x004AEE70` returns in KotOR 1, +0x118 in
+KotOR 2; its meaning is not established), which every save on this PC satisfies.
+Only the player has IsPC set and a `LvlStatList` (the save writes the list only under the
+same condition). Party members (`AVAILNPCn`, their copies in the area) and every other
+creature have neither.
 
-**GetMaxHitPoints [RE] (0x004ED310):**
+**Modifiers.** `mod(x) = floor((x - 10) / 2)` of the attribute as the engine holds it: the
+saved score plus what the creature's ability effects add (`EffectList` entries of type 36,
+`IntList` = attribute number 0 to 5, amount), plus the racial adjustment (0 for every
+race in both games' `racialtypes.2da`); KotOR 2 floors the attribute at 3. The Force
+modifier `F` is Wisdom plus Charisma in KotOR 1 and Wisdom alone in KotOR 2. `L` is the
+total class level, `T` the Toughness bonus per level: 2 with feat 124, else 1 with feat 84,
+else 0.
 
-* Creature with **IsPC = 1** in single player: `max = sum over every character
-  level i of max(1, LvlStat[i].LvlStatHitDie + ConMod (+ toughness bonus))`.
-  `HitPoints` is not used in that sum. Check on the Galaxy PC: hit dice 2 x 6 +
-  9 x 10 = 102, Con modifier +2 (with equipment), 11 levels: 102 + 22 = 124 =
-  stored MaxHitPoints.
-* Any other creature: `max = HitPoints + level x (ConMod + toughness bonus)`
-  (+2 per level with Wookiee Endurance, feat 95), with a floor of 1 per level.
-  Check on Bastila: 72 + 9 x 1 = 81 = stored MaxHitPoints.
-* Toughness bonus when the flag argument is set (the engine passes 1 when
-  saving): +2 per level for feat 124 MASTER_TOUGHNESS, else +1 per level for
-  feat 84 TOUGHNESS (not cumulative in this routine).
-* `ConMod` is the stats object's current Constitution modifier, including
-  item and effect bonuses.
+**Maximum Health.**
 
-**Consequence:** for the PC, changing max HP means editing the
-`LvlStatHitDie` values (and keeping `HitPoints` plausible); for NPCs, edit
-`HitPoints`. The per-level loop indexes the level-stat array for every
-character level, so **a PC whose total class level exceeds the number of
-`LvlStatList` entries is likely to crash** when max HP is computed (the code
-dereferences the entry without a null check): derived from the code, not
-tested.
+* Player: the sum, over the first `L` level records, of `max(1, ConMod + LvlStatHitDie) +
+  T`; KotOR 2 adds 25 once for feat 206. `HitPoints` is not used.
+* Anyone else: with `P = T` plus, in KotOR 2, 25 for feat 206 and 4 for feat 225, else 3
+  for feat 224, else 2 for feat 95 (KotOR 1: 2 for feat 95):
+  `HitPoints + L x (ConMod + P)`, but `L x (1 + P)` when `HitPoints + L x ConMod < L`.
 
-How the stored base `HitPoints` of the PC is built at level-up is not fully
-explained by the data (Galaxy: HitPoints 120 vs hit dice sum 102): UNCONFIRMED.
-Public documentation states KotOR gives the maximum hit die every level (no
-roll); the data agrees (every LvlStatHitDie equals the class hit die).
+**Maximum Force.** 0 for a droid (race 5). Extras `E`: 40 for feat 116, plus
+`BonusForcePoints` (KotOR 2), plus 50 when the creature has a class 4 (KotOR 2: 4, 12 or
+15) and an effect of type 109.
 
-Force points: GetMaxForcePoints (0x004FD490) was not reconstructed; public
-documentation and the data (`LvlStatForce` 4 = Jedi Guardian forcedie) say
-max FP grows by the class `forcedie` per Jedi level plus a Wisdom/Charisma
-bonus. Formula details: UNCONFIRMED.
+* Player: 0 unless the **newest** class (the last `ClassList` entry) is a Jedi class
+  (KotOR 1: 3 to 5; KotOR 2: 3 to 5 and 11 to 16). Otherwise the sum, over the first `L`
+  records that have a `LvlStatForce`, of `max(1, F + LvlStatForce)`, plus `E`, at least 0.
+* Anyone else: 0 without a Jedi class; otherwise `ForcePoints + L x F + E`, at least `L`.
+
+**Current values on load.** With base `B`, stored `S` (`CurrentHitPoints` and
+`HitPoints`, or `CurrentForce` and `ForcePoints`), modifier `M` (ConMod, or `F`):
+
+* **Rule A**, the player: `current = S + max - B`.
+* **Rule B**, anyone else: `current = S + L x M` when `B + L x M > L`; otherwise `L + S - B`
+  when `S < B`, else `L`. The bonuses in the maximum that are not `L x M` (Toughness, feat
+  95, 206, 224, 225, feat 116, `BonusForcePoints`, the 50) are not added back. So a party
+  member with one of them comes back from a save and load short of full by exactly those
+  bonuses: an engine quirk, measured in the code of both games, not something the editor
+  causes or changes.
+
+`SetCurrentHitPoints` (KotOR 1 0x004CC280) clamps only at 1 for `Min1HP`; nothing clamps to
+the maximum, so a stored value can load above it (one KotOR 2 save here shows 999).
+
+**Level-up** (`LevelUp`, both games): `HitPoints += LvlStatHitDie`, `ForcePoints +=
+LvlStatForce` (classes.2da `hitdie` and `forcedie`, never rolled); then current Health is
+set to the new maximum (a level-up heals fully) and current Force rises by what its maximum
+rose. The player's `HitPoints` therefore tracks the dice gained by level-up, not the
+maximum: character creation leaves it 0 (KotOR 1 level 1: `HitPoints` 0, maximum 12), so
+it is only the reference point for rule A.
+
+**Records.** Both maxima index the level records for every level; a player with fewer
+records than levels would read past the list (no null check). KotOR 2's first record
+(character creation) has `LvlStatForce` 0 even for a Jedi; KotOR 1's first class cannot be
+a Jedi class.
+
+**Checked against the saves [file].** The editor's implementation of these rules
+(`max_health`, `max_force` in `src/creature.rs`) gives exactly the `MaxHitPoints` and
+`MaxForcePoints` the game wrote for all 62 creatures (player and party, KotOR 1 and 2) in
+the saves the game wrote on the maintainer's PC (test
+`computed_maxima_match_what_the_game_wrote` in `tests/levels.rs`). Two cases needed the
+effect rule: a KotOR 1 party member with Con 55 and an item giving Con +1, and a KotOR 2
+player with Wis 12 and an item giving Wis +3. Saves the editor itself wrote before this
+correction (`000910` to `000912`, Skip Ahead) had stale stored maxima; the game ignores
+those fields, so they played correctly.
+
+**What the editor does with it** (since 2026-10-23, issue 70):
+
+* Shows Health and Force exactly as the game will after loading: the computed maximum,
+  and the current value by rule A or B.
+* Stores a current value so the game loads exactly it (the inverse of rule A or B), and
+  writes `MaxHitPoints`, `MaxForcePoints` and `PregameCurrent` as the game writes them at a
+  save, so other tools reading the save see the right numbers.
+* Levels up (a class level raised, a class added): the bases and records as `LevelUp`
+  changes them, Health full, Force up by its maximum's rise.
+* Levels down, a class removed or changed, the maximum set directly: what was missing
+  stays missing (Health at least 1, Force at least 0). Levels down and class removal take
+  back exactly what the level-up gave, so up then down returns the records, bases and
+  maxima unchanged.
+* The maximum set directly changes what the engine computes it from: the player's record
+  dice (newest first, 1 to 255 each, Force dice only on records that have one) or anyone
+  else's base. A creature the engine gives no Force keeps none.
+* Heal: current values set to the computed maxima by rule A or B (for a party member with
+  Toughness, `CurrentHitPoints` above `HitPoints`).
+
+**Not covered.** Effects other than type 36 that change an attribute or a maximum, and
+effect type 109's meaning, are not decoded: such a creature can show a maximum that differs
+from the game's by that effect. A KotOR 1 mod that adds feats numbered 206, 224 or 225
+would be counted with KotOR 2's meaning.
 
 ### 3.5 LvlStatList entries (player only) [file][RE]
 

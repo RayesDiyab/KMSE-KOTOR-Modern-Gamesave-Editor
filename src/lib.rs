@@ -1,4 +1,4 @@
-//! KMRP Save Editor's core: the game file formats, finding the games and their saves,
+//! KOTOR Modern Gamesave Editor's core: the game file formats, finding the games and their saves,
 //! and reading, changing and writing a save. No user interface here; `main.rs` and
 //! `ui/` hold that.
 

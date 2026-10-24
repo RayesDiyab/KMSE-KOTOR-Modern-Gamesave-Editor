@@ -23,7 +23,7 @@ globals are a second audience, served in a separate area of the app.
 
 ## Product Purpose
 
-KMRP Save Editor opens any KotOR 1 or 2 save, shows it in plain language, and changes it
+KOTOR Modern Gamesave Editor opens any KotOR 1 or 2 save, shows it in plain language, and changes it
 without breaking it. It replaces the ageing KotOR Savegame Editor (KSE) for people on
 today's platforms. Success: a player finds their save without configuring anything, makes
 the change, and the game loads it.
@@ -52,7 +52,7 @@ KSE is inspiration for what to offer, never a source of code or architecture.
 
 ## Brand Commitments
 
-- Name: "KMRP Save Editor", by RaymanGT, in the KMRP family next to the KMRP installer and
+- Name: "KOTOR Modern Gamesave Editor", by RaymanGT, in the KMRP family next to the KMRP installer and
   the KMRP Font Converter.
 - It must look like the KMRP Font Converter (`font-converter/FontConverter.cs`,
   screenshots in `build/font-converter/screenshots/`): same colours and type, and the
@@ -65,7 +65,7 @@ KSE is inspiration for what to offer, never a source of code or architecture.
 
 - Real KotOR 1 saves in the maintainer's Steam game (`swkotor\saves`), read only for tests.
 - Four KotOR 2 saves (Steam Cloud); no Switch, Android or Xbox saves on hand.
-- KMRP logo in the header: `save-editor/assets/kmrp-logo.png` (a copy of the converter's).
+- The crest in the header: `assets/kmse-logo.png`, the KMRP sigil (`assets/sigil.png`) over KMSE, made the way the KMRP crest is (2026-10-24).
 - The program's icon: a holocron with a datapad in front (`save-editor/assets/icon`, 2026-10-22);
   `save-editor-icon.png` for the window, `save-editor.ico` for the program file. The header keeps
   the KMRP logo (the maintainer, 2026-10-22).

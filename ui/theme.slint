@@ -10,9 +10,10 @@ import { KmrpFonts } from "kmrp-fonts.slint";
 export global Theme {
     in-out property <bool> dark: true;
     in-out property <bool> k2: false;
-    // Text size, from Settings: 0 Small (the first release's sizes), 1 Medium, 2 Large.
+    // Text size, from Settings: 0 Small (the first release's sizes), 1 Medium, 2 Large. Medium
+    // is what Large was and Large is larger (2026-10-24, the maintainer; before: 1.1 and 1.2).
     in-out property <int> text-size: 1;
-    out property <float> ts: text-size == 0 ? 1.0 : text-size == 1 ? 1.1 : 1.2;
+    out property <float> ts: text-size == 0 ? 1.0 : text-size == 1 ? 1.2 : 1.32;
 
     out property <string> title-font: "KMRP Original HD Menu";
     out property <string> list-font: "KMRP Original HD Menu Medium";
@@ -42,8 +43,14 @@ export global Theme {
     out property <color> faint: dark ? (k2 ? #738f84 : #7a8a9a) : (k2 ? #4d665c : #56687c);
 
     out property <color> gold: dark ? #e2c35c : #7a5f08;
+    // The edge of whatever the pointer is on, as KotOR's own menu buttons light up: yellow
+    // (2026-10-24, the maintainer).
+    out property <color> hover-edge: dark ? #f4d03f : #9a7400;
     out property <color> changed: dark ? #ff9a3c : #c75f00;
     out property <color> good: dark ? #7ee0ab : #1e8a52;
+    // Another save on the timeline: green on KotOR's cyan, blue on KotOR II's
+    // teal (where green would read as the accent).
+    out property <color> save-mark: k2 ? (dark ? #60b2ff : #2a6fb8) : good;
     out property <color> danger: dark ? #ff6b6b : #c0392b;
     out property <color> grey-top: dark ? #566272 : #c9d2dc;
     out property <color> grey-bottom: dark ? #424d5c : #b6c0cb;

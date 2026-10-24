@@ -39,7 +39,29 @@ pub struct Class {
     pub hit_die: i64,
     pub force_die: i64,
     pub droid: bool,
+    /// The game the class is from: the engine's Health and Force rules differ by game.
+    pub game: Game,
+    /// What the game's level-up gives in this class without asking.
+    pub grants: LevelGrants,
 }
+
+/// What a level-up gives a class on its own, from the tables the engine reads at start-up
+/// (CSWRules::LoadClassInfo and CSWClass::LoadFeatsTable: KotOR 1 0054F2C0 / 005BD0F0,
+/// KotOR 2 006F0E90).
+#[derive(Clone, Debug, Default)]
+pub struct LevelGrants {
+    /// classes.2da SkillPointBase.
+    pub skill_point_base: i64,
+    /// Feats granted at a level of this class: feat.2da `<FeatsTable>_list` 3 (the engine's
+    /// list kind 0) with `<FeatsTable>_granted`, as (feat, class level).
+    pub granted: Vec<(i64, i64)>,
+    /// KotOR 2's companion columns of feat.2da (handmaiden, baodur, hanharr, hk47, g0t0,
+    /// atton, kreia), per feat: 0 none, 255 "never", else the total level that grants it.
+    pub companion: std::sync::Arc<Vec<(i64, [i64; 7])>>,
+}
+
+/// The companion columns of KotOR 2's feat.2da, in the order of `LevelGrants::companion`.
+pub const COMPANION_COLUMNS: [&str; 7] = ["handmaiden", "baodur", "hanharr", "hk47", "g0t0", "atton", "kreia"];
 
 #[derive(Clone, Debug)]
 pub struct Portrait {
@@ -144,16 +166,46 @@ fn clean(name: String) -> String {
 impl Catalog {
     pub fn build(data: &GameData) -> Catalog {
         let classes_t = data.table("classes");
+        let feat_t = data.table("feat");
+        // Feat rows the engine loads: those with a label (row 0 and the blanks have none).
+        let feat_rows: Vec<usize> = (0..feat_t.rows.len()).filter(|&r| feat_t.cell(r, "label").map_or(false, |l| !l.is_empty() && l != "****")).collect();
+        let companion: Vec<(i64, [i64; 7])> = if data.game == Game::K2 {
+            feat_rows
+                .iter()
+                .filter_map(|&r| {
+                    let mut v = [0i64; 7];
+                    for (i, col) in COMPANION_COLUMNS.iter().enumerate() {
+                        v[i] = feat_t.int(r, col).unwrap_or(0);
+                    }
+                    v.iter().any(|x| *x != 0).then_some((r as i64, v))
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let companion = std::sync::Arc::new(companion);
         let classes = (0..classes_t.rows.len())
             .filter_map(|r| {
                 let name = data.row_name("classes", r)?;
                 let label = classes_t.cell(r, "label").unwrap_or("").to_ascii_lowercase();
+                let prefix = classes_t.cell(r, "featstable").unwrap_or("").to_ascii_lowercase();
+                let granted = if prefix.is_empty() || prefix == "****" {
+                    Vec::new()
+                } else {
+                    feat_rows
+                        .iter()
+                        .filter(|&&f| feat_t.int(f, &format!("{}_list", prefix)) == Some(3))
+                        .filter_map(|&f| feat_t.int(f, &format!("{}_granted", prefix)).map(|l| (f as i64, l)))
+                        .collect()
+                };
                 Some(Class {
                     id: r as i64,
                     name: clean(name),
                     hit_die: classes_t.int(r, "hitdie").unwrap_or(0),
                     force_die: classes_t.int(r, "forcedie").unwrap_or(0),
                     droid: label.contains("droid"),
+                    game: data.game,
+                    grants: LevelGrants { skill_point_base: classes_t.int(r, "skillpointbase").unwrap_or(0), granted, companion: companion.clone() },
                 })
             })
             .collect();

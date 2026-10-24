@@ -48,7 +48,7 @@ fn main() {
             creature::add_power(c, p, &|k| cat.is_force_class(k));
         });
     }
-    save.edit(Who::Player, "heal", creature::heal);
+    save.edit(Who::Player, "heal", |c| creature::heal(c, game));
     save.set_party_int("PT_GOLD", 424242);
     let templates = catalog::item_templates(&data);
     let like = save.inventory().first().cloned();
@@ -64,7 +64,7 @@ fn main() {
         save.edit(Who::Npc(n), "Con", |c| creature::set_attribute(c, "Con", 20));
     }
     save.edit_nfo(|n| n.set("SAVEGAMENAME", Value::String(b"KMRP Edit Test".to_vec())));
-    let backups = std::env::temp_dir().join("kmrp-save-editor-tests").join("example-backups");
+    let backups = std::env::temp_dir().join("kmse-tests").join("example-backups");
     save.write(&backups).unwrap();
     println!("written {}", to.display());
 }

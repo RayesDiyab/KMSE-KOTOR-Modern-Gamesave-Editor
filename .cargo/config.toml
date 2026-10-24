@@ -1,3 +1,9 @@
 # Build output stays in the repository's ignored build folder, not beside the sources.
 [build]
 target-dir = "build/target"
+
+# The linker's time stamp in the program's header becomes a hash of its contents
+# (/Brepro), so two builds of the same sources are byte for byte the same: the way a change
+# to the build is shown to leave the program unchanged (2026-10-24).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/Brepro"]

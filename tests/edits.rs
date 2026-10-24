@@ -25,7 +25,7 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("kmrp-save-editor-tests").join(name);
+    let dir = std::env::temp_dir().join("kmse-tests").join(name);
     let _ = fs::remove_dir_all(&dir);
     dir
 }
@@ -487,4 +487,114 @@ fn a_chapter_does_not_pay_twice() {
         assert!(g1 - g0 > 0, "{:?}: the first pass pays", game);
         assert!((g2 - g1) * 4 < (g1 - g0), "{:?}: the second pass pays {} of {}", game, g2 - g1, g1 - g0);
     }
+}
+
+/// Skip to a quest's stage inside a chapter: the chapters before it played in full, the quest
+/// at that stage (not further), the trip into the chapter, written and read back.
+#[test]
+fn skip_to_a_quest_stage() {
+    let installs = find_installs(&[]);
+    let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
+    let data = GameData::open(Game::K1, &install.path);
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().find(|f| {
+        Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("end_m01"))
+    }) else {
+        return;
+    };
+    let all = kse_core::questdb::milestones(Game::K1);
+    let get = |p: &str| all.iter().find(|(x, _)| x.eq_ignore_ascii_case(p)).map(|(_, m)| m.clone()).unwrap();
+    let work = scratch("skip-stage");
+    copy_dir(&folder.path, &work);
+    let backups = scratch("skip-stage-backups");
+    let mut save = Save::open(&work).unwrap();
+    let notes = kse_core::questdb::skip_to_stage(&mut save, &data, &[get("Endar Spire"), get("Taris")], "tar_escape", 30, None, false, None, false).unwrap();
+    eprintln!("{:?}", notes);
+    save.write(&backups).unwrap();
+    let again = Save::open(&work).unwrap();
+    let stage = |t: &str| again.quests().into_iter().find(|(x, _)| x.eq_ignore_ascii_case(t)).map(|(_, v)| v);
+    assert_eq!(stage("tar_escape"), Some(30), "the quest stops at the picked stage");
+    assert!(stage("end_attack").map_or(false, |v| v >= 1), "the Endar Spire played");
+    assert!(again.recruited(2), "the companion who joins on the way (slot 2) is there");
+    assert_eq!(again.creature(Who::Npc(0)).and_then(|c| c.string("Tag")).map(|t| t.to_ascii_lowercase()), Some("bastila".to_string()), "slot 0 is the companion who joins after the swoop race, not the Endar Spire's officer");
+}
+
+
+/// Going back on the timeline: a save skipped through Dantooine goes back to Dantooine's start;
+/// written and read back, the chapter is out of the save (its class and the levels since, its
+/// companion, its quests, its story values, its stored areas), the XP is the end of Taris,
+/// and items are kept or taken back as asked.
+#[test]
+fn go_back_to_a_chapter() {
+    let installs = find_installs(&[]);
+    let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
+    let data = GameData::open(Game::K1, &install.path);
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().find(|f| {
+        Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("end_m01"))
+    }) else {
+        return;
+    };
+    let all = kse_core::questdb::milestones(Game::K1);
+    let get = |p: &str| all.iter().find(|(x, _)| x.eq_ignore_ascii_case(p)).map(|(_, m)| m.clone()).unwrap();
+    let (es, ta, da) = (get("Endar Spire"), get("Taris"), get("Dantooine"));
+    let taris_xp = kse_core::questdb::rewards_of(Game::K1, "Taris").and_then(|r| r.get("xp_at_end").and_then(|v| v.as_i64())).unwrap();
+    for keep in [true, false] {
+        let work = scratch(&format!("goback-{}", keep));
+        copy_dir(&folder.path, &work);
+        let backups = scratch(&format!("goback-{}-backups", keep));
+        let mut save = Save::open(&work).unwrap();
+        kse_core::questdb::skip_through(&mut save, &data, &[es.clone(), ta.clone(), da.clone()], Some(0), false).unwrap();
+        let items_after_skip = save.inventory().len();
+        assert!(save.has_module("danm14aa") || save.has_module("danm14ab"), "Dantooine areas stored by the skip");
+        let notes = kse_core::questdb::go_back(&mut save, &data, &[es.clone(), ta.clone()], &[da.clone()], keep, None).unwrap();
+        eprintln!("keep {}: {:?}", keep, notes);
+        save.write(&backups).unwrap();
+        let again = Save::open(&work).unwrap();
+        let p = again.player().unwrap();
+        assert_eq!(creature::experience(p), taris_xp, "XP back to the end of Taris, keep {}", keep);
+        assert!(!creature::classes(p).iter().any(|c| [3, 4, 5].contains(&c.0)), "the Jedi class taken off, keep {}", keep);
+        assert_eq!(creature::level(p) as usize, creature::level(p) as usize);
+        assert!(!again.recruited(5), "slot 5 (joins on Dantooine) gone, keep {}", keep);
+        assert!(again.recruited(2), "slot 2 (joins on Taris) stays, keep {}", keep);
+        assert!(!again.quests().iter().any(|(t, _)| t.to_ascii_lowercase().starts_with("dan_")), "Dantooine's quests out of the journal, keep {}", keep);
+        assert!(!again.has_module("danm14aa") && !again.has_module("danm14ab"), "Dantooine's areas forgotten, keep {}", keep);
+        let globals = globals::list(&again.globals.as_ref().unwrap().root);
+        let g = |n: &str| globals.iter().find(|x| x.name.eq_ignore_ascii_case(n)).map(|x| x.value.clone());
+        assert_eq!(g("K_KOTOR_MASTER"), Some(GlobalValue::Number(10)), "the story value back to Taris's, keep {}", keep);
+        if keep {
+            assert_eq!(again.inventory().len(), items_after_skip, "items kept");
+        } else {
+            assert!(again.inventory().len() < items_after_skip, "the chapter's items taken back");
+        }
+    }
+}
+
+/// Going back over KotOR 2's free planets takes their masters back: the count of masters
+/// found and the forms they taught return to where they were.
+#[test]
+fn go_back_takes_back_the_masters() {
+    let installs = find_installs(&[]);
+    let Some(install) = installs.iter().find(|i| i.game == Game::K2) else { return };
+    let data = GameData::open(Game::K2, &install.path);
+    let Some(folder) = find_saves(&installs, Game::K2, &[]).into_iter().find(|f| {
+        Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("101per"))
+    }) else {
+        return;
+    };
+    let all = kse_core::questdb::milestones(Game::K2);
+    let get = |p: &str| all.iter().find(|(x, _)| x.eq_ignore_ascii_case(p)).map(|(_, m)| m.clone()).unwrap();
+    let kept = [get("Peragus"), get("Telos")];
+    let undo = [get("Nar Shaddaa"), get("Dxun"), get("Onderon")];
+    let work = scratch("goback-k2");
+    copy_dir(&folder.path, &work);
+    let mut save = Save::open(&work).unwrap();
+    let path: Vec<serde_json::Value> = kept.iter().chain(undo.iter()).cloned().collect();
+    kse_core::questdb::skip_through(&mut save, &data, &path, None, false).unwrap();
+    let forms = |s: &Save| creature::powers(s.player().unwrap()).into_iter().filter(|x| (258..=268).contains(x)).count();
+    let number = |s: &Save, n: &str| globals::list(&s.globals.as_ref().unwrap().root).into_iter().find(|g| g.name.eq_ignore_ascii_case(n)).map(|g| g.value);
+    assert_eq!(number(&save, "000_Jedi_Found"), Some(GlobalValue::Number(2)), "two masters after the skip");
+    let taught = forms(&save);
+    kse_core::questdb::go_back(&mut save, &data, &kept, &undo, true, None).unwrap();
+    assert_eq!(number(&save, "000_Jedi_Found"), Some(GlobalValue::Number(0)), "no master after going back");
+    assert_eq!(number(&save, "G_PC_FORM"), Some(GlobalValue::Number(0)), "no form taught after going back");
+    assert_eq!(forms(&save), taught - 2, "the two forms the masters taught are gone");
 }

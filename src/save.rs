@@ -378,6 +378,11 @@ impl Save {
             }
             Who::Npc(i) => {
                 let tag = self.creature(who).and_then(|c| c.string("Tag")).unwrap_or_default();
+                // The member's own copy in the area has their tag and their classes; another
+                // creature can share the tag (the Endar Spire's Carth, where Skip Ahead's
+                // saves resume, beside the Carth recruited from his template) and is left
+                // alone.
+                let classes = self.creature(who).map(crate::creature::classes).unwrap_or_default();
                 if let Some(npc) = self.loaded_mut(&format!("availnpc{}", i), RES_TYPE_UTC) {
                     f(&mut npc.root);
                 }
@@ -385,7 +390,8 @@ impl Save {
                     if let Some((_, git)) = self.git.as_mut() {
                         let mut touched = false;
                         if let Some(list) = git.root.list_mut("Creature List") {
-                            for c in list.iter_mut().filter(|c| c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag))) {
+                            let same = |c: &Struct| c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag)) && crate::creature::classes(c) == classes;
+                            for c in list.iter_mut().filter(|c| same(c)) {
                                 f(c);
                                 touched = true;
                             }
@@ -435,10 +441,17 @@ impl Save {
     /// (AddAvailableNPCByTemplate): the template made into a creature as the party table
     /// keeps it, the member available and selectable. A member already recruited is kept.
     pub fn recruit_from_template(&mut self, npc: usize, template: &Struct) -> Result<()> {
-        if self.npcs().contains(&npc) && self.recruited(npc) {
+        // The same companion already there stays as the save has them; anyone else in the slot
+        // is replaced, as the game's AddAvailableNPCByTemplate does (KotOR 1's Endar Spire
+        // leaves its officer in slot 0, where Taris puts slot 0's companion).
+        let same = self.creature(Who::Npc(npc)).and_then(|c| c.string("Tag")).zip(template.string("Tag")).map_or(false, |(a, b)| a.eq_ignore_ascii_case(&b));
+        if same && self.recruited(npc) {
             return Ok(());
         }
         let mut c = crate::area::creature_from_template(template, None);
+        // The stored maxima as the game would write them; it reads only the bases and the
+        // current values, which stay the template's.
+        crate::creature::sync_maxima(&mut c, self.game);
         // The party table's copy is a file of its own: its root, not a list element. Like the
         // game's (AVAILNPCn in a real save) it keeps position fields and has no ObjectId; its
         // spawn script has not run, so the game runs it when the member first appears.
@@ -844,6 +857,18 @@ impl Save {
         true
     }
 
+    /// Forgets an area the save has been to (its stored copy), so the game builds it fresh from
+    /// its own files the next time the player arrives. Never the area the save is in.
+    pub fn remove_stored_module(&mut self, module: &str) -> bool {
+        if module.eq_ignore_ascii_case(&self.module_name) || !self.has_module(module) {
+            return false;
+        }
+        self.archive.resources.retain(|r| !(r.kind == RES_TYPE_SAV && r.name.eq_ignore_ascii_case(module)));
+        self.archive_dirty = true;
+        self.changed(format!("stored.{}.removed", module.to_ascii_lowercase()));
+        true
+    }
+
     /// Changes the saved objects (.git) of `module`: the current area, or another area this
     /// save has been to. Returns false when the save has not been there (the game then
     /// builds that area fresh from its own files when the player arrives).
@@ -902,7 +927,44 @@ impl Save {
     pub fn write(&mut self, backups: &Path) -> Result<PathBuf> {
         let backup = backup_folder(backups, self.game, &self.folder);
         copy_dir(&self.folder, &backup).map_err(|e| format!("the backup could not be made: {}", e))?;
+        self.write_files()?;
+        Ok(backup)
+    }
 
+    /// Writes the save, its changes and all, as a new save in `target` (a folder beside it
+    /// that does not exist yet) named `name` on the game's Load screen, and leaves the save it
+    /// was read from exactly as it was. From then on this is the new save.
+    pub fn write_as(&mut self, target: &Path, name: &str) -> Result<()> {
+        if target.exists() {
+            return Err(format!("{} already exists", target.display()));
+        }
+        copy_dir(&self.folder, target).map_err(|e| format!("the save could not be copied: {}", e))?;
+        let moved = |p: &Path| target.join(p.file_name().unwrap_or_default());
+        self.nfo_path = moved(&self.nfo_path);
+        self.party_path = moved(&self.party_path);
+        self.archive_path = moved(&self.archive_path);
+        self.globals_path = self.globals_path.as_deref().map(moved);
+        self.folder = target.to_path_buf();
+        self.rename(name);
+        self.write_files()
+    }
+
+    /// Copies the save folder `folder` as it is on disk into `target` (a folder beside it that
+    /// does not exist yet) and names the copy `name` on the game's Load screen; nothing else
+    /// in it changes.
+    pub fn copy_save(folder: &Path, target: &Path, name: &str) -> Result<()> {
+        if target.exists() {
+            return Err(format!("{} already exists", target.display()));
+        }
+        copy_dir(folder, target).map_err(|e| format!("the save could not be copied: {}", e))?;
+        let mut copy = Save::open(target)?;
+        copy.rename(name);
+        copy.write_files()
+    }
+
+    /// Writes every changed file into the save's folder, each new file in full before any old
+    /// one is replaced.
+    fn write_files(&mut self) -> Result<()> {
         self.flush_module();
         let module_dirty = self.archive_dirty;
         for (name, kind) in self.dirty_archive.clone() {
@@ -957,7 +1019,7 @@ impl Save {
         self.dirty_archive.clear();
         self.archive_dirty = false;
         self.changes.clear();
-        Ok(backup)
+        Ok(())
     }
 }
 

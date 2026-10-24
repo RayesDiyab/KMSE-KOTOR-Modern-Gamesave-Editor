@@ -1,0 +1,10 @@
+# Build output (.cargo/config.toml puts Cargo's in build/) and the built program.
+build/
+dist/
+# The quest review pages with the game's own text, made from the player's game
+# (tools/questdb --review-text); never committed.
+data/quests/local/
+# Scratch pictures of the icon, kept out of the repository.
+Holocron*.png
+# Python caches.
+__pycache__/

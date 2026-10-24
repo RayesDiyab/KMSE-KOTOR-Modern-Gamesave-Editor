@@ -1,7 +1,7 @@
-# KMRP Save Editor: what it reads, what it writes, field by field
+# KOTOR Modern Gamesave Editor: what it reads, what it writes, field by field
 
 Reference, 2026-10-22, following the [documentation standard](../../docs/documentation-standard.md).
-This covers the KMRP Save Editor in [`save-editor`](../README.md): a
+This covers the KOTOR Modern Gamesave Editor in [`save-editor`](../README.md): a
 separate program, not part of the KMRP installer or patch, that opens KotOR 1 and KotOR 2
 saves and changes them. The save format itself (every file, struct and field, with where
 each fact was measured) is in [save-editor-format.md](save-editor-format.md); this document
@@ -20,7 +20,7 @@ bugs they reported. Untested parts are marked **untested** where they are descri
 | --- | --- |
 | Source | `save-editor` (Rust 2021, Slint 1.18 with its software renderer and the winit backend) |
 | Toolchain | rustc 1.99.1 (2026-10-13), cargo 1.99.1 |
-| Windows build | `save-editor\dist\KMRP Save Editor.exe` from `save-editor\build.ps1` (size and SHA-256 printed by the script) |
+| Windows build | `save-editor\dist\KOTOR Modern Gamesave Editor.exe` from `save-editor\build.ps1` (size and SHA-256 printed by the script) |
 | Linux and macOS builds | `save-editor/build.sh`; **not built or run yet** (no Linux or Mac machine here) |
 | Fonts | the KMRP Original HD fonts ([fonts/](../../fonts/README.md), SIL OFL 1.1): Menu, MenuMedium, MenuSmallB and Descriptions, committed in `save-editor/fonts` and embedded at build time ([build.rs](../build.rs)). *Corrected 2026-10-22:* until then they were the traced OTFs from `tools/build_hd_original_otf.py`, made from the game's atlases and never committed |
 | KotOR 1 tested | Steam, `swkotor`, with KMRP and K1CP 1.10.0; and the KPM test copy `build/party-roster-kpm-check/game` |
@@ -34,8 +34,8 @@ The parts that decide what an editor may change (measured; sources in
 | Field | Read when the save loads? | So the editor |
 | --- | --- | --- |
 | `Str`..`Cha`, skills `Rank`, `FeatList`, `KnownList0`, `Experience`, `GoodEvil`, `HitPoints`, `ForcePoints` | read | changes them |
-| `MaxHitPoints`, `MaxForcePoints`, `PregameCurrent`, saving throws, `ArmorClass`, item `Cost` | **not read; recomputed and written back** | never changes them; shows them for reference only |
-| `CurrentHitPoints`, `CurrentForce` | read, **relative to the base** (`current + (max - base)`) | "Heal Everyone Fully" sets them equal to `HitPoints` and `ForcePoints` |
+| `MaxHitPoints`, `MaxForcePoints`, `PregameCurrent`, saving throws, `ArmorClass`, item `Cost` | **not read; recomputed and written back** | computes both maxima by the engine's rules and shows those; after a Health, Force, level or class edit writes the three Health and Force fields as the game would at a save |
+| `CurrentHitPoints`, `CurrentForce` | read, the player's **relative to the base** (`stored + max - base`), anyone else's **plus level x modifier** ([format, 3.4](save-editor-format.md#34-hit-points-and-force-points-what-is-stored-what-is-recomputed-refile)) | shows and stores them by the same two rules, so the game loads exactly the value set |
 | The player's level | recomputed from `ClassList` and one `LvlStatList` record per level | a level is added only through a class, with its record (section 4) |
 
 The player exists in `Mod_PlayerList` of the last module's `Module.ifo` (both games) and, in
@@ -79,10 +79,10 @@ modded game shows its mods.
 | Character | Experience | `Experience` | at least 0; buttons set the next level's or the highest level's XP from `exptable.2da` |
 | Character | Alignment | `GoodEvil` | 0 to 100 |
 | Character | Attributes | `Str` `Dex` `Con` `Int` `Wis` `Cha` | 1 to 100 |
-| Character | Add a Class | a second `ClassList` entry at level 1, its hit die added to `HitPoints` and `CurrentHitPoints`, its Force die to `ForcePoints` and `CurrentForce`, for the player one more `LvlStatList` record, XP raised to the new level if short | only when there is one class; droids get droid classes only |
+| Character | Add a Class | a second `ClassList` entry at level 1, its hit die added to `HitPoints`, its Force die to `ForcePoints`, for the player one more `LvlStatList` record, XP raised to the new level if short; then Health full and Force up by what its maximum rose, as the game's level-up leaves them | only when there is one class; droids get droid classes only |
 | Character | Look | `PortraitId`, `Appearance_Type` (the portrait's body in the current build: `appearance_s`, `appearancenumber` or `appearance_l` of `portraits.2da`), `Gender` | portraits with `forpc` 1 |
 | Character | Position (player) | `XPosition`, `YPosition`, `ZPosition` | numbers only |
-| Character | Heal Everyone Fully | `CurrentHitPoints = HitPoints`, `CurrentForce = ForcePoints` for every creature | |
+| Character | Heal Everyone Fully | `CurrentHitPoints` and `CurrentForce` such that the game loads both at their maxima, for every creature (the player: equal to `HitPoints` and `ForcePoints`; a party member: above them by the bonuses the load leaves out) | |
 | Abilities | Skills | `SkillList[i].Rank` | 0 to 99 |
 | Abilities | (how they are shown) | every feat and Force power the game has is listed, each with its icon (feat.2da `icon`, spells.2da `iconresref`), in groups: feats by `toolscategories` (Jedi, Combat, Weapons and armour, Class abilities, Skills and general, Droid and other), powers by `goodevil` (Universal, Light side, Dark side), a chain's links together in order; what the creature has is lit | names, icons and groups come from the game and Override, so modded feats and powers appear with their own icons |
 | Abilities | Feats | `FeatList`: add one entry, or remove one and the same feat from every `LvlStatList[].FeatList` | a new entry is a copy of an entry already there |
@@ -120,7 +120,7 @@ Taken from KSE 3.3.7's readme (its list of editable fields), not from its code.
 | Equipment (player and party) | Inventory, Equipped by | an item taken off goes to the party inventory and the effects whose `CreatorId` is its `ObjectId` go with it; an item put on gets `Mod_NextObjId0` of the module's `Module.ifo` as its object id, which then moves on; only items whose `equipableslots` has the slot and whose `droidorhuman` (1 people, 2 droids) fits |
 | Current Party | Party, With you | `PT_MEMBERS`, `PT_NUM_MEMBERS`, savenfo `PORTRAIT1`/`PORTRAIT2`; the area is left alone |
 | Levels, Class add/remove/change | Character, Classes, Edit | `set_class_level`, `change_class`, `remove_class` in `src/creature.rs`; one level record per level for the player |
-| Hit Points, Force Points (current and max) | Character | the current value as the game shows it is stored relative to the base; the maximum moves the base (and the player's last level record) |
+| Hit Points, Force Points (current and max) | Character | shown and stored by the engine's own rules; the maximum moves what the engine computes it from (the player's level-record dice, newest first; anyone else's base); what was missing stays missing ([format, 3.4](save-editor-format.md#34-hit-points-and-force-points-what-is-stored-what-is-recomputed-refile)) |
 | Min1HP | Character, Cannot die | `Min1HP` |
 | Appearance, Gender, Soundset, Portrait, NPC name | Character, Look and voice | `Appearance_Type`, `Gender`, `SoundSetFile`, `PortraitId`, `FirstName` |
 | Time played | Story, More | `PT_PLAYEDSECONDS` (savenfo follows) |
@@ -153,7 +153,7 @@ remove cross.
 | --- | --- |
 | Any area | The Map tab's Areas list holds every area of the game, by planet (cutscene stages, `stunt_` modules, and nameless modules left out; of two areas with one name the visited one, else the one a door leads into). An area not visited shows the game's own .git with each object's template fields filled in (names, portraits) |
 | Travel Here | The ways the game's doors and transitions lead into the area (each module's shipped .git, `LinkedToModule` and `LinkedTo`). Picking one queues an area-transition event (`EVENT_AREA_TRANSITION`, 26) first in the current module's `EventQueue`, due at the saved moment: the game makes the trip right after the save loads, loads an unvisited area fresh from its files with its arrival scripts, and brings the party (`Save::queue_transition`; the event's layout from the maintainer's own reverse engineering, handler 0x0050D6C0). *Corrected 2026-10-23:* queued last and a second later, it waited behind the save's own delayed events until the player did something |
-| Skip Ahead | Story, Skip Ahead: a chapter as if played (`questdb::skip_to`). The chapter's milestone (`data/quests/*-milestone.json`): journal, the story values the rest of the game reads, items; its rewards (`*-rewards.json`, `tools/questdb/rewards.py`): the XP of a full run (kills by the engine's rule, plot XP, script XP, SetXP floors, `tools/xp/calc.py`), the enemies' Dropable items and the containers' loot (class gear by the game's own tests); then the trip by the game's own first hop with its movies, so the story plays on (from the Endar Spire: escape pod movie 01c, the vision, then the Taris apartment) |
+| Skip Ahead | Story, Timeline (Skip to Here in a chapter's pop-up): a chapter as if played (`questdb::skip_to`). The chapter's milestone (`data/quests/*-milestone.json`): journal, the story values the rest of the game reads, items; its rewards (`*-rewards.json`, `tools/questdb/rewards.py`): the XP of a full run (kills by the engine's rule, plot XP, script XP, SetXP floors, `tools/xp/calc.py`), the enemies' Dropable items and the containers' loot (class gear by the game's own tests); then the trip by the game's own first hop with its movies, so the story plays on (from the Endar Spire: escape pod movie 01c, the vision, then the Taris apartment) |
 | Kill XP | The engine on every death (`ApplyDeathExperience` 0x004FB1E0): xptable.2da row (player level from XP) column trunc(CR), for a creature whose faction's reputation toward the player is 10 or below; the player all of it, party members 80%, the pool all of it. Checked against two Endar Spire saves (150 and 450 XP at the same points) |
 
 **The whole of KotOR 1** (2026-10-23, mapped by `tools/questdb`, `checked: false`): 12
@@ -244,6 +244,42 @@ picked in the confirmation (`a_pc_jedi`: the class added, `000_Prestige` 2); and
 player picks it, the companions trained as Jedi without their conversations (the class
 `a_makejedi` gives and the values their conversation chains end with).
 
+**The timeline** (Story, Timeline; 2026-10-23, designed by the maintainer from mockups in
+both games' colours). Story's sections are tabs under the main tab bar (Quests, Timeline, then
+Galaxy Map and Pazaak, then the modder sections), so the timeline runs the panel's full width.
+On a starfield (dark mode; light mode keeps the plain panel, whose text is dark):
+
+| What | How |
+| --- | --- |
+| The line | START to END; each main chapter a point at even steps, the point being the chapter's end, numbered I to X; played chapters filled, the rest hollow; the stretch behind the open save bright |
+| You are here | a gold point just past the furthest main chapter the open save has played; the planets that can be played in any order (KotOR's four star maps, KotOR II's four free planets) may still be open behind it, and show hollow |
+| Played | a chapter's journal entries reached, or its journal quests taken out of the journal by a chapter the save has played (`chapters_played`): the game removes the Endar Spire's quest on Taris, so every save past Taris would otherwise read the Endar Spire as never played, and Skip Ahead would have played it again |
+| Other saves | every other save of the game, any character's, just past the furthest chapter each has played; green (blue in KotOR II, where green is the accent); in one stretch grouped by character and in the order of their time played, side by side, and stacked in columns above the line where the stretch is too short; pointing at one shows its picture, name, character, level and XP, how far its story is ("Story: after Korriban") and where it loads, a click opens it |
+| Chapters | pointing at one shows it above the line, "Click to choose where to go back to" (played), "where to skip to" (ahead) or both (the one the save is in); a click opens its pop-up |
+| The pop-up | a scrolling list from the chapter's beginning (top) to its end (bottom), its quests between, each opening to its stages, each row's button on the right: Go Back to Here for what the save has played or reached, Skip to Here for the rest, leading to the Skip Ahead or Go Back confirmation. The beginning of a chapter ahead is skipped to by playing the chapter before it; the end of a played chapter is gone back to by taking the chapter after it back out |
+| Side chapters | the Ebon Hawk's own quests and Yavin Station (KotOR; KotOR II: the Ebon Hawk) are not on the line, as Skip Ahead plays them only when picked themselves: their ships at the bottom middle open their pop-ups |
+
+The Ebon Hawk is a free-to-use render from Deadly Stream (`assets/timeline/ebon-hawk.png`,
+its background removed with rembg's BiRefNet model). Yavin Station is a frame of KotOR's own
+movie, so it is not in the repository: `build.rs` makes it from the player's game with ffmpeg
+(Live_1c.bik, frame 484, cut out by the committed outline `yavin-station-mask.png`); without
+the game or ffmpeg the button shows its name alone. The starfield (`stars.png`) is generated. Sources in
+[assets/timeline/README.md](../assets/timeline/README.md).
+
+**A maximum out of reach** (Character, Health and Force; 2026-10-23, the maintainer: "there
+should be a notification saying this will lower the level or this will raise the level"). The
+game computes both maxima from the level (section 3.4 of the format notes), so at a given level
+each has a lowest and a highest value: the player's level dice are 0 to 255 each, and anyone's
+Health gains at least 1 a level. The editor finds both ends by setting them on a copy and
+reading back what the engine's rules give (`pool_reach`). A typed maximum past either end
+opens a pop-up instead of stopping short: "Max Force 500 needs a higher level. At level 2, Max
+Force is 256 at most. At level 4 it fits.", a chart with a bar for what the level allows now,
+one for the level that reaches the value and a gold mark at the value, and Cancel, Set to 256
+and Raise to Level 4. Raising adds levels to the newest class; lowering takes them from the
+newest class first, then the one before, as the class level control does. A creature the game
+gives no Force (no Jedi class) is told so. Tested: the ends set exactly and a value past one
+stops there, for every creature in every save (`the_ends_of_a_level_set_exactly`).
+
 The data pipeline caches each script's analysis on disk (`ncsvm.run_script`, in
 `save-editor/build/questdb-cache`, keyed on the script, its parameters, the interpreter's
 settings and its code), so a chapter rebuild takes minutes, and `rewards.py` works out the
@@ -314,7 +350,8 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
 | Removing one Force power removed all of them (KotOR 2) | removes exactly one entry, from the class list and the level records; test `edits_survive_a_write` removes one of a save's powers and checks one fewer remain, in all 14 saves that have two or more |
 | No way to add or remove Force powers | both, searched by name |
 | Raising the level added the wrong Vitality (KotOR 1) | no level box: XP is raised and the game's own level-up runs, with its own hit dice and choices; a class added here adds exactly its hit die and, for the player, the level record the game sums Health from |
-| Max HP and FP edits thrown away | not offered as edits (section 1); the screen says what they come from |
+| Max HP and FP edits thrown away | the maximum is changed where the engine computes it from (level-record dice or base), never in the ignored `MaxHitPoints` field |
+| Health and Force broken by level changes (a Discord report against another editor, issue 70) | levels, classes, Health and Force follow the engine's level-up and load rules; `tests/levels.rs` checks every save on the PC (section 8) |
 | Inventory edits failed on commit | items are built from the game's templates and shaped like items already in the save; tested by adding two items to a save and loading it in the game |
 | Saves not found: Steam Cloud, `kse.ini` paths, registry, VirtualStore, Linux | section 2, no configuration |
 | Android KotOR 2 saves | Add a Save Folder; **untested** |
@@ -391,6 +428,41 @@ Automated (`cargo test --release` in `save-editor`, all passing 2026-10-22):
 | `every_save_round_trips` | every GFF and archive of every save found (10 KotOR 1, 4 KotOR 2) survives write and read unchanged, and the save model opens each |
 | `edits_survive_a_write` | on a copy of each of the 14 saves: Strength, a skill, XP, alignment, a feat added, one power removed, credits, an item added, influence (KotOR 2), a global switch flipped and an NPC's Constitution in all copies; written, read back, each change present, Dexterity and time played unchanged, the backup holding the old Strength |
 | `a_new_class_brings_its_level_record` | a second class adds one level record, its hit die and a power list |
+
+Levels, classes, Health and Force (`tests/levels.rs`, issue 70; 8 tests, all passing
+2026-10-23 on the 19 KotOR 1 and 4 KotOR 2 saves on the maintainer's PC, each scenario on a
+fresh copy, written and read back):
+
+| Test | What it checks |
+| --- | --- |
+| `computed_maxima_match_what_the_game_wrote` | the editor's Health and Force maxima equal the `MaxHitPoints` and `MaxForcePoints` the game wrote, for all 62 creatures (player and party) in the saves the game wrote; storing the shown current value gives back the stored one |
+| `health_and_force_set_directly` | maximum and current Health and Force set together on everyone; read back as set, classes unchanged, Force left at 0 where the engine gives none |
+| `levels_up_then_down` | half-spent Health and Force, first class two levels up: Health full, Force up by its maximum's rise, base up by the dice, two records with the class's dice; down again: records, bases, maxima as before, Force as before; written two levels up and half spent, read back so |
+| `classes_added_removed_and_changed` | a Jedi class added to a creature without one and an ordinary class to a Jedi, then removed; the first class changed to another and back; everything returns, what was missing stays missing; the player's Force follows the newest class |
+| `levels_taken_away_newest_first` | the player two levels up, then levels taken from the newest record back, as Go Back does: the records and maxima as before |
+| `healing_fills_both` | half spent, then healed: both at their maxima as the game will load them, party members with Toughness included |
+| `rules_on_made_up_creatures` | the rules' corners no save here reaches: Toughness feats, feat 95, feat 116, an ability effect, the newest-class rule, a party member whose base is too low for the Con rule, droids |
+| `recruited_companions_keep_the_templates_values` | a companion recruited from the game's template (Carth in KotOR 1, Atton in KotOR 2) loads with the template's own Health and Force, the stored maxima as the game writes them |
+
+Every edit test also checks: the stored maxima are what the engine computes, the player has
+one record per level, `PregameCurrent` is the current Health, and every other copy of the
+character (the player's `pc.utc`, a party member's copy in the area) says the same. A save
+whose records do not match its classes (`000023 - Game22`, changed by another editor: twenty
+records with a hit die of 0 under a 20/20 multiclass) is left out of the change-and-back
+check, as its records of two classes cannot be told apart.
+
+**Untested in the games** (issue 70's acceptance list asks for it): each of the following,
+on KotOR 1 and KotOR 2, loaded, the character sheet read, saved in the game, reopened in the
+editor:
+
+* a level raised on the player and on a party member (Health full, Force as shown);
+* a class added (a Jedi class to a non-Jedi, and the reverse for the player, whose Force
+  then reads 0) and removed;
+* Health and Force set below the maximum on a party member with Toughness: the game should
+  show the set value, and after a save and load it shows less by the Toughness bonus (the
+  engine's own quirk, section 3.4 of the format document);
+* then a normal level-up in the game, checking Health and Force move as on an unedited
+  character.
 
 In the games (the test copy of KotOR 1 and the Steam KotOR 2; the real saves were copied,
 never written):

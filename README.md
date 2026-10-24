@@ -1,4 +1,4 @@
-# KMRP Save Editor
+# KOTOR Modern Gamesave Editor
 
 Opens any Star Wars: Knights of the Old Republic or KotOR II save and changes it safely.
 For Windows, Linux and macOS; works with or without KMRP installed.
@@ -31,7 +31,7 @@ What it changes, field by field, and how it was tested:
 ## Building
 
 This folder builds on its own; nothing outside it is needed. Windows:
-`powershell -ExecutionPolicy Bypass -File build.ps1` makes `dist\KMRP Save Editor.exe`.
+`powershell -ExecutionPolicy Bypass -File build.ps1` makes `dist\KOTOR Modern Gamesave Editor.exe`.
 Linux and macOS: `sh build.sh`. Both need Rust (stable).
 
 The window is set in the KMRP Original HD fonts: the four it uses are in `fonts/` here,

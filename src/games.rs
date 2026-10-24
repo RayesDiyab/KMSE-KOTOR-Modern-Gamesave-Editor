@@ -61,8 +61,10 @@ fn home() -> Option<PathBuf> {
 }
 
 /// Where the editor keeps its settings and the backups of every save it writes:
-/// %LOCALAPPDATA%\KMRP\Save Editor, ~/Library/Application Support/KMRP/Save Editor, or
-/// $XDG_DATA_HOME/KMRP/Save Editor. Never inside the game folder.
+/// %LOCALAPPDATA%\KOTOR Modern Gamesave Editor, ~/Library/Application Support/KOTOR Modern Gamesave Editor, or
+/// $XDG_DATA_HOME/KOTOR Modern Gamesave Editor. Never inside the game folder. Until 2026-10-24 it was named
+/// KMRP Save Editor and kept them in KMRP\Save Editor there: that folder is moved here the
+/// first time (if the move fails, it is used as it is, so nothing is lost).
 pub fn data_dir() -> PathBuf {
     let base = if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -73,7 +75,13 @@ pub fn data_dir() -> PathBuf {
             .map(PathBuf::from)
             .or_else(|| home().map(|h| h.join(".local/share")))
     };
-    base.unwrap_or_else(std::env::temp_dir).join("KMRP").join("Save Editor")
+    let base = base.unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("KOTOR Modern Gamesave Editor");
+    let old = base.join("KMRP").join("Save Editor");
+    if !dir.exists() && old.is_dir() && std::fs::rename(&old, &dir).is_err() {
+        return old;
+    }
+    dir
 }
 
 /// The real path without Windows' \\?\ prefix, so it reads as the player knows it.

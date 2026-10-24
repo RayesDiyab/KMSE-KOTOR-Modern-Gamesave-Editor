@@ -1,0 +1,16 @@
+# Line endings, as in KMRP (where this editor lived until 2026-10-24): text types declared
+# one by one rather than `* text=auto`.
+*.md        text
+*.py        text
+*.ps1       text eol=crlf
+*.txt       text
+*.json      text
+*.yml       text
+*.yaml      text
+
+# Binary.
+*.png       binary
+*.ico       binary
+*.otf       binary
+*.ttc       binary
+*.webp      binary

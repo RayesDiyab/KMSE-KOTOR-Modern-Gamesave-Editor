@@ -24,7 +24,7 @@ fn main() {
     let from = PathBuf::from(&a[2]);
     let saves = PathBuf::from(&a[3]);
     let data = GameData::open(identify(&root).unwrap_or(Game::K1), &root);
-    let backups = std::env::temp_dir().join("kmrp-save-editor-tests").join("map-backups");
+    let backups = std::env::temp_dir().join("kmse-tests").join("map-backups");
 
     let here = saves.join("000097 - Map Move Here");
     copy(&from, &here);

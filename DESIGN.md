@@ -1,5 +1,5 @@
 ---
-name: KMRP Save Editor
+name: KOTOR Modern Gamesave Editor
 description: A KotOR 1 and 2 save editor shaped like the game's own Load screen and in-game menu, in the KMRP family colours.
 colors:
   navy-window: "#0a1220"
@@ -139,7 +139,7 @@ components:
     textColor: "{colors.text}"
 ---
 
-# Design System: KMRP Save Editor
+# Design System: KOTOR Modern Gamesave Editor
 
 ## Overview
 

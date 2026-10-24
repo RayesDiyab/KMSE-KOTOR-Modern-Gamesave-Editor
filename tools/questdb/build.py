@@ -1,9 +1,9 @@
 """Build the Save Editor's quest database for one planet from the game files.
 
 Usage:
-    python save-editor/tools/questdb/build.py --game K1 --planet Taris \
+    python tools/questdb/build.py --game K1 --planet Taris \
         --out save-editor/data/quests/k1-taris.json [--game-dir <KotOR folder>] [--review <md path>]
-    python save-editor/tools/questdb/build.py --game K1 --planet "Endar Spire" \
+    python tools/questdb/build.py --game K1 --planet "Endar Spire" \
         --out save-editor/data/quests/k1-endar-spire.json \
         --milestone save-editor/data/quests/k1-endar-spire-milestone.json
 

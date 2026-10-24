@@ -59,7 +59,7 @@ fn main() {
     save.edit(Who::Player, "min1hp", |c| creature::set_min1hp(c, true));
     save.edit(Who::Player, "voice", |c| creature::set_soundset(c, 85));
     save.edit_nfo(|n| n.set("SAVEGAMENAME", Value::String(b"KSE Features Test".to_vec())));
-    let backups = std::env::temp_dir().join("kmrp-save-editor-tests").join("kse-backups");
+    let backups = std::env::temp_dir().join("kmse-tests").join("kse-backups");
     save.write(&backups).unwrap();
     let back = Save::open(&to).unwrap();
     let p = back.player().unwrap();

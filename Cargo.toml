@@ -1,14 +1,14 @@
 [package]
-name = "kmrp-save-editor"
+name = "kotor-modern-gamesave-editor"
 version = "1.0.0"
 edition = "2021"
-description = "KMRP Save Editor: opens KotOR 1 and KotOR 2 saves and changes them safely"
+description = "KOTOR Modern Gamesave Editor: opens KotOR 1 and KotOR 2 saves and changes them safely"
 authors = ["RaymanGT"]
 license = "GPL-3.0-or-later"
 publish = false
 
 [[bin]]
-name = "kmrp-save-editor"
+name = "kotor-modern-gamesave-editor"
 path = "src/main.rs"
 
 [lib]
@@ -36,3 +36,14 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# For the tests only (build.ps1 runs them beside the release build, on the cores it leaves
+# idle): optimised, without the release build's whole-program pass, so they build in a
+# fraction of its time. The program in dist is always the release profile above.
+[profile.tests]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+panic = "unwind"
+strip = false

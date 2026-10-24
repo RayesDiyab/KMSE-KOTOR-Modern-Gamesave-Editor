@@ -21,14 +21,31 @@ export struct StageRow { id: int, text: string, xp: int, end: bool, place: int }
 // One effect of finishing a quest as if played: for which ending, in plain words, whether
 // the editor can write it, and (for a branch) its choice index and whether it is chosen.
 export struct ChainLine { ending: int, text: string, can: bool, branch: string, choice: int, on: bool }
-// A chapter for Skip Ahead: 0 played in this save, 1 next, 2 later.
-export struct SkipRow { index: int, order: int, planet: string, title: string, note: string, state: int }
+// A row of a chapter's pop-up on the timeline: one of its quests (depth 1, opens and closes by
+// key) or a quest's stage (2), the chapter's beginning (5) or its end (6). state: 0 the button
+// goes back to it (index: the chapter to go back to), 2 it skips to it (index: the chapter to
+// skip through), 3 no button.
+export struct SkipRow { index: int, order: int, planet: string, title: string, note: string, state: int, depth: int, open: bool, key: string, tag: string, stage: int }
+// A main chapter on the timeline, at pos (0 the start, 1 the end; the chapter's end is its
+// point). state: 0 played, 1 the one the save is in, 2 ahead.
+export struct TimelineNode { index: int, numeral: string, planet: string, title: string, state: int, pos: float }
+// Another save of the game on the timeline (index into the save list); level says whose.
+// group: its marker in tl-groups; slot: its place in the marker's list (0 nearest the line).
+export struct TimelineSave { index: int, pos: float, group: int, slot: int, name: string, area: string, time: string, level: string, story: string, shot: image, has-shot: bool }
+// The saves in one stretch of the timeline as one marker: count of them, the first in tl-saves.
+export struct TimelineGroup { pos: float, count: int, start: int }
 export struct SlotRow { slot: int, name: string, item: string, icon: image, has-icon: bool, empty: bool, changed: bool, art: image, has-art: bool }
 export struct CreatureRow { index: int, name: string, note: string, hp: int, max-hp: int }
 export struct MapMark { index: int, x: float, y: float, kind: int, name: string, selected: bool, face: image, has-face: bool }
 // A planet (header: opens and closes its areas) or one of its areas.
 export struct AreaRow { module: string, name: string, note: string, current: bool, viewing: bool, visited: bool, header: bool, open: bool, planet: string }
 export struct Toggle { index: int, name: string, on: bool, value: int, changed: bool }
+// A place on the galaxy map: where it stands (share of the map's width and height), and its
+// globe drawn from the game's own planet texture, lit, and the same in grey for closed.
+export struct PlanetRow { index: int, name: string, on: bool, changed: bool, x: float, y: float, globe: image, globe-off: image, has-globe: bool }
+// A Pazaak side card: its value as the card shows it ("+3", "D"), the game's card face, and
+// where on the face the value goes (a share of its height).
+export struct CardRow { index: int, label: string, value: int, changed: bool, face: image, has-face: bool, label-y: float }
 
 export global App {
     // ---- the save list ----
@@ -96,6 +113,32 @@ export global App {
     in property <[Stat]> attributes;
     in property <string> health;
     in property <string> health-note;
+    // Moves on at every fill of the Character tab: the Health and Force boxes take the
+    // values again, as typing in a box ends its link to them.
+    in property <int> pool-epoch;
+    // A most Health or Force typed out of reach at the creature's level (overlay 13): set the
+    // nearest it can be, or change the level (an empty label hides its button).
+    in property <string> pool-title;
+    in property <string> pool-line;
+    in property <string> pool-line2;
+    // the chart: "Max Force", the value typed, the lowest and highest most at the level now
+    // and at the level that reaches it (new-level 0: none does)
+    in property <bool> pool-chart;
+    in property <string> pool-what;
+    in property <int> pool-want;
+    in property <int> pool-level-now;
+    in property <int> pool-low;
+    in property <int> pool-high;
+    in property <int> pool-new-level;
+    in property <int> pool-new-low;
+    in property <int> pool-new-high;
+    in property <string> pool-set-label;
+    in property <string> pool-level-label;
+    callback pool-set();
+    callback pool-level();
+    callback pool-cancel();
+    // A save whose player level records do not match the classes (another editor's doing).
+    in property <string> records-warning;
     in property <string> force;
     in property <string> force-note;
     in property <image> portrait;
@@ -208,10 +251,22 @@ export global App {
     in property <int> selected-box: -1;
     in property <[ItemRow]> box-items;
     in property <string> area-note;
-    in property <[Toggle]> planets;
+    in property <[PlanetRow]> planets;
     in property <bool> cheat-used;
     in property <bool> cheat-changed;
-    in property <[Toggle]> pazaak;
+    in property <[CardRow]> pazaak;
+    in property <string> pazaak-total;
+    // Save as a New Save (Save Changes' arrow): the name asked for, then the new save written
+    in-out property <string> save-as-name;
+    callback ask-save-as();
+    callback do-save-as(string);
+    // Copy (beside Settings): the name asked for (the same pop-up, save-as-copy set), then the
+    // save as it is on disk copied into the next free slot under that name, nothing else changed
+    in-out property <bool> save-as-copy;
+    callback copy-save();
+    // The saves page's pen: the selected save renamed on the game's Load screen
+    callback rename-save(string);
+    callback do-copy-save(string);
     in property <[Named]> journal;
     in property <[CreatureRow]> creatures;
     in property <string> played-hours;
@@ -247,6 +302,18 @@ export global App {
     in property <[StageRow]> quest-endings;
     callback select-quest-tab(int);
     callback pick-quest(int);
+    // The picked quest's stages drop down under it in the list (open), and one of them can be
+    // picked to see in full: its index in quest-stages (-1 none), its whole journal text,
+    // what its button does (0 start the quest, 1 start it at this point, 2 finish it there,
+    // 3 the quest is already here) and, for an ending, its place in quest-endings.
+    in property <bool> quest-open;
+    in property <int> stage-pick: -1;
+    in property <string> stage-text;
+    in property <int> stage-action;
+    in property <int> stage-ending: -1;
+    callback pick-stage(int);
+    // the ending the Finish Quest pop-up opens on
+    in-out property <int> finish-pick;
     callback set-quest-stage(int);
     callback finish-quest(int);
     callback open-finish-quest();
@@ -295,6 +362,27 @@ export global App {
     in property <[Named]> travel-ways;
     callback travel(int);
     callback toggle-planet(string);
+    // The timeline: its main chapters, the other saves of this game and where the open
+    // save is (0 the start, 1 the end).
+    in property <[TimelineNode]> tl-nodes;
+    // the side chapters, shown as their ships under the line (the Ebon Hawk, Yavin Station)
+    in property <[TimelineNode]> tl-sides;
+    in property <[TimelineSave]> tl-saves;
+    in property <[TimelineGroup]> tl-groups;
+    in property <float> tl-here;
+    // A chapter clicked on the timeline: its pop-up (overlay 12) with the rows below.
+    callback open-chapter(int);
+    // the other saves are read (main.rs reads them away from the window)
+    callback timeline-ready();
+    in property <string> pop-kicker;
+    in property <string> pop-title;
+    in property <string> pop-note;
+    // the place the pop-up is about ("Tatooine"), the row picked (-1 none) and what the
+    // pop-up's button then does (0 nothing picked, 1 skip there, 2 go back there)
+    in property <string> pop-place;
+    in property <int> pop-picked: -1;
+    in property <int> pop-action;
+    callback pick-row(int);
     in property <[SkipRow]> skip-rows;
     // The chapter asked about, before skipping (the confirm pop-up, overlay 10).
     in property <int> skip-asked;
@@ -315,6 +403,19 @@ export global App {
     in property <bool> skip-train;
     in-out property <int> skip-train-pick: 0;
     callback ask-skip(int);
+    callback toggle-skip(string);
+    // skip to a quest's stage: the chapter, the quest's tag, the stage
+    callback ask-skip-stage(int, string, int);
+    // going back: the chapter, a quest's tag and stage (none: the chapter's start); then the
+    // pop-up (overlay 11) and its items choice (0 keep what the player has now, 1 as the story was)
+    callback ask-back(int, string, int);
+    callback do-back();
+    in property <string> back-title;
+    in property <string> back-summary;
+    in-out property <int> back-keep: 0;
+    // another save of the game, opened from the timeline
+    callback open-timeline-save(int);
+    in property <length> skip-height;
     callback do-skip();
     callback spawn-here();
     in property <bool> pick-is-exit;

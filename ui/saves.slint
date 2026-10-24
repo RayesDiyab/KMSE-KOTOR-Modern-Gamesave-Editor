@@ -4,7 +4,7 @@
 
 import { Theme } from "theme.slint";
 import { App, SaveRow } from "state.slint";
-import { Button, Label, Note, Scroller } from "widgets.slint";
+import { Button, Label, Note, Scroller, Field, IconButton } from "widgets.slint";
 
 component SaveLine inherits Rectangle {
     in property <SaveRow> save;
@@ -147,6 +147,9 @@ export component SavesPage inherits Rectangle {
         border-radius: 10px;
         visible: App.saves.length > 0;
         property <length> inner: self.width - 44px;
+        // the pen pressed: the name is a text box until Enter, the save icon or Escape
+        property <bool> renaming;
+        property <string> new-name;
         shot := Rectangle {
             x: 22px;
             y: 22px;
@@ -159,25 +162,109 @@ export component SavesPage inherits Rectangle {
             clip: true;
             if App.preview-has-shot: Image { source: App.preview-shot; width: parent.width; height: parent.height; image-fit: fill; }
         }
+        // The name with its pen, the place under it, and Copy on the right (2026-10-24, the
+        // maintainer).
         HorizontalLayout {
             x: 22px;
             y: shot.y + shot.height + 18px;
             width: inner;
+            spacing: 18px;
             VerticalLayout {
                 spacing: 4px;
                 alignment: start;
-                Text { text: App.preview-name; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; overflow: elide; }
+                horizontal-stretch: 1;
+                HorizontalLayout {
+                    height: 44px;
+                    spacing: renaming ? 12px : 4px;
+                    alignment: start;
+                    if !renaming: Text {
+                        max-width: inner - 260px;
+                        text: App.preview-name;
+                        font-family: Theme.title-font;
+                        font-size: 30px * Theme.ts;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    // the pen: only its lines, at the name's top right, yellow under the mouse
+                    if !renaming: VerticalLayout {
+                        alignment: start;
+                        Rectangle {
+                            width: 22px;
+                            height: 22px;
+                            Path {
+                                width: 18px;
+                                height: 18px;
+                                viewbox-width: 24;
+                                viewbox-height: 24;
+                                stroke: pen-touch.has-hover ? Theme.hover-edge : Theme.accent;
+                                stroke-width: 1.8px;
+                                stroke-line-cap: round;
+                                commands: "M 4 20 L 8 20 L 19 9 L 15 5 L 4 16 Z M 13 7 L 17 11";
+                            }
+                            pen-touch := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    new-name = App.preview-name;
+                                    renaming = true;
+                                }
+                            }
+                        }
+                    }
+                    if renaming: FocusScope {
+                        width: inner - 260px;
+                        key-pressed(event) => {
+                            if event.text == Key.Escape {
+                                renaming = false;
+                                return accept;
+                            }
+                            reject
+                        }
+                        name-box := Field {
+                            height: 44px;
+                            text <=> new-name;
+                            font: Theme.title-font;
+                            font-size: 24px * Theme.ts;
+                            init => { self.focus-all(); }
+                            accepted(t) => {
+                                renaming = false;
+                                App.rename-save(t);
+                            }
+                        }
+                    }
+                    if renaming: IconButton {
+                        width: 44px;
+                        lit: true;
+                        icon: "M 5 4 L 16 4 L 19 7 L 19 20 L 5 20 Z M 8 4 L 8 9 L 15 9 L 15 4 M 8 20 L 8 14 L 16 14 L 16 20";
+                        clicked => {
+                            renaming = false;
+                            App.rename-save(new-name);
+                        }
+                    }
+                }
                 Text { text: App.preview-area; font-family: Theme.body-font; font-size: 16px * Theme.ts; color: Theme.muted; overflow: elide; }
             }
             VerticalLayout {
-                spacing: 5px;
                 alignment: start;
-                for f in [["Character", App.preview-pc], ["Time played", App.preview-time], ["Saved", App.preview-date]]: HorizontalLayout {
-                    spacing: 18px;
-                    alignment: end;
-                    Text { text: f[0]; horizontal-alignment: right; font-family: Theme.body-font; font-size: 14.5px * Theme.ts; color: Theme.muted; }
-                    Text { width: 170px; text: f[1]; horizontal-alignment: right; font-family: Theme.body-font; font-size: 14.5px * Theme.ts; color: Theme.text; }
+                IconButton {
+                    text: "Copy";
+                    icon: "M 6.6 7 L 11.3 7 L 15.2 10.9 L 15.2 18.5 A 1.6 1.6 0 0 1 13.6 20.1 L 6.6 20.1 A 1.6 1.6 0 0 1 5 18.5 L 5 8.6 A 1.6 1.6 0 0 1 6.6 7 Z M 11.3 7 L 11.3 10.9 L 15.2 10.9 M 8.9 6.6 L 8.9 4.6 A 1.6 1.6 0 0 1 10.5 3 L 15.5 3 L 19.3 6.8 L 19.3 14.7 A 1.6 1.6 0 0 1 17.7 16.3 L 16.6 16.3 M 15.5 3 L 15.5 6.8 L 19.3 6.8";
+                    clicked => { App.copy-save(); }
                 }
+            }
+        }
+        // The party, and on the same level the character, time played and date.
+        VerticalLayout {
+            x: parent.width - 22px - self.width;
+            y: shot.y + shot.height + 100px;
+            height: 64px;
+            spacing: 5px;
+            alignment: center;
+            for f in [["Character", App.preview-pc], ["Time played", App.preview-time], ["Saved", App.preview-date]]: HorizontalLayout {
+                spacing: 18px;
+                alignment: end;
+                Text { text: f[0]; horizontal-alignment: right; font-family: Theme.body-font; font-size: 14.5px * Theme.ts; color: Theme.muted; }
+                Text { width: 170px; text: f[1]; horizontal-alignment: right; font-family: Theme.body-font; font-size: 14.5px * Theme.ts; color: Theme.text; }
             }
         }
         HorizontalLayout {
@@ -198,7 +285,7 @@ export component SavesPage inherits Rectangle {
         if App.preview-warning != "": Note {
             x: 22px + App.preview-party.length * 74px + 12px;
             y: shot.y + shot.height + 100px;
-            width: inner - App.preview-party.length * 74px - 12px;
+            width: inner - App.preview-party.length * 74px - 12px - 320px;
             text: App.preview-warning;
             color: Theme.changed;
         }
