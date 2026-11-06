@@ -16,7 +16,9 @@ export component Button inherits Rectangle {
     min-height: kind == 3 || compact ? 38px : 50px;
     min-width: label.preferred-width + (kind == 3 ? 32px : 48px);
     border-radius: 5px;
-    border-width: touch.has-hover && enabled ? 2px : kind == 1 || kind == 3 ? 1px : 0px;
+    // an edge at rest on every kind but the filled ones, whose fill is their edge (Revert's grey
+    // and a greyed-out Save Changes had none, 2026-11-06)
+    border-width: touch.has-hover && enabled ? 2px : kind == 1 || kind == 2 || kind == 3 || !enabled ? 1px : 0px;
     border-color: touch.has-hover && enabled ? Theme.hover-edge : Theme.edge;
     background: !enabled ? (kind == 0 ? Theme.selected : Theme.field)
         : kind == 0 ? @linear-gradient(180deg, touch.has-hover ? Theme.fill-hover : Theme.fill-top 0%, Theme.fill-bottom 100%)
@@ -385,18 +387,25 @@ export component Choice inherits Rectangle {
     in property <length> font-size: 18px * Theme.ts;
     callback picked(int);
     height: 46px;
-    border-radius: 6px;
-    border-width: 1px;
-    border-color: Theme.edge;
-    clip: true;
+    // The outline is drawn last, over the choices: under them the picked one's fill hid it,
+    // and each choice rounded all four corners inside its square cell, so the fill showed
+    // notches where two met and the corners did not match what a click reaches (2026-11-06,
+    // the maintainer: "the edges of the button seem invisible ... the actual edge might be
+    // rounded but the clickable button is square"). Now only the outer corners are round.
+    property <length> r: 6px;
     HorizontalLayout {
         for o[i] in options: Rectangle {
             property <bool> on: i == current;
+            property <bool> first: i == 0;
+            property <bool> last: i == options.length - 1;
             width: root.width / options.length;
             background: on ? @linear-gradient(180deg, Theme.fill-top 0%, Theme.fill-bottom 100%) : ct.has-hover ? Theme.hover : Theme.field;
             border-width: ct.has-hover && !on ? 2px : 0px;
             border-color: Theme.hover-edge;
-            border-radius: 6px;
+            border-top-left-radius: self.first ? root.r : 0px;
+            border-bottom-left-radius: self.first ? root.r : 0px;
+            border-top-right-radius: self.last ? root.r : 0px;
+            border-bottom-right-radius: self.last ? root.r : 0px;
             if i > 0: Rectangle { x: 0; width: 1px; background: Theme.edge; }
             HorizontalLayout {
                 alignment: center;
@@ -407,6 +416,12 @@ export component Choice inherits Rectangle {
             }
             ct := TouchArea { mouse-cursor: pointer; clicked => { root.picked(i); } }
         }
+    }
+    // the outline, over the choices
+    Rectangle {
+        border-radius: root.r;
+        border-width: 1px;
+        border-color: Theme.edge;
     }
 }
 

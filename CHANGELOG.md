@@ -6,10 +6,16 @@ CHANGELOG.
 
 ## [Unreleased]
 
-- **The Endar Spire is drawn as itself** on the Timeline (2026-11-06, the maintainer's
-  render): its picture in place of the outline of a ship, a little larger than its ring.
-  `assets/timeline/endar-spire.png`, cut from its black background and credited in the README.
-  Looked at in the program at 1600 by 900 and 1280 by 780.
+- **The Endar Spire, the Leviathan and the Ravager are drawn as themselves** on the
+  Timeline (2026-11-06, the maintainer's pictures): each in place of the outline of a ship, a
+  little larger than its ring; the Leviathan made greyer than its picture. In
+  `assets/timeline`, cut from their backgrounds and credited in the README. Looked at in the
+  program at 1600 by 900 and 1280 by 780.
+- **Every switch and button shows its edge** (2026-11-06, the maintainer: "the edges of the
+  button seem invisible"). The two- and three-way switches (the game, the quest list's
+  filter, Settings) draw their outline over their choices, where the picked one's fill hid it,
+  and round only their outer corners, so a choice's fill is the square a click reaches. Revert
+  and a greyed-out Save Changes, with its arrow, have an edge at rest.
 - **The Timeline map is the page** (2026-11-06, the maintainer's review). No panel around it
   and nothing above it: the map is 624 px tall at 1600 by 900 (it was 380 before the Timeline
   had its own tab). Where the save is and how to use the map are centred small print along
