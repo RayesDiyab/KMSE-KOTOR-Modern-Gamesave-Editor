@@ -1180,6 +1180,14 @@ fn line_before(game: Game, played: &mut [bool], i: usize) {
     if side(m) {
         return;
     }
+    // a free planet's group comes as one: what comes before it in its group was played
+    if let Some((_, group, _)) = FREE.iter().find(|(g, ps, _)| *g == game && ps.iter().any(|p| p.eq_ignore_ascii_case(planet))) {
+        for p in group.iter().take_while(|p| !p.eq_ignore_ascii_case(planet)) {
+            if let Some(j) = all.iter().position(|(x, _)| x.eq_ignore_ascii_case(p)) {
+                played[j] = true;
+            }
+        }
+    }
     let free_max = all.iter().filter(|(p, _)| is_free(game, p)).map(|(_, m)| order_of(m)).max().unwrap_or(0);
     let after_free = order_of(m) > free_max && !(game == Game::K1 && planet.eq_ignore_ascii_case("Leviathan"));
     for (j, (other, o)) in all.iter().enumerate() {
@@ -1220,7 +1228,10 @@ pub fn chapters_played_in(save: &Save) -> Vec<bool> {
             }
         }
     }
-    if let Some(here) = chapter_of_module(save.game, save.module_name()) {
+    // where the save will be: after Skip Ahead or Go Back the game makes the queued trip as
+    // the save loads, so the area it stood in says nothing (a return from the Unknown World
+    // would read every planet played again)
+    if let Some(here) = chapter_of_module(save.game, &save.place()) {
         line_before(save.game, &mut played, here);
     }
     played

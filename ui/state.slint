@@ -291,6 +291,11 @@ export global App {
     in property <bool> save-name-changed;
     callback select-story(int);
     callback filter-globals(string, bool);
+    // counts the times main.rs clears the feat and power searches, so their boxes clear too
+    in property <int> ability-reset;
+    // the filter the story values list shows: its search text and Only what I changed
+    in property <string> globals-query;
+    in property <bool> globals-changed-only;
     callback set-global-bool(int, bool);
     callback set-global-number(int, int);
     callback set-global-text(int, string);

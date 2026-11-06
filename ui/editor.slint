@@ -71,6 +71,9 @@ component AbilityList inherits Rectangle {
     callback add(int);
     callback remove(int);
     in-out property <string> query;
+    // the box empties when main.rs clears the list's search (another member, a feat added)
+    in property <int> reset: App.ability-reset;
+    changed reset => { root.query = ""; }
     HorizontalLayout {
         x: 0;
         y: 0;
@@ -870,8 +873,10 @@ component PartyTab inherits Rectangle {
 }
 
 component GlobalsSection inherits Rectangle {
-    in-out property <string> query;
-    in-out property <bool> changed-only;
+    // the search and the switch show the filter main.rs applies (kept there, so a Compare that
+    // turns the switch on, or a visit to another section, never leaves them out of step)
+    property <string> query: App.globals-query;
+    property <bool> changed-only: App.globals-changed-only;
     // the save's own fields (from the Galaxy Map page, 2026-10-24): its name on the Load
     // screen, the time played, and the console-cheats mark
     property <length> top: 96px;
@@ -898,7 +903,7 @@ component GlobalsSection inherits Rectangle {
         height: 40px;
         spacing: 14px;
         Field {
-            text <=> query;
+            text: App.globals-query;
             placeholder: "Type part of a name, for example tar_ or k_swg";
             font: Theme.body-font;
             font-size: 15px * Theme.ts;
@@ -907,7 +912,7 @@ component GlobalsSection inherits Rectangle {
         HorizontalLayout {
             width: 230px;
             spacing: 10px;
-            VerticalLayout { alignment: center; Switch { on: changed-only; toggled(v) => { changed-only = v; App.filter-globals(query, v); } } }
+            VerticalLayout { alignment: center; Switch { on: changed-only; toggled(v) => { App.filter-globals(query, v); } } }
             Text { text: App.compare-name != "" ? "Only the differences" : "Only what I changed"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
         }
         Button { kind: 3; text: App.compare-name != "" ? "Compare Another" : "Compare with Another Save"; clicked => { App.open-compare(); } }
@@ -1045,10 +1050,10 @@ component MoreSection inherits Rectangle {
         x: 0;
         width: split;
         Label { x: 0; y: 0; text: "WHERE THE EBON HAWK CAN FLY"; }
-        Note { x: 0; y: 28px; width: parent.width; text: "Where the Ebon Hawk can fly. Click a planet to open it (green) or close it (grey)."; }
+        sky-note := Note { x: 0; y: 28px; width: parent.width; text: "Where the Ebon Hawk can fly. Click a planet to open it (green) or close it (grey)."; }
         sky := Rectangle {
-            y: 56px;
-            height: parent.height - 56px;
+            y: 28px + sky-note.preferred-height + 6px;
+            height: parent.height - self.y;
             clip: true;
             // space, fading out well inside its edges so no edge of the picture shows
             if Theme.dark: Rectangle {
@@ -1096,11 +1101,12 @@ component MoreSection inherits Rectangle {
         x: split + 44px;
         width: parent.width - self.x;
         Label { x: 0; y: 0; text: "PAZAAK CARDS"; }
-        Note { x: 0; y: 28px; width: parent.width; text: "Your side deck cards, as the game draws them. Set how many of each you carry."; }
+        paz-note := Note { x: 0; y: 28px; width: parent.width; text: "Your side deck cards, as the game draws them. Set how many of each you carry."; }
+        // under the note however many lines it takes (two at Large text ran under the cards)
         Scroller {
             x: 0;
-            y: 60px;
-            height: parent.height - 60px - 28px;
+            y: 28px + paz-note.preferred-height + 10px;
+            height: parent.height - self.y - 28px;
             content-height: ceil(App.pazaak.length / root.columns) * (root.card + 60px);
             Rectangle {
                 for c[i] in App.pazaak: Rectangle {

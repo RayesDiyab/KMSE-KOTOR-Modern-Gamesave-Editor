@@ -6,6 +6,22 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The audit of 2026-11-06** (two rounds, each finding checked in the code, measured where a
+  test reaches it: `tests/audit_round2.rs`, `tests/exits.rs`, `tests/galaxy_route.rs`,
+  `tests/level_grants.rs`, `tests/source_text.rs`, `tests/audit_fixes.rs`). Writing: new files reach
+  the disk before old ones are replaced, a failed swap that cannot put the old file back says
+  so, a save left part written is refused with the way back from its backup (a finished write
+  whose clean-up failed still opens), and backups never land in a `saves` or `cloudsaves`
+  folder. Go Back keeps the star map values the game would keep, handles several begun
+  planets, and no longer reads undone planets as played from the area the save still stands
+  in. A found star map counts as played, so Skip Ahead never plays a planet twice; KotOR II's
+  Ebon Hawk scenes with G0-T0 wait until he has joined. A quest stage's XP is given once.
+  Taking a companion's second class away keeps what the first gives. Typed positions refuse
+  `nan` and `inf`; Health and Force boxes ignore a non-number. A way out's spot is outside its
+  trigger. Pazaak shows the game's cards only. Pop-ups close with Escape. A background result
+  arriving while a folder dialog is open waits instead of ending the program. The saves list
+  keeps the save picked when it is re-sorted. Every page fits the 1280 by 780 window. **In
+  the game, untested.**
 - **The timeline is a galaxy map** (2026-11-06). Story opens on a map of the galaxy: each
   chapter at its planet, as the game's own map places them, with the game's planet pictures;
   bands of blue light join the planets in the order the save played them, faint lanes run on

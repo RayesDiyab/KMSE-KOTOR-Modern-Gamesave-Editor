@@ -536,8 +536,11 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     let app = ui.global::<App>();
     let theme = ui.global::<Theme>();
     theme.set_k2(st.game == Game::K2);
-    app.set_has_k1(st.installs.iter().any(|i| i.game == Game::K1));
-    app.set_has_k2(st.installs.iter().any(|i| i.game == Game::K2));
+    // a game shows on the switch when it is installed or has saves added in Settings: saves of
+    // the other game added on a PC with one game could not be left again (2026-11-06 audit)
+    let has = |g: Game| st.installs.iter().any(|i| i.game == g) || !games::find_saves(&st.installs, g, &st.settings.added).is_empty();
+    app.set_has_k1(has(Game::K1));
+    app.set_has_k2(has(Game::K2));
     app.set_showing_k2(st.game == Game::K2);
     st.ensure_game(st.game);
     preload_art(st);
@@ -547,6 +550,12 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     let mut saves: Vec<(SaveFolder, Summary)> =
         folders.into_iter().filter_map(|f| save::summary(&f.path).map(|s| (f, s))).collect();
     saves.sort_by(|a, b| b.1.modified.cmp(&a.1.modified));
+    // the save picked stays picked by its folder, wherever the new order puts it (a save just
+    // written moves to the top; the row number would then pick another)
+    let picked = st.saves.get(st.selected).map(|(f, _)| f.path.clone());
+    if let Some(k) = picked.and_then(|p| saves.iter().position(|(f, _)| f.path == p)) {
+        st.selected = k;
+    }
     st.saves = saves;
     let shots = st.shots.lock().unwrap().clone();
     let rows: Vec<SaveRow> = st
@@ -784,7 +793,7 @@ fn fill_editor(ui: &AppWindow, st: &mut State) {
         nfo.string("AREANAME").unwrap_or_default(),
         save.game.title()
     )));
-    let backups = backups_of(st).join(save.folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());
+    let backups = backups_of(st).join(save::backup_name(&save.folder));
     app.set_backup_path(s(backups.display().to_string()));
 
     let cat = st.catalog();
@@ -1135,9 +1144,10 @@ fn item_rows(st: &mut State, items: &[Struct], original: &[Struct]) -> Vec<ItemR
             // the same item in the save as opened, by its object id (by place where it has
             // none): removing one row no longer marks every row under it
             let id = it.int("ObjectId");
+            let same_id = |o: &&Struct| o.int("ObjectId") == id;
             let was = match id {
-                Some(_) => original.iter().find(|o| o.int("ObjectId") == id),
-                None => original.get(i),
+                Some(_) if original.iter().filter(same_id).count() == 1 => original.iter().find(same_id),
+                _ => original.get(i),
             };
             let changed = was.map_or(true, |o| o != it);
             ItemRow {
@@ -1876,13 +1886,15 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
     let all = kse_core::questdb::milestones_ref(st.game);
     // where the save is: the chapter whose areas hold its area; on the ship (or anywhere no
     // chapter names), at the last stop played
-    let module = st.save.as_ref().map(|s| s.module_name().to_string()).unwrap_or_default();
+    let module = st.save.as_ref().map(|s| s.place()).unwrap_or_default();
     let in_chapter = kse_core::questdb::chapter_of_module(st.game, &module);
     let here_k = in_chapter.and_then(|i| main.iter().position(|c| c.index == i as i32));
-    let aboard = here_k.is_none();
+    // a side chapter's own place (Yavin Station) is not the ship
+    let at_side = in_chapter.filter(|i| chapters.iter().any(|c| c.side && c.index == *i as i32)).map(|i| all[i].0.to_string()).filter(|p| !p.eq_ignore_ascii_case("Ebon Hawk"));
+    let aboard = here_k.is_none() && at_side.is_none();
     let here_k = here_k.or_else(|| main.iter().rposition(|c| c.played)).or(if main.is_empty() { None } else { Some(0) });
     // the chapter the save is in: the one it stands in, unplayed. Begun: a chapter not played
-    // that the save has been to (its quests are in the journal, or its star map found); a
+    // that the save has been to (one of its areas, or KotOR II's marker for it); a
     // free planet left half done is begun, not the save's place.
     let begun = begun_chapters(st);
     let current_k = here_k.filter(|k| !main[*k].played);
@@ -1968,6 +1980,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         )
     };
     let here_text = match here_k.map(|k| &stops[k]) {
+        _ if at_side.is_some() => format!("At {}", at_side.clone().unwrap_or_default()),
         Some(h) if aboard => format!("Aboard the Ebon Hawk, last at {}", h.planet),
         Some(h) => format!("On {}", h.planet),
         None => String::new(),
@@ -2138,6 +2151,8 @@ fn fill_globals(ui: &AppWindow, st: &State) {
     let orig = st.original.as_ref().and_then(|o| o.globals.as_ref()).map(|g| globals::list(&g.root)).unwrap_or_default();
     let other = st.compare.as_ref().map(|(_, l)| l);
     let (query, only) = (&st.global_filter.0, st.global_filter.1);
+    ui.global::<App>().set_globals_query(s(query));
+    ui.global::<App>().set_globals_changed_only(only);
     let mut rows = Vec::new();
     for (pos, v) in all.iter().enumerate() {
         let changed = orig.get(pos).map_or(false, |o| o.value != v.value);
@@ -3492,24 +3507,51 @@ macro_rules! on {
     ($ui:expr, $state:expr, $name:ident, |$u:ident, $st:ident $(, $arg:ident : $ty:ty)*| $body:block) => {{
         let weak = $ui.as_weak();
         let state = $state.clone();
+        #[allow(unused_variables, unused_mut)]
+        let handler = Rc::new(move |$u: AppWindow, $st: &mut State $(, $arg: $ty)*| $body);
         $ui.global::<App>().$name(move |$($arg: $ty),*| {
-            if let Some($u) = weak.upgrade() {
-                let $st = &mut *state.borrow_mut();
-                $body
-            }
+            let h = handler.clone();
+            run_handler(weak.clone(), state.clone(), Rc::new(move |u: AppWindow, st: &mut State| h(u, st $(, $arg.clone())*)));
         });
     }};
+}
+
+/// Runs a handler with the state. A handler can come while another still holds the state:
+/// a result from a background thread delivered while a folder dialog is open, whose modal loop
+/// runs the window's events. Borrowing it then ended the program (2026-11-06 audit); the
+/// handler now waits its turn.
+fn run_handler(weak: slint::Weak<AppWindow>, state: Shared, f: Rc<dyn Fn(AppWindow, &mut State)>) {
+    let Some(u) = weak.upgrade() else { return };
+    let busy = match state.try_borrow_mut() {
+        Ok(mut st) => {
+            f(u, &mut st);
+            false
+        }
+        Err(_) => true,
+    };
+    if busy {
+        slint::Timer::single_shot(std::time::Duration::from_millis(40), move || run_handler(weak, state, f));
+    }
 }
 
 /// A most Health (or Force) typed that the creature cannot have at its level: the two values
 /// typed, the class levels at which it can (class index, level; None: at no level), and the
 /// nearest it can have without a level change.
 struct PoolAsk {
+    // the member it was asked for: a click on another member can land as the pop-up opens
+    who: Who,
     force: bool,
     now: i64,
     most: i64,
     levels: Option<Vec<(usize, i64)>>,
     nearest: i64,
+}
+
+/// Picks member `who` again (an answer to a pop-up asked for one member acts on that one).
+fn pick_who(st: &mut State, who: Who) {
+    if let Some(k) = st.whos.iter().position(|w| *w == who) {
+        st.who = k;
+    }
 }
 
 /// The lowest and highest most Health (force: most Force) the creature can have at its
@@ -3620,7 +3662,7 @@ fn ask_pool(ui: &AppWindow, st: &mut State, force: bool, now: i64, most: i64) ->
         }
     };
     app.set_pool_set_label(s(format!("Set to {}", thousands(nearest))));
-    st.pool_ask = Some(PoolAsk { force, now, most, levels, nearest });
+    st.pool_ask = Some(PoolAsk { who: st.who(), force, now, most, levels, nearest });
     app.set_overlay(13);
     true
 }
@@ -3658,7 +3700,7 @@ fn edit_who(ui: &AppWindow, st: &mut State, key: &str, f: impl Fn(&mut Struct)) 
 /// (2026-10-24, the maintainer).
 fn needs_game(ui: &AppWindow, st: &State) -> bool {
     if st.read_only {
-        let why = st.save.as_ref().and_then(|s| read_only_reason(&s.folder)).unwrap_or("It is read only.");
+        let why = st.save.as_ref().and_then(|s| read_only_reason(&s.folder).or_else(|| s.module_problem())).unwrap_or("It is read only.");
         message(ui, "This save cannot be changed", why);
         return true;
     }
@@ -3779,6 +3821,13 @@ fn search_items(ui: &AppWindow, st: &mut State) {
         }
     }
     st.picker_ids = ids;
+    // the list stops at 200 rows: say so, or most items look missing
+    let more = rows.len() >= 200;
+    ui.global::<App>().set_overlay_note(s(if more {
+        "Every item the game has, mods included. The first 200 that match are shown: type part of a name to narrow the list; click an item to add one."
+    } else {
+        "Every item the game has, mods included. Type to narrow the list; click an item to add one."
+    }));
     ui.global::<App>().set_picker(model(rows));
 }
 
@@ -4104,7 +4153,9 @@ fn main() {
     on!(ui, state, on_select_who, |u, st, i: i32| {
         st.who = i.max(0) as usize;
         st.feat_query.clear();
+        u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         st.power_query.clear();
+        u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         fill_editor(&u, st);
     });
     on!(ui, state, on_select_tab, |u, st, i: i32| {
@@ -4279,6 +4330,7 @@ fn main() {
     });
     on!(ui, state, on_add_feat, |u, st, id: i32| {
         st.feat_query.clear();
+        u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         edit_who(&u, st, &format!("feat{}", id), |c| {
             creature::add_feat(c, id as i64);
         });
@@ -4290,6 +4342,7 @@ fn main() {
     });
     on!(ui, state, on_add_power, |u, st, id: i32| {
         st.power_query.clear();
+        u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         let Some(cat) = st.catalog() else { return };
         edit_who(&u, st, &format!("power{}", id), move |c| {
             creature::add_power(c, id as i64, &|k| cat.is_force_class(k));
@@ -4608,6 +4661,11 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_finish_quest, |u, st, id: i32| {
+        // refused at once on a save that cannot be changed (it said "Finished" before)
+        if st.read_only {
+            needs_game(&u, st);
+            return;
+        }
         let Some(tag) = st.quest_pick.clone() else { return };
         // As if played: every step on the way to this ending first, then the ending itself.
         let mut skipped = Vec::new();
@@ -4757,6 +4815,7 @@ fn main() {
         }
         u.global::<App>().set_overlay(0);
         let Some(a) = st.pool_ask.take() else { return };
+        pick_who(st, a.who);
         set_pool(&u, st, a.force, a.now, a.nearest);
     });
     on!(ui, state, on_pool_level, |u, st| {
@@ -4765,6 +4824,7 @@ fn main() {
         }
         u.global::<App>().set_overlay(0);
         let Some(a) = st.pool_ask.take() else { return };
+        pick_who(st, a.who);
         let Some(levels) = a.levels else { return };
         let Some(cat) = st.catalog() else { return };
         let Some(have) = st.save.as_ref().and_then(|s| s.creature(st.who())).map(creature::classes) else { return };
@@ -5131,6 +5191,8 @@ fn main() {
     on!(ui, state, on_do_back, |u, st| {
         if needs_game(&u, st) { return; }
         let Some(prepared) = take_story_preview(&u, st, true) else { return };
+        // the story's XP is the skip's or the return's now: stage clicks start counting again
+        st.quest_xp.clear();
         let party = st.save.as_ref().map(|s| s.party_members());
         st.save = Some(prepared.save);
         if st.save.as_ref().map(|s| s.party_members()) != party {
@@ -5151,6 +5213,8 @@ fn main() {
     on!(ui, state, on_do_skip, |u, st| {
         if needs_game(&u, st) { return; }
         let Some(prepared) = take_story_preview(&u, st, false) else { return };
+        // the story's XP is the skip's or the return's now: stage clicks start counting again
+        st.quest_xp.clear();
         let party = st.save.as_ref().map(|s| s.party_members());
         st.save = Some(prepared.save);
         if st.save.as_ref().map(|s| s.party_members()) != party {
@@ -5504,6 +5568,8 @@ fn main() {
                     }
                     u.global::<App>().set_overlay_note(s("Added. Add more, or close."));
                     refresh_after_edit(&u, st);
+                } else {
+                    u.global::<App>().set_overlay_note(s("That item could not be read from the game's files, so nothing was added."));
                 }
             }
             Target::Container => {
@@ -5515,7 +5581,10 @@ fn main() {
                     .and_then(|g| area::container(&g.root, list, index))
                     .and_then(|c| c.list("ItemList"))
                     .and_then(|l| l.first().cloned());
-                let Some(mut item) = new_item(st, id.max(0) as usize, like.as_ref()) else { return };
+                let Some(mut item) = new_item(st, id.max(0) as usize, like.as_ref()) else {
+                    u.global::<App>().set_overlay_note(s("That item could not be read from the game's files, so nothing was added."));
+                    return;
+                };
                 if let Some(save) = st.save.as_mut() {
                     // From the module's counter, as for every other new object.
                     let next = save.new_object_id();

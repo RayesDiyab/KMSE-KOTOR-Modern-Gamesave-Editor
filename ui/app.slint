@@ -26,23 +26,37 @@ export { Theme, App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, D
 component Overlay inherits Rectangle {
     in property <length> panel-width: 760px;
     in property <length> panel-height: 620px;
+    // Escape does what the pop-up's Cancel or Close does (2026-11-06: no pop-up answered it)
+    callback escape;
+    escape => { App.close-overlay(); }
     background: Theme.scrim;
-    TouchArea { }
-    panel := Rectangle {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        width: min(panel-width, parent.width - 80px);
-        height: min(panel-height, parent.height - 80px);
-        background: Theme.panel;
-        border-width: 1px;
-        border-color: Theme.edge;
-        border-radius: 12px;
-        Rectangle {
-            x: 32px;
-            y: 28px;
-            width: parent.width - 64px;
-            height: parent.height - 56px;
-            @children
+    // around everything, so Escape typed in a box inside reaches it too
+    keys := FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.escape();
+                return accept;
+            }
+            return reject;
+        }
+        TouchArea { }
+        panel := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(root.panel-width, parent.width - 80px);
+            height: min(root.panel-height, parent.height - 80px);
+            background: Theme.panel;
+            border-width: 1px;
+            border-color: Theme.edge;
+            border-radius: 12px;
+            Rectangle {
+                x: 32px;
+                y: 28px;
+                width: parent.width - 64px;
+                height: parent.height - 56px;
+                @children
+            }
         }
     }
 }
@@ -265,17 +279,18 @@ export component AppWindow inherits Window {
             spacing: 10px;
             Text { text: App.overlay-title; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; }
             Note { text: App.overlay-note; font-size: 15px * Theme.ts; }
+            // the categories share the row (at 1280 by 780 the last ran out of the pop-up)
             if App.overlay == 1 && App.picker-tabs.length > 0: HorizontalLayout {
                 spacing: 6px;
-                alignment: start;
                 for t[i] in App.picker-tabs: Rectangle {
                     height: 34px;
-                    width: tt.preferred-width + 24px;
+                    min-width: tt.preferred-width + 12px;
+                    horizontal-stretch: 1;
                     border-radius: 5px;
                     border-width: 1px;
                     border-color: i == App.picker-tab ? Theme.accent : Theme.edge;
                     background: i == App.picker-tab ? Theme.selected : pt2.has-hover ? Theme.hover : Theme.field;
-                    tt := Text { text: t; font-family: Theme.list-font; font-size: 15px * Theme.ts; color: i == App.picker-tab ? Theme.text : Theme.soft; }
+                    tt := Text { text: t; font-family: Theme.list-font; font-size: 14px * Theme.ts; color: i == App.picker-tab ? Theme.text : Theme.soft; }
                     pt2 := TouchArea { mouse-cursor: pointer; clicked => { App.select-picker-tab(i); } }
                 }
             }
@@ -544,6 +559,7 @@ export component AppWindow inherits Window {
     // of what the level now allows, one of what the new level allows, a gold mark where the
     // typed value falls), then the nearest it can be or the level that reaches it.
     if App.overlay == 13: Overlay {
+        escape => { App.pool-cancel(); }
         panel-width: 760px;
         panel-height: App.pool-chart ? 470px : 300px;
         VerticalLayout {

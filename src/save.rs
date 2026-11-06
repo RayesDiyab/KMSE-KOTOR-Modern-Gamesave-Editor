@@ -144,15 +144,20 @@ pub struct Save {
 /// Why a save is refused when a write into it was cut off (interrupted_write).
 pub const INTERRUPTED: &str = "The editor was stopped while it wrote this save, so its files may be part old and part new. Nothing was changed by opening it. Copy the files of its latest backup (Save Editor Backup, in the game's folder) over this save folder, then open it again. Files left from the write:";
 
-/// The files a write leaves only while it runs (`*.kmrp-new`, the new file not yet in place;
-/// `*.kmrp-old`, the old one waiting to be removed): any of them in a folder means a write was
-/// cut off part way (the program ended, the power failed). Named, or None.
+/// The files a write leaves only while it runs: `*.kmrp-new`, a new file not yet in place, and
+/// `*.kmrp-old`, an old one waiting to be removed. A write cut off part way (the program ended,
+/// the power failed) leaves a new file not yet in place, or an old one whose file is gone. An
+/// old one beside its file is only clean-up that failed after a finished write (a file held
+/// by a virus scanner), which the next write replaces. Named, or None.
 pub fn interrupted_write(folder: &Path) -> Option<String> {
-    let left: Vec<String> = fs::read_dir(folder)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .filter(|n| n.ends_with(".kmrp-new") || n.ends_with(".kmrp-old"))
+    let names: Vec<String> = fs::read_dir(folder).ok()?.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    let left: Vec<String> = names
+        .iter()
+        .filter(|n| {
+            n.ends_with(".kmrp-new")
+                || n.strip_suffix(".kmrp-old").map_or(false, |base| !names.iter().any(|x| x.len() > base.len() && x[..base.len()].eq_ignore_ascii_case(base) && x[base.len()..].starts_with('.') && !x.ends_with(".kmrp-old") && !x.ends_with(".kmrp-new")))
+        })
+        .cloned()
         .collect();
     (!left.is_empty()).then(|| left.join(", "))
 }
@@ -1005,6 +1010,21 @@ impl Save {
         Ok(())
     }
 
+    /// The area a trip waiting in the current module's queue leads to (Skip Ahead, Go Back
+    /// and Travel Here queue one; the game makes it as the save loads), by module name.
+    pub fn queued_trip(&self) -> Option<String> {
+        let q = self.ifo.as_ref()?.root.list("EventQueue")?;
+        let e = q.iter().find(|e| e.int("EventId") == Some(26))?;
+        let first = e.child("EventData")?.list("StringList")?.first()?;
+        let name = first.string("Parameter")?;
+        (!name.is_empty()).then(|| name.to_ascii_lowercase())
+    }
+
+    /// Where the save will be once the game runs it: a queued trip's area, else the one it is in.
+    pub fn place(&self) -> String {
+        self.queued_trip().unwrap_or_else(|| self.module_name.to_ascii_lowercase())
+    }
+
     /// Whether SAVEGAME.sav holds a stored copy of `module` (the player has been there).
     pub fn has_module(&self, module: &str) -> bool {
         self.archive.resources.iter().any(|r| r.kind == RES_TYPE_SAV && r.name.eq_ignore_ascii_case(module))
@@ -1311,13 +1331,19 @@ pub fn next_save_folder(folder: &Path) -> Option<PathBuf> {
     (!target.exists()).then_some(target)
 }
 
-fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
+/// The name of a save's folder of backups, inside the backups folder: the save's folder name.
+/// KotOR II's local and Steam Cloud saves share their folder names ("000001 - QuickSave") and
+/// the backups folder, so a cloud save's is told apart by name, not by time alone.
+pub fn backup_name(folder: &Path) -> String {
     let mut name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "save".into());
-    // KotOR II's local and Steam Cloud saves share their folder names ("000001 - QuickSave")
-    // and their backups' folder: told apart by name, not by time alone
     if folder.ancestors().any(|a| a.file_name().map_or(false, |n| n.to_string_lossy().eq_ignore_ascii_case("cloudsaves"))) {
         name.push_str(" (Steam Cloud)");
     }
+    name
+}
+
+fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
+    let name = backup_name(folder);
     let stamp = timestamp();
     let mut path = backups.join(&name).join(&stamp);
     let mut n = 2;
