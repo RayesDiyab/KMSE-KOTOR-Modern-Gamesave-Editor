@@ -326,15 +326,31 @@ export component IconButton inherits Rectangle {
     callback clicked;
     height: 44px;
     // as wide as the icon and words need, whatever the layout around it has to spare
-    width: root.text == "" ? self.height : 16px + 22px + 10px + label.preferred-width + 18px;
+    width: root.text == "" ? self.height : 16px + 22px + 10px + measure.preferred-width + 18px;
     border-radius: 6px;
     border-width: touch.has-hover ? 2px : 1px;
     border-color: touch.has-hover ? Theme.hover-edge : lit ? Theme.accent : Theme.edge;
     background: touch.has-hover ? Theme.hover : Theme.field;
-    HorizontalLayout {
-        padding-left: root.text == "" ? 0 : 16px;
-        padding-right: root.text == "" ? 0 : 18px;
-        spacing: root.text == "" ? 0 : 10px;
+    // the words' width, measured apart from the layout
+    measure := Text { visible: false; text: root.text; font-family: Theme.list-font; font-size: 18px * Theme.ts; }
+    // the icon alone: placed in the middle itself (2026-11-06, the maintainer: in a layout with
+    // an empty label beside it the save button's disk sat 6 px left of centre)
+    if root.text == "": Path {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: root.icon-size;
+        height: root.icon-size;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        stroke: touch.has-hover || lit ? Theme.accent : Theme.soft;
+        stroke-width: 1.8px;
+        stroke-line-cap: round;
+        commands: root.icon;
+    }
+    if root.text != "": HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 18px;
+        spacing: 10px;
         alignment: center;
         VerticalLayout {
             alignment: center;
@@ -349,8 +365,7 @@ export component IconButton inherits Rectangle {
                 commands: root.icon;
             }
         }
-        label := Text {
-            visible: root.text != "";
+        Text {
             text: root.text;
             font-family: Theme.list-font;
             font-size: 18px * Theme.ts;

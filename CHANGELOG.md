@@ -6,6 +6,15 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The Timeline zooms and moves** (2026-11-06, the maintainer: "make the timeline zoomable
+  and movable with mouse"). The wheel zooms in and out about the pointer, from the whole map
+  to four times its size; dragging an empty part of it moves it, never past its edges; a
+  double-click, or Fit, shows all of it again, as does opening another save. Buttons for
+  out, in and Fit sit in its bottom right corner. A planet clicked while zoomed opens as
+  before. The ring a tag of many saves opens into stays inside the map (sixteen saves at the
+  Endar Spire ran off its top). The rename button's disk is centred: an empty label beside
+  it had pushed it 6 px left. Looked at in the program at 1600 by 900 and 1280 by 780 in
+  both games; in the game, **untested** (nothing here changes what is written).
 - **Timeline is its own tab** (2026-11-06, the maintainer's review). The galaxy map moved out
   of Story into a Timeline tab beside it, with no section tabs above it, so the map is about a
   fifth taller (380 px to 453 px at 1600 by 900). Story now holds Quests and Planets, Pazaak, and opens on Quests. The

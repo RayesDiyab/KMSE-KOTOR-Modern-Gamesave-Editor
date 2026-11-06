@@ -1553,13 +1553,43 @@ component GalaxySection inherits Rectangle {
             background: root.space;
             border-width: 1px;
             border-color: Theme.dark ? Theme.panel-edge : #2a3d5c;
-            // where the stops stand: inside margins that leave room for the names under them
-            property <length> unit: min(70px * Theme.ts, max(34px, self.height / 6));
-            property <length> px: max(70px * Theme.ts, self.unit * 1.2);
-            property <length> pt: self.unit * 0.85 + 14px * Theme.ts;
-            property <length> pb: self.unit * 0.6 + 34px * Theme.ts;
-            property <length> iw: self.width - 2 * self.px;
-            property <length> ih: self.height - self.pt - self.pb;
+            // where the stops stand: inside margins that leave room for the names under them,
+            // the box (bx, by, bw, bh) the whole map fits at zoom 1
+            property <length> base-unit: min(70px * Theme.ts, max(34px, self.height / 6));
+            property <length> bx: max(70px * Theme.ts, self.base-unit * 1.2);
+            property <length> by: self.base-unit * 0.85 + 14px * Theme.ts;
+            property <length> bb: self.base-unit * 0.6 + 34px * Theme.ts;
+            property <length> bw: self.width - 2 * self.bx;
+            property <length> bh: self.height - self.by - self.bb;
+            // Zoomed with the wheel about the pointer and moved by dragging (2026-11-06, the
+            // maintainer: "make the timeline zoomable and movable with mouse"): the box grows
+            // by zoom, from 1 (all of it) to 4, and pan moves it, never past its own edges.
+            property <float> zoom: 1;
+            property <length> pan-x: 0;
+            property <length> pan-y: 0;
+            property <length> iw: self.bw * self.zoom;
+            property <length> ih: self.bh * self.zoom;
+            property <length> px: self.bx + max(self.bw - self.iw, min(0px, self.pan-x));
+            property <length> pt: self.by + max(self.bh - self.ih, min(0px, self.pan-y));
+            // the globes grow more slowly than the distances between them
+            property <length> unit: self.base-unit * sqrt(self.zoom);
+            // zoom by f, keeping the point under (mx, my) where it is
+            function zoom-at(mx: length, my: length, f: float) {
+                let ux = (mx - self.px) / self.iw;
+                let uy = (my - self.pt) / self.ih;
+                let z = max(1, min(4, self.zoom * f));
+                self.zoom = z;
+                self.pan-x = max(self.bw - self.bw * z, min(0px, mx - ux * self.bw * z - self.bx));
+                self.pan-y = max(self.bh - self.bh * z, min(0px, my - uy * self.bh * z - self.by));
+            }
+            function fit() {
+                self.zoom = 1;
+                self.pan-x = 0;
+                self.pan-y = 0;
+            }
+            // another save opened (from a tag on this map, the page stays): all of its map
+            property <string> opened: App.context-line;
+            changed opened => { self.fit(); }
             // the stars, and a faint glow where the galaxy's core is
             Image {
                 width: parent.width;
@@ -1586,6 +1616,36 @@ component GalaxySection inherits Rectangle {
                 height: 22px;
                 Rectangle { x: c.x == 0 ? 0 : parent.width - self.width; y: c.y == 0 ? 0 : parent.height - 2px; width: parent.width; height: 2px; background: Theme.accent.with-alpha(0.55); }
                 Rectangle { x: c.x == 0 ? 0 : parent.width - 2px; y: c.y == 0 ? 0 : parent.height - self.height; width: 2px; height: parent.height; background: Theme.accent.with-alpha(0.55); }
+            }
+
+            // the drag and the wheel, under everything that can be clicked: a press on a planet
+            // opens it, a press anywhere else moves the map
+            drag := TouchArea {
+                property <length> start-x;
+                property <length> start-y;
+                mouse-cursor: self.pressed && map.zoom > 1.001 ? MouseCursor.grabbing : map.zoom > 1.001 ? MouseCursor.grab : MouseCursor.default;
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) {
+                        self.start-x = map.px - map.bx;
+                        self.start-y = map.pt - map.by;
+                    }
+                }
+                moved => {
+                    map.pan-x = max(map.bw - map.iw, min(0px, self.start-x + self.mouse-x - self.pressed-x));
+                    map.pan-y = max(map.bh - map.ih, min(0px, self.start-y + self.mouse-y - self.pressed-y));
+                }
+                scroll-event(e) => {
+                    if (e.delta-y > 0) {
+                        map.zoom-at(self.mouse-x, self.mouse-y, 1.25);
+                        return accept;
+                    }
+                    if (e.delta-y < 0) {
+                        map.zoom-at(self.mouse-x, self.mouse-y, 1 / 1.25);
+                        return accept;
+                    }
+                    return reject;
+                }
+                double-clicked => { map.fit(); }
             }
 
             // the lanes: faint ahead, bands of light behind; each path in the box of its curve
@@ -1821,10 +1881,12 @@ component GalaxySection inherits Rectangle {
             // a marker of several saves, opened: the ring
             ring := Rectangle {
                 property <TimelineGroup> g: root.shown-group >= 0 && root.shown-group < App.tl-groups.length ? App.tl-groups[root.shown-group] : { x: 0, y: 0, count: 0, start: 0 };
-                property <length> cx: map.px + g.x * map.iw + map.unit * 0.42 + 16px;
-                property <length> cy: map.pt + g.y * map.ih - map.unit * 0.62 + 9px;
-                property <length> r: root.ring(g.count);
+                // inside the map whatever stop it opens at, and never taller than the map
+                // (2026-11-06: sixteen saves at the Endar Spire ran off the map's top)
+                property <length> r: min(root.ring(g.count), map.height / 2 - 34px);
                 property <length> reach: self.r + 26px;
+                property <length> cx: max(self.reach + 6px, min(map.width - self.reach - 6px, map.px + g.x * map.iw + map.unit * 0.42 + 16px));
+                property <length> cy: max(self.reach + 6px, min(map.height - self.reach - 6px, map.pt + g.y * map.ih - map.unit * 0.62 + 9px));
                 visible: root.spread > 0.01 && g.count > 1;
                 x: self.cx - self.reach;
                 y: self.cy - self.reach;
@@ -1881,6 +1943,56 @@ component GalaxySection inherits Rectangle {
                     background: root.save-green;
                     Text { text: ring.g.count; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: #06121e; }
                 }
+            }
+
+            // the zoom: out, in, and back to all of the map; bottom right, inside the corners
+            Rectangle {
+                x: map.width - self.width - 36px;
+                y: map.height - self.height - 12px;
+                width: zoom-row.preferred-width + 8px;
+                height: 30px * Theme.ts + 8px;
+                border-radius: 7px;
+                background: root.space.with-alpha(0.8);
+            zoom-row := HorizontalLayout {
+                x: 4px;
+                y: 4px;
+                width: self.preferred-width;
+                height: 30px * Theme.ts;
+                spacing: 6px;
+                // how, beside the buttons (in the note above it took a third line from the map);
+                // left out where the map is narrow, where it covered a planet's name
+                if map.width >= 1300px: Text {
+                    text: "  Scroll to zoom, drag to move";
+                    font-family: Theme.body-font;
+                    font-size: 12px * Theme.ts;
+                    color: root.ink-faint;
+                    vertical-alignment: center;
+                }
+                if map.width >= 1300px: Rectangle { width: 2px; }
+                for b[i] in ["−", "+", "Fit"]: Rectangle {
+                    property <bool> on: i == 0 ? map.zoom > 1.001 : i == 1 ? map.zoom < 3.999 : map.zoom > 1.001;
+                    width: i == 2 ? zt.preferred-width + 20px : self.height;
+                    border-radius: 5px;
+                    border-width: 1px;
+                    border-color: zb.has-hover && self.on ? root.hover-gold : root.lane-blue.with-alpha(self.on ? 0.6 : 0.25);
+                    background: root.space.with-alpha(0.85);
+                    zt := Text {
+                        text: b;
+                        font-family: i == 2 ? Theme.list-font : Theme.body-font;
+                        font-size: (i == 2 ? 13px : 18px) * Theme.ts;
+                        color: !parent.on ? root.ink-faint : zb.has-hover ? root.hover-gold : root.ink-text;
+                    }
+                    zb := TouchArea {
+                        enabled: parent.on;
+                        mouse-cursor: parent.on ? pointer : default;
+                        clicked => {
+                            if (i == 0) { map.zoom-at(map.width / 2, map.height / 2, 1 / 1.5); }
+                            if (i == 1) { map.zoom-at(map.width / 2, map.height / 2, 1.5); }
+                            if (i == 2) { map.fit(); }
+                        }
+                    }
+                }
+            }
             }
 
             // a stop pointed at: its chapter, above it (below it near the top)
@@ -1954,9 +2066,9 @@ component GalaxySection inherits Rectangle {
             if root.hover-save >= 0 && root.hover-save < App.tl-saves.length: card := Rectangle {
                 property <TimelineSave> v: App.tl-saves[root.hover-save];
                 property <TimelineGroup> g: App.tl-groups[v.group];
-                property <length> cx: map.px + g.x * map.iw + map.unit * 0.42 + 16px;
-                property <length> cy: map.pt + g.y * map.ih - map.unit * 0.62 + 9px;
-                property <length> side: g.count > 1 ? root.ring(g.count) + 34px : 30px;
+                property <length> cx: g.count > 1 ? ring.cx : map.px + g.x * map.iw + map.unit * 0.42 + 16px;
+                property <length> cy: g.count > 1 ? ring.cy : map.pt + g.y * map.ih - map.unit * 0.62 + 9px;
+                property <length> side: g.count > 1 ? ring.r + 34px : 30px;
                 Rectangle {
                     width: 430px * Theme.ts;
                     height: 146px * Theme.ts;
