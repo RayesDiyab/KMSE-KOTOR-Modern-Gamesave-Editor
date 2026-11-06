@@ -854,7 +854,7 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
     let before = Before::of(save);
     let met: Vec<bool> = chapters.iter().map(|m| master_met(save, m)).collect();
     // Read before the chapters change the journal.
-    let played = chapters_played(save.game, &save.quests());
+    let played = chapters_played_in(save);
     let mut run: Vec<String> = milestones_ref(save.game).iter().zip(&played).filter(|(_, p)| **p).map(|((planet, _), _)| planet.to_string()).collect();
     run.extend(chapters.iter().filter_map(|m| m.get("planet").and_then(|p| p.as_str()).map(str::to_string)));
     // What the game itself took out of the journal stays out (the chapters already played too).
@@ -1153,31 +1153,51 @@ pub fn chapters_played(game: Game, quests: &[(String, i64)]) -> Vec<bool> {
             break;
         }
     }
-    // Outside the free planets the story is one line, so a chapter played means every chapter
-    // before it on that line was played, though the game took its quests out of the journal (a
-    // KotOR 1 save on Korriban had no Dantooine entry left). A chapter after the free planets
-    // means all of them, except KotOR 1's Leviathan, which comes after the third.
+    let known = played.clone();
+    for (i, k) in known.iter().enumerate() {
+        if *k {
+            line_before(game, &mut played, i);
+        }
+    }
+    played
+}
+
+/// Outside the free planets the story is one line, so being past chapter `i` (milestone index)
+/// means every chapter before it on that line was played, though the game took its quests out
+/// of the journal (a KotOR 1 save on Korriban had no Dantooine entry left). A chapter after the
+/// free planets means all of them, except KotOR 1's Leviathan, which comes after the third.
+fn line_before(game: Game, played: &mut [bool], i: usize) {
+    let all = milestones_ref(game);
     let order_of = |m: &serde_json::Value| m.get("order").and_then(|v| v.as_i64()).unwrap_or(99);
     let side = |m: &serde_json::Value| m.get("side_chapter").and_then(|v| v.as_bool()) == Some(true);
+    let Some((planet, m)) = all.get(i) else { return };
+    if side(m) {
+        return;
+    }
     let free_max = all.iter().filter(|(p, _)| is_free(game, p)).map(|(_, m)| order_of(m)).max().unwrap_or(0);
-    let known = played.clone();
-    for (i, (planet, m)) in all.iter().enumerate() {
-        if !known[i] || side(m) {
+    let after_free = order_of(m) > free_max && !(game == Game::K1 && planet.eq_ignore_ascii_case("Leviathan"));
+    for (j, (other, o)) in all.iter().enumerate() {
+        if side(o) || order_of(o) >= order_of(m) {
             continue;
         }
-        let after_free = order_of(m) > free_max && !(game == Game::K1 && planet.eq_ignore_ascii_case("Leviathan"));
-        for (j, (other, o)) in all.iter().enumerate() {
-            if side(o) || order_of(o) >= order_of(m) {
-                continue;
-            }
-            let free = is_free(game, other);
-            // KotOR 1's Leviathan sits after the free planets in the files, but before the
-            // fourth in the game: what comes after it says nothing about it unless after_free
-            let leviathan = game == Game::K1 && other.eq_ignore_ascii_case("Leviathan");
-            if (!free && !leviathan) || after_free {
-                played[j] = true;
+        // KotOR 1's Leviathan sits after the free planets in the files, but before the fourth in
+        // the game: what comes after it says nothing about it unless after_free
+        let leviathan = game == Game::K1 && other.eq_ignore_ascii_case("Leviathan");
+        if (!is_free(game, other) && !leviathan) || after_free {
+            if let Some(x) = played.get_mut(j) {
+                *x = true;
             }
         }
+    }
+}
+
+/// Which chapters a save has played: chapters_played by its journal, and every chapter before
+/// the one it stands in on the story's line (a KotOR II save on Telos has finished Peragus,
+/// though the journal may not reach Peragus's end).
+pub fn chapters_played_in(save: &Save) -> Vec<bool> {
+    let mut played = chapters_played(save.game, &save.quests());
+    if let Some(here) = chapter_of_module(save.game, save.module_name()) {
+        line_before(save.game, &mut played, here);
     }
     played
 }
@@ -1292,17 +1312,29 @@ pub struct Route {
     pub kinds: Vec<u8>,
 }
 
+/// Whether a save has been to any of the chapter's own areas (milestone index `i`): `visited`
+/// is what the save keeps of the areas it has been to (Save::visited_modules) and the area it
+/// is in. A quest of the chapter's in the journal says less: KotOR II hands out a Nar Shaddaa
+/// quest on Telos.
+pub fn been_to(game: Game, i: usize, visited: &[String]) -> bool {
+    milestones_ref(game).get(i).map_or(false, |(_, m)| {
+        m.get("cleared").and_then(|c| c.as_array()).map_or(false, |c| {
+            c.iter().filter_map(|e| e.get("module").and_then(|v| v.as_str())).any(|x| visited.iter().any(|v| v.eq_ignore_ascii_case(x)))
+        })
+    })
+}
+
 /// The story's main chapters in the order this save plays them. Outside the free planets the
 /// story is one line. The free planets come in the order the save went to them: those done
-/// first (the game's flag, or the chapter played), then those begun, each in the order their
-/// own quests first appear in the journal, which keeps new entries at its end; then the ones
-/// not yet visited in the order of `plan` (planet names; the timeline's order without one).
-/// `plan` also reorders the done and the begun among themselves, where the journal guessed
-/// wrong. KotOR 1's Leviathan comes after the third free planet, as the game plays it (the
-/// capture starts at the take-off after the third star map).
-pub fn story_route(game: Game, quests: &[(String, i64)], globals: &[crate::globals::Global], plan: &[String]) -> Route {
+/// first (the game's flag, or the chapter played), then those begun (the save has been to one
+/// of their areas, `visited`: see been_to), each in the order their own quests first appear in
+/// the journal, which keeps new entries at its end; then the ones not yet visited in the order
+/// of `plan` (planet names; the timeline's order without one). `plan` also reorders the done
+/// and the begun among themselves, where the journal guessed wrong. KotOR 1's Leviathan comes
+/// after the third free planet, as the game plays it (the capture starts at the take-off after
+/// the third star map). `played` is chapters_played_in, or chapters_played without a save.
+pub fn story_route(game: Game, quests: &[(String, i64)], played: &[bool], globals: &[crate::globals::Global], visited: &[String], plan: &[String]) -> Route {
     let all = milestones_ref(game);
-    let played = chapters_played(game, quests);
     let order_of = |m: &serde_json::Value| m.get("order").and_then(|v| v.as_i64()).unwrap_or(99);
     let side = |m: &serde_json::Value| m.get("side_chapter").and_then(|v| v.as_bool()) == Some(true);
     let mut mains: Vec<(i64, usize)> = all.iter().enumerate().filter(|(_, (_, m))| !side(m)).map(|(i, (_, m))| (order_of(m), i)).collect();
@@ -1330,7 +1362,7 @@ pub fn story_route(game: Game, quests: &[(String, i64)], globals: &[crate::globa
             members.iter().any(|i| owns[*i].contains(&t)) && owns.iter().filter(|o| o.contains(&t)).count() == 1
         });
         let done = flag_on || members.iter().all(|i| played.get(*i).copied().unwrap_or(false));
-        let kind = if done { 0 } else if at.is_some() || members.iter().any(|i| played.get(*i).copied().unwrap_or(false)) { 1 } else { 2 };
+        let kind = if done { 0 } else if members.iter().any(|i| played.get(*i).copied().unwrap_or(false) || been_to(game, *i, visited)) { 1 } else { 2 };
         let base = members.iter().map(|i| order_of(all[*i].1)).min().unwrap_or(99);
         groups.push((kind, at.unwrap_or(usize::MAX), 0, base, members, planets[0].to_string()));
     }

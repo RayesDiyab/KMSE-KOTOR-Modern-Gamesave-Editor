@@ -1285,7 +1285,7 @@ struct Chapter {
 fn skip_chapters(st: &State) -> Vec<Chapter> {
     let Some(save) = st.save.as_ref() else { return Vec::new() };
     let quests = save.quests();
-    let done = kse_core::questdb::chapters_played(st.game, &quests);
+    let done = kse_core::questdb::chapters_played_in(save);
     let titles = st.module_titles.get(&st.game);
     let mut out: Vec<Chapter> = kse_core::questdb::milestones_ref(st.game)
         .iter()
@@ -1345,31 +1345,32 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
     out
 }
 
-/// The chapters (milestone indices) the open save has begun and not played: any of their own
-/// quests in the journal, or, for a free planet, the game's flag that it is done.
+/// The chapters (milestone indices) the open save has begun and not played: it has been to one
+/// of their areas (questdb::been_to), or, for a free planet, the game's flag says it is done.
 fn begun_chapters(st: &State) -> Vec<i32> {
     let Some(save) = st.save.as_ref() else { return Vec::new() };
-    let quests = save.quests();
-    let played = kse_core::questdb::chapters_played(st.game, &quests);
+    let played = kse_core::questdb::chapters_played_in(save);
     let route = story_route(st);
-    let all = kse_core::questdb::milestones_ref(st.game);
-    (0..all.len())
+    let areas = been_areas(save);
+    (0..kse_core::questdb::milestones_ref(st.game).len())
         .filter(|i| !played.get(*i).copied().unwrap_or(false))
-        .filter(|i| {
-            let in_group = route.groups.iter().position(|g| g.contains(i)).map_or(false, |g| route.kinds[g] < 2);
-            let own = kse_core::questdb::chapter_quests(st.game, all[*i].0);
-            let shared = |t: &str| all.iter().enumerate().any(|(j, (p, _))| j != *i && kse_core::questdb::chapter_quests(st.game, p).iter().any(|(x, _)| x.eq_ignore_ascii_case(t)));
-            in_group || own.iter().any(|(t, _)| quests.iter().any(|(q, _)| q.eq_ignore_ascii_case(t)) && !shared(t))
-        })
+        .filter(|i| route.groups.iter().position(|g| g.contains(i)).map_or(false, |g| route.kinds[g] < 2) || kse_core::questdb::been_to(st.game, *i, &areas))
         .map(|i| i as i32)
         .collect()
+}
+
+/// The areas a save has been to: those it keeps (Save::visited_modules) and the one it is in.
+fn been_areas(save: &Save) -> Vec<String> {
+    let mut v = save.visited_modules();
+    v.push(save.module_name().to_ascii_lowercase());
+    v
 }
 
 /// The open save's route through the story (questdb::story_route) with the order picked.
 fn story_route(st: &State) -> kse_core::questdb::Route {
     let Some(save) = st.save.as_ref() else { return Default::default() };
     let globals = save.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default();
-    kse_core::questdb::story_route(st.game, &save.quests(), &globals, &st.route_plan)
+    kse_core::questdb::story_route(st.game, &save.quests(), &kse_core::questdb::chapters_played_in(save), &globals, &been_areas(save), &st.route_plan)
 }
 
 /// The Skip Ahead confirmation for chapter `i` (or, with st.skip_stage, a stage in it).
@@ -1685,9 +1686,9 @@ struct TimelineOther {
 /// its name. A free planet earlier on the route may still be open.
 fn furthest_played(save: &Save) -> Option<(usize, String)> {
     let quests = save.quests();
-    let done = kse_core::questdb::chapters_played(save.game, &quests);
+    let done = kse_core::questdb::chapters_played_in(save);
     let globals = save.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default();
-    let route = kse_core::questdb::story_route(save.game, &quests, &globals, &[]);
+    let route = kse_core::questdb::story_route(save.game, &quests, &done, &globals, &been_areas(save), &[]);
     let all = kse_core::questdb::milestones_ref(save.game);
     route.order.iter().filter(|i| done.get(**i).copied().unwrap_or(false)).last().map(|i| (*i, all[*i].0.to_string()))
 }
@@ -2265,8 +2266,8 @@ const MAP_STOPS: &[(Game, &str, f32, f32, &str, u8)] = &[
     (Game::K1, "Manaan", 0.86, 0.22, "Gui_Manaan_1", 0),
     (Game::K1, "Korriban", 0.55, 0.08, "Gui_korriban_1", 0),
     (Game::K1, "Leviathan", 0.66, 0.45, "", 1),
-    (Game::K1, "Unknown World", 0.48, 0.50, "Gui_unknown_1", 0),
-    (Game::K1, "Star Forge", 0.40, 0.90, "", 2),
+    (Game::K1, "Unknown World", 0.47, 0.56, "Gui_unknown_1", 0),
+    (Game::K1, "Star Forge", 0.37, 0.38, "", 2),
     (Game::K1, "Yavin Station", 0.97, 0.62, "GUI_yavin_1", 0),
     (Game::K1, "Ebon Hawk", 0.0, 0.0, "", 1),
     (Game::K2, "Peragus", 0.04, 0.20, "Gui_peragus", 0),

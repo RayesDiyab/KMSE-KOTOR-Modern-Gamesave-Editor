@@ -1544,7 +1544,7 @@ component GalaxySection inherits Rectangle {
             // with a margin for the glow (a path is cut at its own bounds), its view that size
             // in pixels (a path keeps its view's shape)
             for l in App.gm-lanes: Rectangle {
-                property <length> m: 14px;
+                property <length> m: 16px;
                 x: map.px + l.x * map.iw - self.m;
                 y: map.pt + l.y * map.ih - self.m;
                 width: max(1px, l.w * map.iw) + 2 * self.m;
@@ -1555,11 +1555,11 @@ component GalaxySection inherits Rectangle {
                 property <float> ih: (self.height - 2 * self.m) / 1px;
                 property <float> o: self.m / 1px;
                 property <string> d: "M " + (self.o + l.ax * self.iw) + " " + (self.o + l.ay * self.ih) + " Q " + (self.o + l.cx * self.iw) + " " + (self.o + l.cy * self.ih) + " " + (self.o + l.bx * self.iw) + " " + (self.o + l.by * self.ih);
-                for w[k] in (l.lit ? [18, 9, 3.5, 1.2] : [1.5]): Path {
+                for w[k] in (l.lit ? [24, 11, 4.5, 1.6] : [1.5]): Path {
                     width: parent.width; height: parent.height;
                     viewbox-width: parent.vw; viewbox-height: parent.vh;
                     commands: parent.d;
-                    stroke: !l.lit ? #8fb0d8.with-alpha(0.5) : k == 0 ? root.lane-blue.with-alpha(0.10) : k == 1 ? root.lane-blue.with-alpha(0.22) : k == 2 ? root.lane-core.with-alpha(0.75) : #f2fbff;
+                    stroke: !l.lit ? #8fb0d8.with-alpha(0.5) : k == 0 ? root.lane-blue.with-alpha(0.13) : k == 1 ? root.lane-blue.with-alpha(0.28) : k == 2 ? root.lane-core.with-alpha(0.85) : #f6fcff;
                     stroke-width: w * 1px;
                 }
             }

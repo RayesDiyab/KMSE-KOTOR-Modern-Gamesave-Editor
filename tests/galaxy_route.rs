@@ -41,14 +41,14 @@ fn flag(name: &str) -> Global {
 
 #[test]
 fn a_new_game_follows_the_timeline_with_the_leviathan_after_the_third_planet() {
-    let route = questdb::story_route(Game::K1, &[], &[], &[]);
+    let route = questdb::story_route(Game::K1, &[], &questdb::chapters_played(Game::K1, &[]), &[], &[], &[]);
     assert_eq!(
         names(Game::K1, &route.order),
         ["Endar Spire", "Taris", "Dantooine", "Tatooine", "Kashyyyk", "Manaan", "Leviathan", "Korriban", "Unknown World", "Star Forge"]
     );
     assert_eq!(route.groups.len(), 4);
     assert!(route.kinds.iter().all(|k| *k == 2), "nothing visited yet");
-    let k2 = questdb::story_route(Game::K2, &[], &[], &[]);
+    let k2 = questdb::story_route(Game::K2, &[], &questdb::chapters_played(Game::K2, &[]), &[], &[], &[]);
     let order = names(Game::K2, &k2.order);
     assert_eq!(order.first(), Some(&"Peragus"));
     assert_eq!(order.last(), Some(&"Malachor V"));
@@ -60,14 +60,14 @@ fn a_new_game_follows_the_timeline_with_the_leviathan_after_the_third_planet() {
 #[test]
 fn the_order_picked_is_the_order_played() {
     let plan: Vec<String> = ["Korriban", "Manaan", "Tatooine", "Kashyyyk"].iter().map(|s| s.to_string()).collect();
-    let route = questdb::story_route(Game::K1, &[], &[], &plan);
+    let route = questdb::story_route(Game::K1, &[], &questdb::chapters_played(Game::K1, &[]), &[], &[], &plan);
     assert_eq!(
         names(Game::K1, &route.order),
         ["Endar Spire", "Taris", "Dantooine", "Korriban", "Manaan", "Tatooine", "Leviathan", "Kashyyyk", "Unknown World", "Star Forge"]
     );
     // KotOR 2: the pair moves as one
     let plan: Vec<String> = ["Korriban", "Dxun", "Nar Shaddaa", "Dantooine"].iter().map(|s| s.to_string()).collect();
-    let k2 = questdb::story_route(Game::K2, &[], &[], &plan);
+    let k2 = questdb::story_route(Game::K2, &[], &questdb::chapters_played(Game::K2, &[]), &[], &[], &plan);
     let order = names(Game::K2, &k2.order);
     let at = |p: &str| order.iter().position(|x| *x == p).unwrap();
     assert!(at("Korriban") < at("Dxun") && at("Dxun") + 1 == at("Onderon") && at("Onderon") < at("Nar Shaddaa") && at("Nar Shaddaa") < at("Dantooine"));
@@ -76,14 +76,16 @@ fn the_order_picked_is_the_order_played() {
 
 #[test]
 fn done_comes_before_begun_and_begun_before_not_visited() {
-    // Korriban done (its star map flag), Manaan begun (a quest of its own in the journal);
+    // Korriban done (its star map flag), Manaan begun (the save has been to its first area);
     // a plan that puts the unvisited Tatooine first cannot move it before either
     let mut quests = journal_of(Game::K1, &["Endar Spire", "Taris", "Dantooine"]);
-    let manaan_own = questdb::chapter_quests(Game::K1, "Manaan").into_iter().map(|(t, _)| t).find(|t| t.starts_with("man")).unwrap();
-    quests.push((manaan_own, 1));
+    // a Tatooine quest in the journal is not a visit
+    let tatooine_own = questdb::chapter_quests(Game::K1, "Tatooine").into_iter().map(|(t, _)| t).find(|t| t.starts_with("tat")).unwrap();
+    quests.push((tatooine_own, 1));
     let globals = vec![flag("K_STAR_MAP_KORRIBAN")];
+    let visited = vec!["manm26aa".to_string()];
     let plan: Vec<String> = ["Tatooine", "Manaan", "Korriban", "Kashyyyk"].iter().map(|s| s.to_string()).collect();
-    let route = questdb::story_route(Game::K1, &quests, &globals, &plan);
+    let route = questdb::story_route(Game::K1, &quests, &questdb::chapters_played(Game::K1, &quests), &globals, &visited, &plan);
     let order = names(Game::K1, &route.order);
     assert_eq!(&order[3..6], ["Korriban", "Manaan", "Tatooine"]);
     assert_eq!(route.kinds, [0, 1, 2, 2]);
@@ -93,7 +95,7 @@ fn done_comes_before_begun_and_begun_before_not_visited() {
 fn played_chapters_come_in_the_order_their_quests_entered_the_journal() {
     let quests = journal_of(Game::K1, &["Endar Spire", "Taris", "Dantooine", "Manaan", "Tatooine"]);
     let globals = vec![flag("K_STAR_MAP_MANAAN"), flag("K_STAR_MAP_TATOOINE")];
-    let route = questdb::story_route(Game::K1, &quests, &globals, &[]);
+    let route = questdb::story_route(Game::K1, &quests, &questdb::chapters_played(Game::K1, &quests), &globals, &[], &[]);
     assert_eq!(&names(Game::K1, &route.order)[3..5], ["Manaan", "Tatooine"]);
 }
 
@@ -121,7 +123,7 @@ fn skip_ahead_follows_the_route() {
     // after Dantooine, Korriban picked first: a skip to it plays Korriban alone
     let quests = journal_of(Game::K1, &["Endar Spire", "Taris", "Dantooine"]);
     let plan: Vec<String> = ["Korriban", "Tatooine", "Kashyyyk", "Manaan"].iter().map(|s| s.to_string()).collect();
-    let route = questdb::story_route(Game::K1, &quests, &[], &plan);
+    let route = questdb::story_route(Game::K1, &quests, &questdb::chapters_played(Game::K1, &quests), &[], &[], &plan);
     let played = questdb::chapters_played(Game::K1, &quests);
     let states: Vec<ChapterState> = route
         .order
@@ -144,7 +146,9 @@ fn every_save_on_the_pc_has_a_whole_route() {
         for folder in find_saves(&installs, game, &[]) {
             let Ok(save) = Save::open(&folder.path) else { continue };
             let globals = save.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default();
-            let route = questdb::story_route(game, &save.quests(), &globals, &[]);
+            let mut visited = save.visited_modules();
+            visited.push(save.module_name().to_ascii_lowercase());
+            let route = questdb::story_route(game, &save.quests(), &questdb::chapters_played_in(&save), &globals, &visited, &[]);
             let mut sorted = route.order.clone();
             sorted.sort();
             sorted.dedup();
@@ -158,6 +162,17 @@ fn every_save_on_the_pc_has_a_whole_route() {
             }
             // done, then begun, then not visited
             assert!(route.kinds.windows(2).all(|w| w[0] <= w[1]), "{}", folder.path.display());
+            // the chapters before the one the save stands in, on the story's line, read played
+            let played = questdb::chapters_played_in(&save);
+            if let Some(here) = questdb::chapter_of_module(game, save.module_name()) {
+                let all = questdb::milestones_ref(game);
+                let k = route.order.iter().position(|i| *i == here);
+                for i in route.order.iter().take(k.unwrap_or(0)) {
+                    if !questdb::is_free(game, all[*i].0) && !all[*i].0.eq_ignore_ascii_case("Leviathan") {
+                        assert!(played[*i], "{}: {} before {}", folder.path.display(), all[*i].0, all[here].0);
+                    }
+                }
+            }
             seen += 1;
         }
     }
