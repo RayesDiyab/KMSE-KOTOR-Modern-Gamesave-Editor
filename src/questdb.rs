@@ -1078,6 +1078,12 @@ fn removed_by(m: &serde_json::Value) -> Vec<String> {
     m.get("journal_remove").and_then(|j| j.as_array()).into_iter().flatten().filter_map(|t| t.as_str().map(str::to_string)).collect()
 }
 
+/// The XP a full run of `planets` (chapters, in any order) ends with: each chapter's own share
+/// once. What Skip Ahead gives (never less than the player has).
+pub fn xp_after(game: Game, planets: &[String]) -> i64 {
+    xp_of(game, planets)
+}
+
 /// The XP of a set of chapters. The rewards files hold running totals along the timeline; one
 /// chapter's own share is its total less the one before it, so a save that played the free
 /// planets in another order counts each planet once, and the Leviathan where it belongs. A

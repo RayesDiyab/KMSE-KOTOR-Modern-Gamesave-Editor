@@ -19,6 +19,10 @@ impl Rim {
             return None;
         }
         let count = u32::from_le_bytes(head[12..16].try_into().ok()?) as usize;
+        // a key takes 32 bytes: a damaged count cannot ask for more than the file holds
+        if count as u64 > file.metadata().ok()?.len() / 32 {
+            return None;
+        }
         let mut keys = u32::from_le_bytes(head[16..20].try_into().ok()?) as u64;
         if keys == 0 {
             keys = 120;

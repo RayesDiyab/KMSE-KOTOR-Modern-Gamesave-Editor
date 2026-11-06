@@ -166,6 +166,10 @@ impl ErfIndex {
         let count = u32::from_le_bytes(head[16..20].try_into().ok()?) as usize;
         let keys = u32::from_le_bytes(head[24..28].try_into().ok()?) as u64;
         let list = u32::from_le_bytes(head[28..32].try_into().ok()?) as u64;
+        // a key takes 24 bytes: a damaged count cannot ask for more than the file holds
+        if count as u64 > file.metadata().ok()?.len() / 24 {
+            return None;
+        }
         let mut key_raw = vec![0u8; count * 24];
         file.seek(SeekFrom::Start(keys)).ok()?;
         file.read_exact(&mut key_raw).ok()?;

@@ -47,6 +47,10 @@ impl Key {
         let key_count = u32_at(&data, 12)? as usize;
         let files = u32_at(&data, 16)? as usize;
         let keys = u32_at(&data, 20)? as usize;
+        // twelve and twenty-two bytes an entry: damaged counts cannot ask for more than the file holds
+        if bif_count > data.len() / 12 || key_count > data.len() / 22 {
+            return None;
+        }
         let mut bifs = Vec::with_capacity(bif_count);
         for i in 0..bif_count {
             let at = files + i * 12;

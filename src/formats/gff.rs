@@ -226,6 +226,10 @@ struct Reader<'a> {
     list_indices_offset: usize,
     list_indices_len: usize,
     depth: usize,
+    // structs read so far: a file names each struct once, so a list that names the same ones
+    // over and over (a damaged or made-up file) is refused before its copies use up the
+    // memory or the time
+    visits: usize,
 }
 
 fn u32_at(data: &[u8], at: usize) -> Result<u32, GffError> {
@@ -267,6 +271,10 @@ impl<'a> Reader<'a> {
         self.depth += 1;
         if self.depth > 64 {
             return err("structs nested too deeply");
+        }
+        self.visits += 1;
+        if self.visits > self.struct_count * 4 + 64 {
+            return err("structs named more often than the file has them");
         }
         let at = self.struct_offset + index * 12;
         let id = u32_at(self.data, at)?;
@@ -394,6 +402,7 @@ impl Gff {
             list_indices_offset: h(10)?,
             list_indices_len: h(11)?,
             depth: 0,
+            visits: 0,
         };
         let blocks = [
             (reader.struct_offset, reader.struct_count * 12),

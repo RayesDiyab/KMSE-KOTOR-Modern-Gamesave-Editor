@@ -233,6 +233,39 @@ fn adding_a_class_does_not_claim_a_feat_the_player_already_owned() {
     eprintln!("Already-owned first-class grants checked on {} games", checked);
 }
 
+/// A party member keeps no level records: a second class added and taken away again leaves
+/// the feats the first class gives (2026-11-06 audit; before, the second class's level-1
+/// proficiencies were taken off though the first class had given them).
+#[test]
+fn removing_a_companions_class_keeps_what_the_first_class_gives() {
+    let installs = find_installs(&[]);
+    let mut checked = 0;
+    for game in [Game::K1, Game::K2] {
+        let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
+        let cat = Catalog::build(&GameData::open(game, &install.path));
+        // a soldier (0) to level 4, with what those levels give, then a scout (1) beside it
+        let soldier = cat.class(0).cloned().unwrap();
+        let scout = cat.class(1).cloned().unwrap();
+        let mut c = made_up(game, false, "someone", 0, 0, 12);
+        creature::set_class_level(&mut c, 0, 4, &soldier, &|l| cat.xp_for(l));
+        let before = creature::feats(&c);
+        assert!(creature::add_class(&mut c, &scout, None));
+        let keep = creature::other_class_feats(&c, 1, &|id| cat.class(id).cloned());
+        // the old way, for the record: what it took
+        let mut old = c.clone();
+        creature::remove_class(&mut old, 1, &scout, &|l| cat.xp_for(l));
+        let lost: Vec<i64> = before.iter().filter(|f| !creature::feats(&old).contains(f)).copied().collect();
+        eprintln!("{:?}: without keep, lost {:?}", game, lost);
+        creature::remove_class_keeping(&mut c, 1, &scout, &|l| cat.xp_for(l), &keep);
+        let after = creature::feats(&c);
+        for f in &before {
+            assert!(after.contains(f), "{:?}: feat {} kept", game, f);
+        }
+        checked += 1;
+    }
+    eprintln!("checked on {} games", checked);
+}
+
 /// The rules reproduce what the game wrote: every player level record in every save on this
 /// machine holds the feats the level grants on its own (those the creature did not have
 /// yet), with the creature's levels as they were after that level.

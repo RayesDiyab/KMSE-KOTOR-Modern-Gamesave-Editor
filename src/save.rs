@@ -530,6 +530,11 @@ impl Save {
                     let stay: Vec<(String, Value)> = c.fields.iter().filter(|(l, _)| STAY.contains(&l.as_str())).cloned().collect();
                     c.fields = new_body.fields.iter().filter(|(l, _)| !STAY.contains(&l.as_str())).cloned().collect();
                     c.fields.extend(stay);
+                    // what they were doing in the other save names objects of that save's
+                    // areas: an empty action list, as a move to another area leaves (#43)
+                    if c.get("ActionList").is_some() {
+                        c.set("ActionList", Value::List(Vec::new()));
+                    }
                 }
             });
         }

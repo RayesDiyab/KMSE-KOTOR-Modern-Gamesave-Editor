@@ -28,6 +28,13 @@ pub fn decode(data: &[u8]) -> Option<Image> {
     let mut pos = 18 + id_len + colormap;
     let px = bpp / 8;
     let total = (width * height) as usize;
+    // what the file can hold at most (a run packet gives at most 128 pixels per byte) bounds
+    // what is set aside: a header claiming 65535 by 65535 asked for 17 GB, and failing to get
+    // it ends the program
+    let room = data.len().saturating_sub(pos);
+    if total > 8192 * 8192 || (kind == 2 && room < total * px) || (kind == 10 && total > room.saturating_mul(128)) {
+        return None;
+    }
     let mut pixels: Vec<[u8; 4]> = Vec::with_capacity(total);
     let read = |at: usize| -> Option<[u8; 4]> {
         let p = data.get(at..at + px)?;

@@ -27,6 +27,20 @@ pub fn name(c: &Struct) -> String {
     crate::text::strip_codes(&n)
 }
 
+/// The name as stored, codes and all: what the Name box edits, so typing in it never drops
+/// a part `name` hides (a name like "Bob <3 Ann" shows as "Bob" in lists).
+pub fn stored_name(c: &Struct) -> String {
+    let part = |label: &str| match c.get(label) {
+        Some(Value::LocString(l)) => l.strings.first().map(|(_, t)| crate::text::decode(t)),
+        _ => None,
+    };
+    let mut n = part("FirstName").unwrap_or_default();
+    if let Some(l) = part("LastName").filter(|l| !l.is_empty()) {
+        n = format!("{} {}", n, l);
+    }
+    n
+}
+
 /// The player's name lives in FirstName (and Mod_FirstName); the last name is cleared,
 /// as character creation leaves it.
 pub fn set_name(c: &mut Struct, text: &str) {
@@ -803,8 +817,14 @@ fn add_base(c: &mut Struct, class: &crate::catalog::Class, levels: i64) {
 /// to the first XP of the new total level when it no longer fits; going up keeps XP that
 /// already reaches a later level, which the game then offers as level-ups.
 pub fn set_class_level(c: &mut Struct, index: usize, level_wanted: i64, class: &crate::catalog::Class, xp_for: &dyn Fn(i64) -> Option<i64>) {
+    set_class_level_keeping(c, index, level_wanted, class, xp_for, &[]);
+}
+
+/// As set_class_level; a level taken away never takes a feat in `keep` (the feats the
+/// creature's other classes give it).
+pub fn set_class_level_keeping(c: &mut Struct, index: usize, level_wanted: i64, class: &crate::catalog::Class, xp_for: &dyn Fn(i64) -> Option<i64>, keep: &[i64]) {
     let before = pools(c, class.game);
-    let Some(delta) = change_levels(c, index, level_wanted, class) else { return };
+    let Some(delta) = change_levels(c, index, level_wanted, class, keep) else { return };
     settle(c, class.game, before, delta > 0);
     if delta > 0 {
         let low = xp_for(self::level(c)).unwrap_or(0);
@@ -818,7 +838,7 @@ pub fn set_class_level(c: &mut Struct, index: usize, level_wanted: i64, class: &
 
 /// The class entry, bases and records of `set_class_level`, without Health and Force;
 /// returns the levels added (negative: taken away).
-fn change_levels(c: &mut Struct, index: usize, level_wanted: i64, class: &crate::catalog::Class) -> Option<i64> {
+fn change_levels(c: &mut Struct, index: usize, level_wanted: i64, class: &crate::catalog::Class, keep: &[i64]) -> Option<i64> {
     let now = c.list("ClassList").and_then(|l| l.get(index)).and_then(|e| e.int("ClassLevel"))?;
     let wanted = level_wanted.max(1);
     let delta = wanted - now;
@@ -829,7 +849,7 @@ fn change_levels(c: &mut Struct, index: usize, level_wanted: i64, class: &crate:
         if delta > 0 {
             raise_one(c, index, class);
         } else {
-            lower_one(c, index, class);
+            lower_one(c, index, class, keep);
         }
     }
     Some(delta)
@@ -890,6 +910,24 @@ pub fn level_skill_points(c: &Struct, class: &crate::catalog::Class) -> i64 {
 ///   the creature is Bao-Dur or Kreia and their column says 255 (never);
 /// - 212 to 219 (Unarmed Specialist I to VIII) granted by the class: when the class is a
 ///   Jedi class and its level is the creature's levels in Jedi classes.
+/// The feats the creature's classes other than entry `index` give it at their levels (with
+/// `class_of` finding a class by id): what taking a level of `index` away must leave. KotOR II's
+/// companion columns count whatever their level, which keeps more rather than less.
+pub fn other_class_feats(c: &Struct, index: usize, class_of: &dyn Fn(i64) -> Option<crate::catalog::Class>) -> Vec<i64> {
+    let mut out = Vec::new();
+    for (j, (id, lv)) in classes(c).into_iter().enumerate() {
+        if j == index {
+            continue;
+        }
+        let Some(k) = class_of(id) else { continue };
+        out.extend(k.grants.granted.iter().filter(|(_, l)| *l <= lv).map(|(f, _)| *f));
+        out.extend(k.grants.companion.iter().map(|(f, _)| *f));
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 pub fn level_feats(c: &Struct, index: usize, class: &crate::catalog::Class, skip_held: bool) -> Vec<i64> {
     let cls = classes(c);
     let class_level = cls.get(index).map_or(0, |e| e.1);
@@ -986,7 +1024,11 @@ fn raise_one(c: &mut Struct, index: usize, class: &crate::catalog::Class) {
 /// level-up) gave: the player's last record of that class with its feats, powers, ranks,
 /// attribute and the skill points it banked; for anyone else, who keeps no records, the
 /// feats that level grants on its own and the points it gives.
-fn lower_one(c: &mut Struct, index: usize, class: &crate::catalog::Class) {
+/// One level of class entry `index` taken away. A party member keeps no level records, so the
+/// feats the level grants are taken off, except those in `keep` (another class gives them):
+/// until 2026-11-06 a companion who was given a second class and had it taken away again lost
+/// the proficiencies the first class had given (audit).
+fn lower_one(c: &mut Struct, index: usize, class: &crate::catalog::Class, keep: &[i64]) {
     let now = c.list("ClassList").and_then(|l| l.get(index)).and_then(|e| e.int("ClassLevel")).unwrap_or(0);
     if now <= 0 {
         return;
@@ -1006,7 +1048,7 @@ fn lower_one(c: &mut Struct, index: usize, class: &crate::catalog::Class) {
             }
         }
     } else {
-        for f in level_feats(c, index, class, false) {
+        for f in level_feats(c, index, class, false).into_iter().filter(|f| !keep.contains(f)) {
             if let Some(list) = c.list_mut("FeatList") {
                 list.retain(|x| x.int("Feat") != Some(f));
             }
@@ -1177,12 +1219,17 @@ pub fn change_class(c: &mut Struct, index: usize, old: &crate::catalog::Class, n
 /// levelled down, then the entry goes with its powers. What was missing of Health and
 /// Force stays missing.
 pub fn remove_class(c: &mut Struct, index: usize, class: &crate::catalog::Class, xp_for: &dyn Fn(i64) -> Option<i64>) {
+    remove_class_keeping(c, index, class, xp_for, &[]);
+}
+
+/// As remove_class; never takes a feat in `keep` (the feats the other class gives).
+pub fn remove_class_keeping(c: &mut Struct, index: usize, class: &crate::catalog::Class, xp_for: &dyn Fn(i64) -> Option<i64>, keep: &[i64]) {
     if c.list("ClassList").map_or(true, |l| l.len() < 2 || index >= l.len()) {
         return;
     }
     let before = pools(c, class.game);
-    change_levels(c, index, 1, class);
-    lower_one(c, index, class);
+    change_levels(c, index, 1, class, keep);
+    lower_one(c, index, class, keep);
     c.list_mut("ClassList").unwrap().remove(index);
     settle(c, class.game, before, false);
     fit_experience(c, xp_for);

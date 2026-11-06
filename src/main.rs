@@ -326,6 +326,9 @@ struct State {
     // the chapter whose pop-up is open on the timeline (a milestone index), and the row
     // picked in it: (depth, chapter index, quest tag, stage), as SkipRow has them
     timeline_pick: Option<i32>,
+    // the XP each quest's stage clicks have given since the save was opened or last saved,
+    // by quest tag: a stage's XP is given once, and taken back when the quest is set back
+    quest_xp: HashMap<String, i64>,
     // the order picked on the galaxy map for the free planets (planet names), for this save
     route_plan: Vec<String>,
     pop_pick: Option<(i32, i32, String, i32)>,
@@ -727,6 +730,7 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.read_only = read_only_reason(&folder.path).is_some();
             st.save = Some(sv);
             st.original = Some(orig);
+            st.quest_xp.clear();
             st.who = 0;
             st.tab = 0;
             st.stage_pick = None;
@@ -830,6 +834,13 @@ fn fill_editor(ui: &AppWindow, st: &mut State) {
 
 /// Which tab holds each change, for the orange marks beside the tab names.
 fn tab_of(change: &str) -> usize {
+    // the player's name as the party table keeps it, and the party's members
+    if change == "party.name" {
+        return 0;
+    }
+    if change == "party.members" {
+        return 3;
+    }
     let field = change.rsplit_once('.').map(|(_, f)| f).unwrap_or(change);
     if change.starts_with("Player.") || change.starts_with("Npc(") {
         if field.starts_with("skill") || field.starts_with("feat") || field.starts_with("power") {
@@ -872,7 +883,10 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     let o = st.original.as_ref().and_then(|s| s.creature(who)).cloned().unwrap_or_else(|| c.clone());
     let Some(cat) = st.catalog() else { return };
 
-    app.set_name(s(creature::name(&c)));
+    // the box edits the name as stored; a companion known only by its line in dialog.tlk
+    // shows that name
+    let stored = creature::stored_name(&c);
+    app.set_name(s(if stored.trim().is_empty() { st.creature_name(st.who()) } else { stored }));
     app.set_name_changed(creature::name(&c) != creature::name(&o));
     let classes: Vec<String> =
         creature::classes(&c).iter().map(|(id, lv)| format!("{} {}", cat.class_name(*id), lv)).collect();
@@ -1118,7 +1132,14 @@ fn item_rows(st: &mut State, items: &[Struct], original: &[Struct]) -> Vec<ItemR
             let icon = st.item_icon(it);
             let (kind, max) = st.item_kind(it);
             let stack = it.int("StackSize").unwrap_or(1);
-            let changed = original.get(i).map_or(true, |o| o != it);
+            // the same item in the save as opened, by its object id (by place where it has
+            // none): removing one row no longer marks every row under it
+            let id = it.int("ObjectId");
+            let was = match id {
+                Some(_) => original.iter().find(|o| o.int("ObjectId") == id),
+                None => original.get(i),
+            };
+            let changed = was.map_or(true, |o| o != it);
             ItemRow {
                 index: i as i32,
                 name: s(st.item_name(it)),
@@ -1312,8 +1333,9 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| format!("The end of the {}", planet));
             let mut parts = vec!["its quests finished".to_string()];
-            if let Some(x) = xp {
-                parts.push(format!("{} XP in all", x));
+            if xp.is_some() {
+                // filled in below, once the route's order is known
+                parts.push("{XP} XP in all".to_string());
             }
             if items > 0 {
                 parts.push("the loot of a full run".to_string());
@@ -1347,6 +1369,20 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
         }
     }
     out.sort_by_key(|c| c.order);
+    // the XP a skip to each chapter ends with: the chapters played and those the skip plays
+    // on the route, each counted once (the files' totals follow the timeline's order)
+    let states = chapter_states(&out);
+    let all = kse_core::questdb::milestones_ref(st.game);
+    let played: Vec<String> = out.iter().filter(|c| c.played).map(|c| c.planet.clone()).collect();
+    for k in 0..out.len() {
+        if !out[k].summary.contains("{XP}") {
+            continue;
+        }
+        let mut run = played.clone();
+        run.extend(kse_core::questdb::skip_path(&states, out[k].index).into_iter().filter_map(|i| all.get(i as usize).map(|(p, _)| p.to_string())));
+        let xp = kse_core::questdb::xp_after(st.game, &run);
+        out[k].summary = out[k].summary.replace("{XP}", &thousands(xp));
+    }
     out
 }
 
@@ -1417,7 +1453,12 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
     app.set_skip_dark(leans_dark as i32);
     // KotOR 2: the prestige class Kreia offers from level 15, by the XP the skip ends with;
     // the one matching the base class first (Guardian, Sentinel, Consular)
-    let end_xp = picked.last().and_then(|m| m.get("planet")).and_then(|p| p.as_str()).and_then(|p| kse_core::questdb::rewards_of(st.game, p)).and_then(|r| r.get("xp_at_end").and_then(|v| v.as_i64()));
+    // the XP the skip ends with on the route: the chapters played and those it plays
+    let end_xp = {
+        let mut run: Vec<String> = chapters.iter().filter(|c| c.played).map(|c| c.planet.clone()).collect();
+        run.extend(picked.iter().filter_map(|m| m.get("planet").and_then(|p| p.as_str()).map(str::to_string)));
+        Some(kse_core::questdb::xp_after(st.game, &run))
+    };
     let prestige = match (st.save.as_ref(), st.data(), end_xp) {
         (Some(save), Some(data), Some(xp)) => kse_core::questdb::prestige_due(save, &data, xp.max(save.player().map(kse_core::creature::experience).unwrap_or(0))),
         _ => false,
@@ -2304,6 +2345,16 @@ const NOT_DESTINATIONS: &[(Game, &str)] = &[
 /// A Pazaak side card's look: its value as the card shows it, the game's card face, and
 /// the middle of the face's black window, where the value goes. KotOR: +1..+6, -1..-6, the flip cards +/-1..+/-6;
 /// KotOR II adds +/-1/2, Double, Tiebreaker and the 2&4 and 3&6 flips (g_i_pazcard_019..023).
+/// How many Pazaak side cards the game has: KotOR's 18 (+1 to +6, -1 to -6, the flip cards),
+/// KotOR II's 23 (five more). The save's list holds one entry more than that in both
+/// (docs/save-editor-format.md, PT_PAZAAKCARDS), which is no card.
+fn pazaak_cards(game: Game) -> usize {
+    match game {
+        Game::K1 => 18,
+        Game::K2 => 23,
+    }
+}
+
 fn card_look(game: Game, i: usize) -> (String, &'static str, f32) {
     let n = i % 6 + 1;
     let label = match i {
@@ -2491,7 +2542,8 @@ fn fill_more(ui: &AppWindow, st: &mut State) {
     let cards = save.party.root.list("PT_PAZAAKCARDS").cloned().unwrap_or_default();
     let ocards = st.original.as_ref().and_then(|o| o.party.root.list("PT_PAZAAKCARDS").cloned()).unwrap_or_default();
     let mut pazaak: Vec<CardRow> = Vec::new();
-    for (i, c) in cards.iter().enumerate() {
+    // the list is longer than the cards: KotOR keeps 19 entries for 18 cards, KotOR II 24 for 23
+    for (i, c) in cards.iter().enumerate().take(pazaak_cards(game)) {
         let v = c.int("PT_PAZAAKCOUNT").unwrap_or(0);
         let (label, face, label_y) = card_look(game, i);
         let face = data.as_ref().and_then(|d| picture(&mut st.portraits, &st.art, texture_key(face), || texture_pixels(d, face)));
@@ -2572,6 +2624,15 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
     };
     let counts = [0, 1, 2].map(|k| all.iter().filter(|q| status(q) == k).count() as i32);
     app.set_quest_counts(model(counts.to_vec()));
+    // The quest picked follows itself to its new tab (started: Active; finished: Completed),
+    // so the stage picked stays with the quest it belongs to. Until 2026-11-06 the pick fell
+    // to the first quest left on the tab, which then showed the other quest's stage picked.
+    if let Some(q) = st.quest_pick.as_deref().and_then(|t| all.iter().find(|q| q.tag.eq_ignore_ascii_case(t))) {
+        let k = status(q);
+        if k != st.quest_tab as i32 {
+            st.quest_tab = k as usize;
+        }
+    }
     app.set_quest_tab(st.quest_tab as i32);
     let mut tags = Vec::new();
     let mut rows = Vec::new();
@@ -2588,6 +2649,7 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
     // The first quest of the tab is shown until another is picked.
     if st.quest_pick.as_ref().map_or(true, |t| !tags.iter().any(|x| x.eq_ignore_ascii_case(t))) {
         st.quest_pick = tags.first().cloned();
+        st.stage_pick = None;
         if let Some(r) = rows.first_mut() {
             r.owned = true;
         }
@@ -2657,25 +2719,30 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
 /// Puts a quest at a stage, giving that stage's experience as the game does when the journal
 /// reaches it (to the player and the party pool), once.
 fn set_quest_stage(st: &mut State, tag: &str, id: i64) {
-    let xp = st
-        .journal()
-        .iter()
-        .find(|q| q.tag.eq_ignore_ascii_case(tag))
-        .cloned()
-        .and_then(|q| q.stage(id).map(|x| x.xp))
-        .unwrap_or(0);
-    let before = st.save.as_ref().and_then(|s| s.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map(|(_, v)| v));
+    let journal = st.journal();
+    let quest = journal.iter().find(|q| q.tag.eq_ignore_ascii_case(tag)).cloned();
+    let xp_of = |stage: i64| quest.as_ref().and_then(|q| q.stage(stage).map(|x| x.xp)).unwrap_or(0);
+    // The XP is the stage's when it lies past where the save was opened, given once: what
+    // this session gave the quest before is taken off first, so clicking stages back and forth
+    // gives it once, and a quest set back to where it was gives it back. Until 2026-11-06 every
+    // click on another stage gave its XP again.
+    let opened = st.original.as_ref().and_then(|o| o.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map(|(_, v)| v));
+    let due = if opened.map_or(true, |o| id > o) { xp_of(id) } else { 0 };
+    let key = tag.to_ascii_lowercase();
+    let given = st.quest_xp.get(&key).copied().unwrap_or(0);
+    let delta = due - given;
     if let Some(save) = st.save.as_mut() {
         save.set_quest(tag, id);
-        if xp > 0 && before != Some(id) {
+        if delta != 0 {
             save.edit(Who::Player, "questxp", |c| {
                 let now = creature::experience(c);
-                creature::set_experience(c, now + xp);
+                creature::set_experience(c, (now + delta).max(0));
             });
             let pool = save.party_int("PT_XP_POOL").unwrap_or(0);
-            save.set_party_int("PT_XP_POOL", pool + xp);
+            save.set_party_int("PT_XP_POOL", (pool + delta).max(0));
         }
     }
+    st.quest_xp.insert(key, due);
 }
 
 // ---- the map ----
@@ -3473,7 +3540,8 @@ fn levels_for_pool(c: &Struct, cat: &Catalog, force: bool, want: i64) -> Option<
             if next < 1 || (up && creature::level(&t) >= cat.max_level()) {
                 break;
             }
-            creature::set_class_level(&mut t, idx, next, &class, &|l| cat.xp_for(l));
+            let keep = creature::other_class_feats(&t, idx, &|id| cat.class(id).cloned());
+            creature::set_class_level_keeping(&mut t, idx, next, &class, &|l| cat.xp_for(l), &keep);
             let (lo, hi) = pool_reach(&t, cat.game, force);
             if (lo..=hi).contains(&want) {
                 return Some((creature::classes(&t).iter().enumerate().map(|(i, (_, l))| (i, *l)).collect(), lo, hi));
@@ -3893,6 +3961,7 @@ fn main() {
         timeline_load: Arc::new(Mutex::new(None)),
         timeline_loading: false,
         timeline_pick: None,
+        quest_xp: HashMap::new(),
         route_plan: Vec::new(),
         pop_pick: None,
         quest_open: false,
@@ -4056,8 +4125,18 @@ fn main() {
                 save.edit_party_table("name", |p| p.set("PT_PCNAME", Value::String(bytes.clone())));
             }
         }
-        fill_bar(&u, st);
+        if undo_read_only(&u, st) {
+            fill_editor(&u, st);
+            return;
+        }
+        // the member list shows the new name (only the name: the box keeps its caret)
         let app = u.global::<App>();
+        let name = st.creature_name(st.who());
+        if let Some(mut row) = app.get_members().row_data(st.who) {
+            row.name = s(if name.is_empty() { "Player".to_string() } else { name });
+            app.get_members().set_row_data(st.who, row);
+        }
+        fill_bar(&u, st);
         app.set_name_changed(true);
     });
     on!(ui, state, on_set_xp, |u, st, xp: i32| {
@@ -4268,10 +4347,15 @@ fn main() {
 
     // Party
     on!(ui, state, on_set_recruited, |u, st, i: i32, on: bool| {
+        let party = st.save.as_ref().map(|s| s.party_members());
         if let Some(save) = st.save.as_mut() {
             save.set_recruited(i.max(0) as usize, on);
         }
-        refresh_after_edit(&u, st);
+        if st.save.as_ref().map(|s| s.party_members()) != party {
+            update_party_portraits(st);
+        }
+        // the member list says who is recruited and in the party
+        fill_editor(&u, st);
     });
     on!(ui, state, on_set_selectable, |u, st, i: i32, on: bool| {
         if let Some(save) = st.save.as_mut() {
@@ -4322,6 +4406,7 @@ fn main() {
                 save.edit_globals(&format!("b{}", g.index), |root| globals::set(root, &g, &GlobalValue::Bool(on)));
             }
         }
+        undo_read_only(&u, st);
         fill_globals(&u, st);
         fill_bar(&u, st);
     });
@@ -4333,6 +4418,7 @@ fn main() {
                 save.edit_globals(&format!("n{}", g.index), |root| globals::set(root, &g, &GlobalValue::Number(v as i64)));
             }
         }
+        undo_read_only(&u, st);
         fill_globals(&u, st);
         fill_bar(&u, st);
     });
@@ -4344,6 +4430,7 @@ fn main() {
                 save.edit_globals(&format!("s{}", g.index), |root| globals::set(root, &g, &GlobalValue::Text(t.to_string())));
             }
         }
+        undo_read_only(&u, st);
         fill_globals(&u, st);
         fill_bar(&u, st);
     });
@@ -4368,6 +4455,7 @@ fn main() {
                 }
             }
         }
+        undo_read_only(&u, st);
         fill_globals(&u, st);
         fill_bar(&u, st);
     });
@@ -4379,6 +4467,7 @@ fn main() {
                 save.edit_globals(&format!("{:?}{}", g.kind, g.index), |root| globals::set(root, &g, &v));
             }
         }
+        undo_read_only(&u, st);
         fill_globals(&u, st);
         fill_bar(&u, st);
     });
@@ -4386,12 +4475,14 @@ fn main() {
         if let Some(save) = st.save.as_mut() {
             save.edit_area(&format!("door{}", i), |git| area::set_door_locked(git, i.max(0) as usize, on));
         }
+        st.map = None;
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_set_door_open, |u, st, i: i32, on: bool| {
         if let Some(save) = st.save.as_mut() {
             save.edit_area(&format!("door{}", i), |git| area::set_door_open(git, i.max(0) as usize, on));
         }
+        st.map = None;
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_select_box, |u, st, row: i32| {
@@ -4438,6 +4529,11 @@ fn main() {
         open_items_picker(&u, st, Target::Container, "Add an Item Here");
     });
     on!(ui, state, on_set_planet, |u, st, i: i32, on: bool| {
+        // without the game's planetary.2da the Endar Spire, the Leviathan and the Star Forge
+        // cannot be told from places the galaxy map flies to, and opening one strands the ship
+        if needs_game(&u, st) {
+            return;
+        }
         if let Some(save) = st.save.as_mut() {
             save.edit_party_table(&format!("planet{}", i), |p| {
                 if let Some(map) = p.child_mut("GlxyMap") {
@@ -4466,6 +4562,9 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_set_pazaak, |u, st, i: i32, v: i32| {
+        if i < 0 || i as usize >= pazaak_cards(st.game) {
+            return;
+        }
         if let Some(save) = st.save.as_mut() {
             save.edit_party_table(&format!("pazaak{}", i), |p| {
                 if let Some(card) = p.list_mut("PT_PAZAAKCARDS").and_then(|l| l.get_mut(i.max(0) as usize)) {
@@ -4669,7 +4768,8 @@ fn main() {
             }
             let xp_cat = cat.clone();
             edit_who(&u, st, &format!("class{}", i), move |c| {
-                creature::set_class_level(c, i, level, &class, &|l| xp_cat.xp_for(l));
+                let keep = creature::other_class_feats(c, i, &|id| xp_cat.class(id).cloned());
+                creature::set_class_level_keeping(c, i, level, &class, &|l| xp_cat.xp_for(l), &keep);
             });
         }
         set_pool(&u, st, a.force, a.now, a.most);
@@ -4715,7 +4815,8 @@ fn main() {
         let index = index.max(0) as usize;
         let xp_cat = cat.clone();
         edit_who(&u, st, &format!("class{}", index), move |c| {
-            creature::set_class_level(c, index, level as i64, &class, &|l| xp_cat.xp_for(l));
+            let keep = creature::other_class_feats(c, index, &|id| xp_cat.class(id).cloned());
+            creature::set_class_level_keeping(c, index, level as i64, &class, &|l| xp_cat.xp_for(l), &keep);
         });
         fill_editor(&u, st);
         u.global::<App>().set_overlay(6);
@@ -4746,7 +4847,8 @@ fn main() {
         let index = index.max(0) as usize;
         let xp_cat = cat.clone();
         edit_who(&u, st, &format!("class{}", index), move |c| {
-            creature::remove_class(c, index, &class, &|l| xp_cat.xp_for(l));
+            let keep = creature::other_class_feats(c, index, &|id| xp_cat.class(id).cloned());
+            creature::remove_class_keeping(c, index, &class, &|l| xp_cat.xp_for(l), &keep);
         });
         fill_editor(&u, st);
         u.global::<App>().set_overlay(6);
@@ -4814,6 +4916,9 @@ fn main() {
         if let Some(save) = st.save.as_mut() {
             save.edit_area(&format!("creature{}", index), |git| area::remove_creature(git, index.max(0) as usize));
         }
+        // the map's people are numbered as the area lists them: read it again
+        st.map = None;
+        st.map_pick = None;
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_set_played, |u, st, h: SharedString, m: SharedString| {
@@ -5137,6 +5242,7 @@ fn main() {
             Ok(backup) => {
                 let folder = st.save.as_ref().unwrap().folder.clone();
                 st.original = Save::open(&folder).ok();
+                st.quest_xp.clear();
                 if let Ok(fresh) = Save::open(&folder) {
                     st.save = Some(fresh);
                 }
@@ -5276,6 +5382,7 @@ fn main() {
         match result {
             Ok(()) => {
                 st.original = Save::open(&target).ok();
+                st.quest_xp.clear();
                 if let Ok(fresh) = Save::open(&target) {
                     st.save = Some(fresh);
                 }
@@ -5300,6 +5407,7 @@ fn main() {
         if let Some(folder) = st.save.as_ref().map(|s| s.folder.clone()) {
             st.save = Save::open(&folder).ok();
             st.original = Save::open(&folder).ok();
+            st.quest_xp.clear();
             st.status = (String::new(), false);
             st.map = None;
             st.map_pick = None;
