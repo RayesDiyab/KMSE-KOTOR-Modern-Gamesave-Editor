@@ -168,12 +168,12 @@ Taken from KSE 3.3.7's readme (its list of editable fields), not from its code.
 | Hit Points, Force Points (current and max) | Character | shown and stored by the engine's own rules; the maximum moves what the engine computes it from (the player's level-record dice, newest first; anyone else's base); what was missing stays missing ([format, 3.4](save-editor-format.md#34-hit-points-and-force-points-what-is-stored-what-is-recomputed-refile)) |
 | Min1HP | Character, Cannot die | `Min1HP` |
 | Appearance, Gender, Soundset, Portrait, NPC name | Character, Look and voice | `Appearance_Type`, `Gender`, `SoundSetFile`, `PortraitId`, `FirstName` |
-| Time played | Story, More | `PT_PLAYEDSECONDS` (savenfo follows) |
-| Quests | Story, Quests | `JNL_Entries`: a quest at a stage of global.jrl |
+| Time played | Advanced, Story Values (above the list) | `PT_PLAYEDSECONDS` (savenfo follows) |
+| Quests | Quests | `JNL_Entries`: a quest at a stage of global.jrl |
 | Copy inventory between saves | Inventory, Copy from Another Save | the other save's `INVENTORY` item list |
 | Xbox .sig files | not done | see section 6 |
 
-Area creatures (in the fork the maintainer showed) are listed in Story, Creatures, with a
+Area creatures (in the fork the maintainer showed) are listed in Advanced, Creatures, with a
 remove cross.
 
 ## 3b. The map, moving the player, Finish Quest
@@ -198,7 +198,7 @@ remove cross.
 | --- | --- |
 | Any area | The Map tab's Areas list holds every area of the game, by planet (cutscene stages, `stunt_` modules, and nameless modules left out; of two areas with one name the visited one, else the one a door leads into). An area not visited shows the game's own .git with each object's template fields filled in (names, portraits) |
 | Travel Here | The ways the game's doors and transitions lead into the area (each module's shipped .git, `LinkedToModule` and `LinkedTo`). Picking one queues an area-transition event (`EVENT_AREA_TRANSITION`, 26) first in the current module's `EventQueue`, due at the saved moment: the game makes the trip right after the save loads, loads an unvisited area fresh from its files with its arrival scripts, and brings the party (`Save::queue_transition`; the event's layout from the maintainer's own reverse engineering, handler 0x0050D6C0). *Corrected 2026-10-23:* queued last and a second later, it waited behind the save's own delayed events until the player did something |
-| Skip Ahead | Story, Timeline (Skip to Here in a chapter's pop-up): a chapter as if played (`questdb::skip_to`). The chapter's milestone (`data/quests/*-milestone.json`): journal, the story values the rest of the game reads, items; its rewards (`*-rewards.json`, `tools/questdb/rewards.py`): the XP of a full run (kills by the engine's rule, plot XP, script XP, SetXP floors, `tools/xp/calc.py`), the enemies' Dropable items and the containers' loot (class gear by the game's own tests); then the trip by the game's own first hop with its movies, so the story plays on (from the Endar Spire: escape pod movie 01c, the vision, then the Taris apartment) |
+| Skip Ahead | Timeline (Skip to Here in a chapter's pop-up): a chapter as if played (`questdb::skip_to`). The chapter's milestone (`data/quests/*-milestone.json`): journal, the story values the rest of the game reads, items; its rewards (`*-rewards.json`, `tools/questdb/rewards.py`): the XP of a full run (kills by the engine's rule, plot XP, script XP, SetXP floors, `tools/xp/calc.py`), the enemies' Dropable items and the containers' loot (class gear by the game's own tests); then the trip by the game's own first hop with its movies, so the story plays on (from the Endar Spire: escape pod movie 01c, the vision, then the Taris apartment) |
 | Kill XP | The engine on every death (`ApplyDeathExperience` 0x004FB1E0): xptable.2da row (player level from XP) column trunc(CR), for a creature whose faction's reputation toward the player is 10 or below; the player all of it, party members 80%, the pool all of it. Checked against two Endar Spire saves (150 and 450 XP at the same points) |
 
 **The whole of KotOR 1** (2026-10-23, mapped by `tools/questdb`, `checked: false`): 12
@@ -301,8 +301,16 @@ order a player visited them ... aesthetically pleasing in the style of kotor but
 intuitive"). It replaced the timeline (below). It was first a section of Story, beside Quests
 and Planets, Pazaak; the same day the maintainer asked for it as a tab of its own beside Story
 ("Make Timeline a seperate tab next to story and make the actual galaxy map bigger"). With no
-section tabs above it the map is 453 px tall at 1600 by 900, where it was 380 px. Story keeps Quests and Planets, Pazaak and opens on
-Quests. Later the same day the maintainer asked for everything around the map to be in it
+section tabs above it the map is 453 px tall at 1600 by 900, where it was 380 px. Story kept Quests and Planets, Pazaak and opened on
+Quests; later that day the maintainer made each a tab of its own ("put Pazaak & Destinations
+as a seperate menu tab / make Story called Quests"): **Quests**, then **Pazaak &
+Destinations** (planets and Pazaak, numbered 8 so the other tabs keep their numbers). Where the
+whole name does not fit beside the other tabs (measured unseen, the tab row with that name
+against the room; at 1280 by 780 it does not) the tab is "Pazaak". Its changes, `party.planet`
+and `party.pazaak`, put the orange mark on that tab. Its cards are five a row where the section
+is narrower than 1250 px, so the planets keep the room for their whole title, and a card's
+column is never narrower than 76 px times the text size (at 1280 by 780 a 74 px column cut the
+count between its buttons). Later the same day the maintainer asked for everything around the map to be in it
 ("Include the planet order in the map itself / Meaning expand map size"; "Remove the top text,
 and incorporate it into the map itself ... like small print"; "Remove the outer border and make
 the map the main piece on this timeline page"): the map is now the page, with no panel around
@@ -494,7 +502,7 @@ loot, the escape pod movie and the vision, and the Taris apartment with Carth's 
 Endar Spire (Taris has had a milestone for some time; this line said otherwise until
 2026-11-02); KotOR 2.
 
-**The quest tracker** (Story, Quests; 2026-10-22, the maintainer: "what a person wants when
+**The quest tracker** (the Quests tab, Story, Quests until 2026-11-06; 2026-10-22, the maintainer: "what a person wants when
 he enters the story mode ... is a quest tracker"): Story opened on Quests then (it opened on the timeline from 2026-10-24, and on Quests again since 2026-11-06, when the map became the Timeline tab), listed first before
 the modder sections, and the party list steps aside. Left: the quests in three tabs, Active,
 Completed (the journal entry is one of the quest's endings) and Not Started, each with where it
@@ -506,7 +514,7 @@ the party pool, once. The journal keeps only a quest's current stage, so "earlie
 lower stage number, not a stage the player is known to have seen.
 
 **Removing what was spawned** (2026-10-22): a creature the editor spawned, picked on the map,
-offers Remove This Creature; the area's own creatures do not (Story, Creatures still lists
+offers Remove This Creature; the area's own creatures do not (Advanced, Creatures still lists
 every creature for modders). The editor records each spawn in `spawned.txt` beside its
 settings as game, module, `ObjectId` and `Tag`; the game keeps a creature's id when it saves,
 so the record finds it in later saves of the same playthrough. Creatures spawned before this

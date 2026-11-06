@@ -40,7 +40,8 @@ changes before that day are in KMRP's CHANGELOG.
 * **Timeline**: a galaxy map of the story, with bands of light joining the planets in the order
   you played them and every save on it; pick the order of the planets that can be played in any
   order, Skip Ahead to a later chapter and Go Back to an earlier one.
-* **Story**: a quest tracker; the planets the Ebon Hawk can fly to; Pazaak cards.
+* **Quests**: a quest tracker.
+* **Pazaak & Destinations**: the planets the Ebon Hawk can fly to, and Pazaak cards.
 * **Map**: the area's map with its people, doors and containers; moving the player, travel
   to any area, and spawning a creature.
 * **Advanced**: every global variable, and a comparison with another save to fix a stuck

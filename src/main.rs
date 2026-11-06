@@ -864,6 +864,10 @@ fn tab_of(change: &str) -> usize {
     if change == "party.members" {
         return 3;
     }
+    // where the Ebon Hawk can fly, and the Pazaak cards: their own tab
+    if change.starts_with("party.planet") || change.starts_with("party.pazaak") {
+        return 8;
+    }
     let field = change.rsplit_once('.').map(|(_, f)| f).unwrap_or(change);
     if change.starts_with("Player.") || change.starts_with("Npc(") {
         if field.starts_with("skill") || field.starts_with("feat") || field.starts_with("power") {
@@ -887,8 +891,9 @@ fn tab_of(change: &str) -> usize {
 
 fn fill_bar(ui: &AppWindow, st: &State) {
     let app = ui.global::<App>();
-    // Timeline is tab 7 (it shows no changes of its own: a skip's are Story's)
-    let mut tabs = vec![false; 8];
+    // Timeline is tab 7 (it shows no changes of its own: a skip's are Quests'), Pazaak &
+    // Destinations 8
+    let mut tabs = vec![false; 9];
     if let Some(sv) = st.save.as_ref() {
         for c in &sv.changes {
             tabs[tab_of(c)] = true;
@@ -4200,12 +4205,14 @@ fn main() {
     });
     on!(ui, state, on_select_tab, |u, st, i: i32| {
         st.tab = i;
-        // Timeline is section 5 alone, Story holds 3 and 4, Advanced 0 to 2: each opens on
-        // its first
+        // Timeline is section 5, Quests 3, Pazaak & Destinations 4, each alone; Advanced holds
+        // 0 to 2 and opens on its first
         if i == 7 {
             st.story = 5;
-        } else if i == 4 && st.story != 3 && st.story != 4 {
+        } else if i == 4 {
             st.story = 3;
+        } else if i == 8 {
+            st.story = 4;
         } else if i == 6 && st.story >= 3 {
             st.story = 0;
         }
@@ -5621,7 +5628,7 @@ fn main() {
                 let app = u.global::<App>();
                 app.set_pick_title(s(format!("{} spawned", sp.name)));
                 app.set_pick_note(s(
-                    "It stands on the map now. Save Changes to keep it; Story, Creatures lists it and can remove it again.",
+                    "It stands on the map now. Save Changes to keep it; Advanced, Creatures lists it and can remove it again.",
                 ));
             }
             Target::Class => {

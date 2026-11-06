@@ -6,6 +6,14 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Pazaak & Destinations is a tab of its own, and Story is Quests** (2026-11-06, the
+  maintainer). The planets the Ebon Hawk can fly to and the Pazaak cards have their own tab
+  beside Quests, with its own mark for changes; Quests is the quest tracker alone. On a narrow
+  window the new tab reads "Pazaak" (its whole name is shown wherever it fits, measured) and
+  the cards go five a row so the planets keep their whole title; the cards' counts are never
+  cut. The tabs are a little smaller so all nine fit. Hints that sent players to "Story,
+  Quests" and "Story, Creatures" name the right places. Looked at in the program at 1600 by
+  900 and 1280 by 780.
 - **KotOR II's feats and powers can be added and removed again** (2026-11-06, the
   maintainer: "abilities in kotor 2 dont work to add or remove"). A long name in the lists
   (in German, "Geschwindigkeitsschub") made every row wider than the list, so the + and x

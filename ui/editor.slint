@@ -1115,8 +1115,13 @@ component AreaSection inherits Rectangle {
 // grey), and the Pazaak side cards as the game draws them, large, each with how many are
 // carried. Only these two: the save's name, time played and cheat mark are in Story Values.
 component MoreSection inherits Rectangle {
-    property <length> split: self.width * 0.56;
-    property <int> columns: 6;
+    // five cards a row where the section is narrow, so the planets keep the room for their
+    // whole title (2026-11-06, the maintainer: "in the smaller size make it 5 cards per row and
+    // write out the title of both pazaak and planets")
+    property <int> columns: self.width < 1250px ? 5 : 6;
+    // the planets take what the cards leave, and the cards' columns are never too narrow for
+    // their counts (at 1280 by 780 a column of 74 px cut the number between - and +)
+    property <length> split: min(self.width * 0.56, self.width - 44px - self.columns * 76px * Theme.ts);
     // a card's column and the card's size
     property <length> cell: (self.width - self.split - 44px) / self.columns;
     property <length> card: min(104px * Theme.ts, self.cell - 16px);
@@ -1124,7 +1129,7 @@ component MoreSection inherits Rectangle {
     Rectangle {
         x: 0;
         width: split;
-        Label { x: 0; y: 0; text: "WHERE THE EBON HAWK CAN FLY"; }
+        Label { x: 0; y: 0; width: parent.width; text: "WHERE THE EBON HAWK CAN FLY"; }
         sky-note := Note { x: 0; y: 28px; width: parent.width; text: "Where the Ebon Hawk can fly. Click a planet to open it (green) or close it (grey)."; }
         sky := Rectangle {
             y: 28px + sky-note.preferred-height + 6px;
@@ -2684,7 +2689,7 @@ component MapTab inherits Rectangle {
             alignment: start;
             Note { font-size: 12.5px * Theme.ts; text: "Move to any marked place, or click the floor. Every spot is checked to be walkable floor with room around it, out of the walls."; }
             Button { kind: 3; text: "Open Every Door Here"; clicked => { App.open-all-doors(); } }
-            Note { font-size: 12.5px * Theme.ts; text: "A quest that will not move on: Story, Quests, pick it and choose its ending."; }
+            Note { font-size: 12.5px * Theme.ts; text: "A quest that will not move on: Quests, pick it and choose its ending."; }
         }
     }
 }
@@ -2703,24 +2708,43 @@ export component EditorPage inherits Rectangle {
         clicked => { App.back(); }
     }
     // Tabs
-    Rectangle {
+    tabs := Rectangle {
         x: 60px;
         y: 170px;
         width: parent.width - 120px;
         height: 48px;
         Rectangle { x: 0; y: parent.height - 1px; height: 1px; background: Theme.edge; }
+        // the tabs' words and the room after each
+        property <length> tab-font: (root.slim ? 17px : 18px) * Theme.ts;
+        property <length> tab-pad: 24px;
+        // The tabs as they would be with the new tab's whole name, measured unseen: the whole
+        // name only where it fits, else "Pazaak" (at 1600 by 900 with Large text it fits; at 1280
+        // by 780 it does not)
+        full-row := HorizontalLayout {
+            visible: false;
+            spacing: tabs.tab-pad;
+            for n in ["Character", "Abilities", "Inventory", "Party", "Timeline", "Quests", "Pazaak & Destinations", "Map", "Advanced"]: Text {
+                text: n;
+                font-family: Theme.list-font;
+                font-size: tabs.tab-font;
+            }
+        }
+        property <bool> roomy: full-row.preferred-width + self.tab-pad <= self.width;
         HorizontalLayout {
             alignment: start;
-            // Timeline (the galaxy map) is its own tab beside Story (2026-11-06, the maintainer);
-            // it keeps the number 7 so the other tabs keep theirs
+            // Timeline (the galaxy map) is its own tab (2026-11-06, the maintainer), and so are
+            // the planets and Pazaak, beside Quests, which was Story (the same day: "put Pazaak &
+            // Destinations as a seperate menu tab / make Story called Quests"). They keep the
+            // numbers 7 and 8 so the other tabs keep theirs.
             for t in [
                 { name: "Character", i: 0 }, { name: "Abilities", i: 1 }, { name: "Inventory", i: 2 },
-                { name: "Party", i: 3 }, { name: "Timeline", i: 7 }, { name: "Story", i: 4 },
+                { name: "Party", i: 3 }, { name: "Timeline", i: 7 }, { name: "Quests", i: 4 },
+                { name: tabs.roomy ? "Pazaak & Destinations" : "Pazaak", i: 8 },
                 { name: "Map", i: 5 }, { name: "Advanced", i: 6 },
             ]: Rectangle {
                 property <int> i: t.i;
-                width: tt.preferred-width + (root.slim ? 30px : 52px);
-                tt := Text { y: 10px; text: t.name; font-family: Theme.list-font; font-size: (root.slim ? 18px : 20px) * Theme.ts; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
+                width: tt.preferred-width + tabs.tab-pad;
+                tt := Text { y: 10px; text: t.name; font-family: Theme.list-font; font-size: tabs.tab-font; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
                 if App.tab-changed[i]: Rectangle {
                     x: tt.x + tt.width + 6px;
                     y: 12px;
@@ -2817,13 +2841,9 @@ export component EditorPage inherits Rectangle {
             if App.tab == 1: AbilitiesTab { }
             if App.tab == 2: InventoryTab { }
             if App.tab == 3: PartyTab { }
-            if App.tab == 4: StoryTab {
-                items: [
-                    { name: "Quests", section: 3 },
-                    { name: "", section: -1 },
-                    { name: "Planets, Pazaak", section: 4 },
-                ];
-            }
+            // Quests and Pazaak & Destinations: each one section, so no tabs of their own
+            if App.tab == 4: JournalSection { }
+            if App.tab == 8: MoreSection { }
             if App.tab == 6: StoryTab {
                 items: [
                     { name: "Story Values", section: 0 },
