@@ -224,16 +224,22 @@ fn has_effect(c: &Struct, kind: i64) -> bool {
     c.list("EffectList").map_or(false, |l| l.iter().any(|e| e.int("Type") == Some(kind)))
 }
 
-/// An attribute with what the creature's ability effects (type 36: the attribute's number,
-/// then the amount, as items and powers put them in the save) add to it. The engine's
-/// modifiers are taken from this value, not the bare score.
+/// An attribute with what the creature's ability effects (type 36 adds, type 37 takes away:
+/// the attribute's number, then the amount, as items and powers put them in the save) make of
+/// it, never below 3, in both games. The engine's modifiers are taken from this value, not the
+/// bare score. The engine's caps and its rule for effects of one source are not modelled.
 pub fn effective_attribute(c: &Struct, label: &str) -> i64 {
     let index = ATTRIBUTES.iter().position(|a| *a == label).unwrap_or(0) as i64;
     let mut v = attribute(c, label);
-    for e in c.list("EffectList").into_iter().flatten().filter(|e| e.int("Type") == Some(36)) {
+    for e in c.list("EffectList").into_iter().flatten() {
+        let sign = match e.int("Type") {
+            Some(36) => 1,
+            Some(37) => -1,
+            _ => continue,
+        };
         let ints: Vec<i64> = e.list("IntList").map(|l| l.iter().filter_map(|i| i.int("Value")).collect()).unwrap_or_default();
         if ints.first() == Some(&index) {
-            v += ints.get(1).copied().unwrap_or(0);
+            v += sign * ints.get(1).copied().unwrap_or(0);
         }
     }
     v.max(3)
@@ -794,12 +800,20 @@ fn add_base(c: &mut Struct, class: &crate::catalog::Class, levels: i64) {
 /// takes the player's last records of that class away together with what they gave
 /// (feats, powers, skill ranks, the raised attribute), as the game would never have
 /// granted them, and keeps what was missing of Health and Force missing. Experience moves
-/// to the first XP of the new total level when it no longer fits.
+/// to the first XP of the new total level when it no longer fits; going up keeps XP that
+/// already reaches a later level, which the game then offers as level-ups.
 pub fn set_class_level(c: &mut Struct, index: usize, level_wanted: i64, class: &crate::catalog::Class, xp_for: &dyn Fn(i64) -> Option<i64>) {
     let before = pools(c, class.game);
     let Some(delta) = change_levels(c, index, level_wanted, class) else { return };
     settle(c, class.game, before, delta > 0);
-    fit_experience(c, xp_for);
+    if delta > 0 {
+        let low = xp_for(self::level(c)).unwrap_or(0);
+        if experience(c) < low {
+            set_experience(c, low);
+        }
+    } else {
+        fit_experience(c, xp_for);
+    }
 }
 
 /// The class entry, bases and records of `set_class_level`, without Health and Force;
@@ -1017,6 +1031,67 @@ fn fit_experience(c: &mut Struct, xp_for: &dyn Fn(i64) -> Option<i64>) {
     }
 }
 
+/// Check only the history that must remain. Later edited classes or synthetic levels
+/// do not prevent a rewind when the earlier records still describe real levels.
+pub fn validate_rewind_prefix(c: &Struct, wanted: i64, cat: &crate::catalog::Catalog) -> Result<usize, String> {
+    let records = c.list("LvlStatList").filter(|r| !r.is_empty()).ok_or("The saved level history is missing. Earlier levels cannot be reconstructed safely.")?;
+    let keep = (wanted.max(1) as usize).min(records.len());
+    for (i, record) in records.iter().take(keep).enumerate() {
+        let class = record.int("LvlStatClass").and_then(|id| cat.class(id));
+        if class.is_none() || record.int("LvlStatHitDie").map_or(true, |v| v <= 0) || record.int("LvlStatForce").map_or(true, |v| v < 0) {
+            return Err(format!("The saved level history has no usable record for level {}. Earlier levels cannot be reconstructed safely.", i + 1));
+        }
+    }
+    Ok(keep)
+}
+
+/// Restore the retained chronological levels, rather than looking them up through a
+/// current class list that another edit may have changed. Only recorded gains are undone.
+pub fn rewind_level_history(c: &mut Struct, wanted: i64, cat: &crate::catalog::Catalog) -> Result<i64, String> {
+    let keep = validate_rewind_prefix(c, wanted, cat)?;
+    let records = c.list("LvlStatList").unwrap().clone();
+    let mut hp = 0;
+    let mut fp = 0;
+    for record in records.iter().skip(keep).rev() {
+        undo_record(c, record);
+        hp += record.int("LvlStatHitDie").unwrap_or(0).max(0);
+        fp += record.int("LvlStatForce").unwrap_or(0).max(0);
+    }
+    add_to_short(c, "HitPoints", -hp);
+    add_to_short(c, "ForcePoints", -fp);
+    let old_classes = c.list("ClassList").cloned().unwrap_or_default();
+    let mut counts: Vec<(i64, i64)> = Vec::new();
+    for record in records.iter().take(keep) {
+        let id = record.int("LvlStatClass").unwrap();
+        if let Some((_, levels)) = counts.iter_mut().find(|(class, _)| *class == id) { *levels += 1; }
+        else { counts.push((id, 1)); }
+    }
+    let classes = counts.into_iter().map(|(id, levels)| {
+        let original = old_classes.iter().find(|e| e.int("Class") == Some(id));
+        let mut entry = original.cloned().or_else(|| old_classes.first().cloned()).unwrap_or_else(|| Struct::new(0));
+        entry.set_int("Class", id, Value::Int(0));
+        entry.set_int("ClassLevel", levels, Value::Short(0));
+        if cat.class(id).unwrap().force_die == 0 {
+            entry.fields.retain(|(label, _)| label != "KnownList0");
+        } else if original.is_none() {
+            let mut spells: Vec<Struct> = Vec::new();
+            for record in records.iter().take(keep).filter(|r| r.int("LvlStatClass") == Some(id)) {
+                for spell in record.list("KnownList0").into_iter().flatten() {
+                    if !spells.iter().any(|s| s.int("Spell") == spell.int("Spell")) { spells.push(spell.clone()); }
+                }
+            }
+            entry.set("KnownList0", Value::List(spells));
+        }
+        entry
+    }).collect();
+    c.set("ClassList", Value::List(classes));
+    c.set("LvlStatList", Value::List(records[..keep].to_vec()));
+    if let Some(points) = records[keep - 1].int("SkillPoints") { set_skill_points(c, points); }
+    heal(c, cat.game);
+    sync_maxima(c, cat.game);
+    Ok(keep as i64)
+}
+
 /// Takes back what one level record gave.
 fn undo_record(c: &mut Struct, record: &Struct) {
     let feats: Vec<i64> = record.list("FeatList").map(|l| l.iter().filter_map(|f| f.int("Feat")).collect()).unwrap_or_default();
@@ -1162,4 +1237,44 @@ pub fn equip(c: &mut Struct, slot: u32, mut item: Struct, object_id: u32) {
     list.retain(|i| i.id != slot);
     let at = list.iter().position(|i| i.id > slot).unwrap_or(list.len());
     list.insert(at, item);
+}
+
+#[cfg(test)]
+mod rewind_history_tests {
+    use super::*;
+    use crate::{catalog::{Catalog, Class, LevelGrants}, gamedata::GameData};
+
+    fn catalog() -> Catalog {
+        let mut cat = Catalog::build(&GameData::none(Game::K1));
+        cat.classes = [(0, 10, 0), (1, 8, 0), (3, 10, 4), (4, 6, 8)].into_iter().map(|(id, hit_die, force_die)| Class { id, name: format!("Recorded class {}", id), hit_die, force_die, droid: false, game: Game::K1, grants: LevelGrants::default() }).collect();
+        cat
+    }
+    fn player() -> Struct {
+        let mut p = Struct::new(0);
+        p.set("IsPC", Value::Byte(1)); p.set("Con", Value::Byte(10));
+        p.set("HitPoints", Value::Short(100)); p.set("ForcePoints", Value::Short(16));
+        let mut class = Struct::new(0); class.set("Class", Value::Int(0)); class.set("ClassLevel", Value::Short(7));
+        p.set("ClassList", Value::List(vec![class]));
+        let records = [(1,8,0),(1,8,0),(1,8,0),(4,6,8),(4,6,8),(0,0,0),(0,0,0)].into_iter().map(|(class,hp,fp)| {
+            let mut r = Struct::new(0); r.set("LvlStatClass", Value::Byte(class)); r.set("LvlStatHitDie", Value::Byte(hp)); r.set("LvlStatForce", Value::Byte(fp)); r.set("SkillPoints", Value::Byte(0)); r
+        }).collect();
+        p.set("LvlStatList", Value::List(records)); p
+    }
+    #[test]
+    fn earlier_levels_can_be_rebuilt_despite_later_edited_classes() {
+        let mut p = player();
+        assert!(!level_records_match(&p));
+        assert_eq!(rewind_level_history(&mut p, 3, &catalog()).unwrap(), 3);
+        assert_eq!(classes(&p), vec![(1,3)]);
+        assert_eq!(p.list("LvlStatList").unwrap().len(), 3);
+        assert!(level_records_match(&p));
+        assert_eq!(health(&p), (24,24));
+        assert_eq!(force(&p, Game::K1), (0,0));
+    }
+    #[test]
+    fn unusable_retained_levels_are_refused_without_changing_the_character() {
+        let mut p = player(); let original = p.clone();
+        assert!(rewind_level_history(&mut p, 6, &catalog()).is_err());
+        assert_eq!(p, original);
+    }
 }

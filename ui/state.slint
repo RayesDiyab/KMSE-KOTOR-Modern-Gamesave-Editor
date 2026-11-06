@@ -16,6 +16,8 @@ export struct DoorRow { index: int, tag: string, note: string, locked: bool, ope
 export struct BoxRow { index: int, name: string, note: string }
 export struct PortraitRow { id: int, image: image, female: bool, current: bool }
 export struct ClassRow { index: int, name: string, level: int, maximum: int, can-remove: bool }
+export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool }
+export struct StoryItem { name: string, icon: image, has-icon: bool, difference: string, gained: bool }
 // A quest's stage: 0 behind where the quest is, 1 where it is, 2 ahead.
 export struct StageRow { id: int, text: string, xp: int, end: bool, place: int }
 // One effect of finishing a quest as if played: for which ending, in plain words, whether
@@ -53,6 +55,8 @@ export global App {
     in property <bool> has-k1;
     in property <bool> has-k2;
     in property <bool> showing-k2;
+    in-out property <bool> renaming-save;
+    in-out property <bool> rename-hovered;
     in property <[SaveRow]> saves;
     in property <int> selected-save: 0;
     in property <string> saves-note;
@@ -286,6 +290,7 @@ export global App {
     callback set-door-open(int, bool);
     callback select-box(int);
     callback remove-box-item(int);
+    callback set-box-stack(int, int);
     callback add-box-item();
     callback set-planet(int, bool);
     callback set-cheat(bool);
@@ -382,6 +387,14 @@ export global App {
     in property <string> pop-place;
     in property <int> pop-picked: -1;
     in property <int> pop-action;
+    in property <string> pop-detail;
+    in property <bool> story-preview-ready;
+    in property <string> story-preview-status;
+    in property <[StoryValue]> story-values;
+    in property <[StoryItem]> story-items;
+    in property <[Named]> story-grants;
+    callback refresh-story-preview();
+    callback story-preview-finished();
     callback pick-row(int);
     in property <[SkipRow]> skip-rows;
     // The chapter asked about, before skipping (the confirm pop-up, overlay 10).
@@ -402,17 +415,12 @@ export global App {
     // KotOR 2: train the companions as Jedi without their conversations (0 yes, 1 no)
     in property <bool> skip-train;
     in-out property <int> skip-train-pick: 0;
-    callback ask-skip(int);
     callback toggle-skip(string);
-    // skip to a quest's stage: the chapter, the quest's tag, the stage
-    callback ask-skip-stage(int, string, int);
-    // going back: the chapter, a quest's tag and stage (none: the chapter's start); then the
-    // pop-up (overlay 11) and its items choice (0 keep what the player has now, 1 as the story was)
-    callback ask-back(int, string, int);
+    // going back: the pop-up (overlay 11). Items and credits always follow the story.
     callback do-back();
     in property <string> back-title;
     in property <string> back-summary;
-    in-out property <int> back-keep: 0;
+    in-out property <int> back-alignment: 50;
     // another save of the game, opened from the timeline
     callback open-timeline-save(int);
     in property <length> skip-height;

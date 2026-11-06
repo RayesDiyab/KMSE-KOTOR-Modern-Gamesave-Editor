@@ -147,8 +147,8 @@ export component SavesPage inherits Rectangle {
         border-radius: 10px;
         visible: App.saves.length > 0;
         property <length> inner: self.width - 44px;
-        // the pen pressed: the name is a text box until Enter, the save icon or Escape
-        property <bool> renaming;
+        // Enter and the icon save; Escape or a press outside cancels the draft.
+        property <bool> renaming <=> App.renaming-save;
         property <string> new-name;
         shot := Rectangle {
             x: 22px;
@@ -173,72 +173,77 @@ export component SavesPage inherits Rectangle {
                 spacing: 4px;
                 alignment: start;
                 horizontal-stretch: 1;
-                HorizontalLayout {
+                rename-touch := TouchArea {
                     height: 44px;
-                    spacing: renaming ? 12px : 4px;
-                    alignment: start;
-                    if !renaming: Text {
-                        max-width: inner - 260px;
-                        text: App.preview-name;
-                        font-family: Theme.title-font;
-                        font-size: 30px * Theme.ts;
-                        color: Theme.text;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    // the pen: only its lines, at the name's top right, yellow under the mouse
-                    if !renaming: VerticalLayout {
+                    width: renaming ? inner - 260px + 12px + 44px : name-row.preferred-width;
+                    changed has-hover => { App.rename-hovered = self.has-hover; }
+                    name-row := HorizontalLayout {
+                        spacing: renaming ? 12px : 4px;
                         alignment: start;
-                        Rectangle {
-                            width: 22px;
-                            height: 22px;
-                            Path {
-                                width: 18px;
-                                height: 18px;
-                                viewbox-width: 24;
-                                viewbox-height: 24;
-                                stroke: pen-touch.has-hover ? Theme.hover-edge : Theme.accent;
-                                stroke-width: 1.8px;
-                                stroke-line-cap: round;
-                                commands: "M 4 20 L 8 20 L 19 9 L 15 5 L 4 16 Z M 13 7 L 17 11";
-                            }
-                            pen-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => {
-                                    new-name = App.preview-name;
-                                    renaming = true;
+                        if !renaming: Text {
+                            max-width: inner - 260px;
+                            text: App.preview-name;
+                            font-family: Theme.title-font;
+                            font-size: 30px * Theme.ts;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        // the pen: only its lines, at the name's top right, yellow under the mouse
+                        if !renaming: VerticalLayout {
+                            alignment: start;
+                            Rectangle {
+                                width: 22px;
+                                height: 22px;
+                                Path {
+                                    width: 18px;
+                                    height: 18px;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                    stroke: pen-touch.has-hover ? Theme.hover-edge : Theme.accent;
+                                    stroke-width: 1.8px;
+                                    stroke-line-cap: round;
+                                    commands: "M 4 20 L 8 20 L 19 9 L 15 5 L 4 16 Z M 13 7 L 17 11";
+                                }
+                                pen-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        new-name = App.preview-name;
+                                        renaming = true;
+                                    }
                                 }
                             }
                         }
-                    }
-                    if renaming: FocusScope {
-                        width: inner - 260px;
-                        key-pressed(event) => {
-                            if event.text == Key.Escape {
-                                renaming = false;
-                                return accept;
+                        if renaming: FocusScope {
+                            width: inner - 260px;
+                            key-pressed(event) => {
+                                if event.text == Key.Escape {
+                                    renaming = false;
+                                    return accept;
+                                }
+                                reject
                             }
-                            reject
-                        }
-                        name-box := Field {
-                            height: 44px;
-                            text <=> new-name;
-                            font: Theme.title-font;
-                            font-size: 24px * Theme.ts;
-                            init => { self.focus-all(); }
-                            accepted(t) => {
-                                renaming = false;
-                                App.rename-save(t);
+                            name-box := Field {
+                                height: 44px;
+                                accept-on-blur: false;
+                                text <=> new-name;
+                                font: Theme.title-font;
+                                font-size: 24px * Theme.ts;
+                                init => { self.focus-all(); }
+                                accepted(t) => {
+                                    renaming = false;
+                                    App.rename-save(t);
+                                }
                             }
                         }
-                    }
-                    if renaming: IconButton {
-                        width: 44px;
-                        lit: true;
-                        icon: "M 5 4 L 16 4 L 19 7 L 19 20 L 5 20 Z M 8 4 L 8 9 L 15 9 L 15 4 M 8 20 L 8 14 L 16 14 L 16 20";
-                        clicked => {
-                            renaming = false;
-                            App.rename-save(new-name);
+                        if renaming: IconButton {
+                            width: 44px;
+                            lit: true;
+                            icon: "M 5 4 L 16 4 L 19 7 L 19 20 L 5 20 Z M 8 4 L 8 9 L 15 9 L 15 4 M 8 20 L 8 14 L 16 14 L 16 20";
+                            clicked => {
+                                renaming = false;
+                                App.rename-save(new-name);
+                            }
                         }
                     }
                 }

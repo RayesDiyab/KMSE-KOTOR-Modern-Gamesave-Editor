@@ -63,7 +63,7 @@ STAR_MAP_RULE = {
     "rule": "K_STAR_MAP = 10 + 10 for each planet flag that is TRUE after this milestone's own flag is set",
     "on_count": [
         {"count": 30, "set": [{"name": "K_SWG_BASTILA", "value": 99, "only_if_below": 3}]},
-        {"count": 40, "set": [{"name": "K_CAPTURED_LEV", "value": 5},
+        {"count": 40, "set": [{"name": "K_CAPTURED_LEV", "value": 5, "only_if_below": 5},
                               {"name": "K_SWG_BASTILA", "value": 99, "only_if_below": 5}],
          "note": "K_CAPTURED_LEV 5 makes the next take-off from the galaxy map (k_sup_galaxymap: K_STAR_MAP "
                  "== 40 and K_CAPTURED_LEV == 5) play the Leviathan capture"},

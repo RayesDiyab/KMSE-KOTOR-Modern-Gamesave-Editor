@@ -358,8 +358,16 @@ case insensitive on Windows.
 | `GLOBALVARS.res` | GFF `GVT ` | Global script variables (section 4). |
 | `SAVEGAME.sav` | ERF `MOD ` | Nested module saves, NPC roster creatures, party inventory, factions (2.4). |
 | `Screen.tga` | TGA | Thumbnail (1.6). |
+| `pifo.ifo` | GFF `IFO ` | External `Mod_PlayerList` with the player. In the measured KotOR 1 arrival autosave (2026-10-25, `LASTMODULE` `unk_m41ad`), the archive has no current-module player. A 2026-10-29 audit also found it in the KotOR II `201TEL` autosave alongside an archived current-module player and `pc.utc`. The editor does not write this external file [file]. |
 
 There is **no** `PARTYTABLE` or `GLOBALVARS` inside `SAVEGAME.sav` in KotOR 1 [file].
+
+**Correction, 2026-10-29:** the first `pifo.ifo` note described only the KotOR 1
+arrival autosave. File presence does not prove the archive lacks a player. The audit
+found one file among 23 KotOR 1 saves and one among four KotOR II saves, both autosaves.
+The reader uses the external file only if no archived player is available. All saves
+with this external player-state file remain read only until synchronized writes and
+game loading are verified. The other three KotOR II saves have no such restriction.
 
 ### 2.2 savenfo.res (`NFO `) [file]
 
@@ -443,7 +451,7 @@ There is no separate PC `.utc` in a KotOR 1 SAVEGAME.sav [file].
 
 | Value | Location | Notes |
 | --- | --- | --- |
-| Player creature | `SAVEGAME.sav` > nested `<LASTMODULE>` > `Module.ifo` > `Mod_PlayerList[0]` (struct id **48813 = 0xBEAD**) | The authoritative copy [RE: LoadServerCharacter reads `Mod_PlayerList`]. **Every** nested Module.ifo has its own stale snapshot of the player from when it was last left [file: Galaxy save has player XP 44100..55480 across modules]. Edit the LASTMODULE copy; updating the others is harmless and avoids confusion. |
+| Player creature | `SAVEGAME.sav` > nested `<LASTMODULE>` > `Module.ifo` > `Mod_PlayerList[0]` (struct id **48813 = 0xBEAD**) | The authoritative copy [RE: LoadServerCharacter reads `Mod_PlayerList`]. **Every** nested Module.ifo has its own stale snapshot of the player from when it was last left [file: Galaxy save has player XP 44100..55480 across modules]. Edit the LASTMODULE copy; updating the others is harmless and avoids confusion. When `SAVEGAME.sav` has no nested save for LASTMODULE, the player is in `pifo.ifo` beside it (2.1). |
 | Party member creatures | `AVAILNPCn.utc` | Authoritative for members in the active party: they are **not** in the module GIT [file: Game22]. |
 | NPCs standing in the current module (Ebon Hawk) | Both `AVAILNPCn.utc` **and** the module `.git` `Creature List` | Measured identical copies in the Galaxy save (all 7 recruited NPCs). Edit both or the change is lost or duplicated depending on which one the game spawns. |
 | Party inventory | `INVENTORY.res` `ItemList` | The PC's own `ItemList` is empty; equipped items are in each creature's `Equip_ItemList`. |
@@ -580,9 +588,13 @@ same condition). Party members (`AVAILNPCn`, their copies in the area) and every
 creature have neither.
 
 **Modifiers.** `mod(x) = floor((x - 10) / 2)` of the attribute as the engine holds it: the
-saved score plus what the creature's ability effects add (`EffectList` entries of type 36,
-`IntList` = attribute number 0 to 5, amount), plus the racial adjustment (0 for every
-race in both games' `racialtypes.2da`); KotOR 2 floors the attribute at 3. The Force
+saved score plus what the creature's ability effects add and take away (`EffectList` entries
+of type 36 and 37, `IntList` = attribute number 0 to 5, amount, positive in both), plus the
+racial adjustment (0 for every race in both games' `racialtypes.2da`). Both games floor every
+attribute at 3 [RE] (*corrected 2026-11-02:* this page said KotOR 2 only; the KotOR 1 1.03
+getters and five of KotOR 2's six do it alike, KotOR 2's Dexterity getter was not read). The
+engine also caps the effect total (KotOR 1 +20 and -30, KotOR 2 +60 and -90) and keeps only the
+highest increase of one source for an attribute [RE]; `src/creature.rs` models neither. The Force
 modifier `F` is Wisdom plus Charisma in KotOR 1 and Wisdom alone in KotOR 2. `L` is the
 total class level, `T` the Toughness bonus per level: 2 with feat 124, else 1 with feat 84,
 else 0.
@@ -1023,7 +1035,7 @@ the editor and loaded in the game:
 | Droids with Jedi classes, feats or force powers they cannot use | Droid classes (6, 7) and droid races cannot use force powers; feat.2da / skills.2da `droidcanuse` columns. | Filter by class and race. |
 | PC total level larger than LvlStatList length | GetMaxHitPoints indexes one entry per level (3.4). | Add LvlStat entries when adding levels. |
 | Editing MaxHitPoints / ArmorClass / saving throws / Cost | Not read on load; recomputed. | Edit the inputs (HitPoints, LvlStatHitDie, Con, items). |
-| CurrentHitPoints above HitPoints | Stored value is relative to the base; values above base overheal after the bonus is added. | Full heal = `CurrentHitPoints = HitPoints`. |
+| CurrentHitPoints above HitPoints | Stored value is relative to the base; values above base overheal after the bonus is added. | See 3.4 for the full heal: this line used to read `CurrentHitPoints = HitPoints`, which section 3.4's correction replaced. |
 | Editing only one copy of an NPC | NPCs can exist in AVAILNPCn and in the current GIT (Ebon Hawk). | Edit both copies. |
 | Editing a stale player copy | Every module IFO holds a player snapshot. | Edit the LASTMODULE copy (and optionally all). |
 | PT_NUM_MEMBERS out of sync with PT_MEMBERS, members that are not recruited (PT_NPC_AVAIL 0) or without an AVAILNPC file | Party table holds indices only. | Validate the three together; max 2 members, no duplicates. |
@@ -1031,7 +1043,7 @@ the editor and loaded in the game:
 | GLOBALVARS over the caps (904 booleans, 500 numbers, 100 locations, 5 strings) | Reader buffers are fixed. | Enforce caps. |
 | Reordering Cat lists | Values are positional. | Edit values in place. |
 | Duplicate or reused ObjectIds | Object lookups go by id. | Allocate new ids above Mod_NextObjId0 and bump it. |
-| Effects left by removed items | Item bonuses live in EffectList with CreatorId = item ObjectId. | When removing an equipped item, also remove effects whose CreatorId is that item, or unequip in game. UNCONFIRMED whether the engine cleans them on load. |
+| Effects left by removed items | Item bonuses live in EffectList with CreatorId = item ObjectId. | When removing an equipped item, also remove effects whose CreatorId is that item, as the engine does. **Settled 2026-11-02** [RE, both games]: a creature's load equips each item and applies its properties anew, and the effect list's load drops entries with `SkipOnLoad` 1 or `SubType & 7` = 3, the kind every item effect in seven saves has (SubType 3, SkipOnLoad 0). So an item's bonuses come from the item at load, a stored one is never used, and the editor writes none. KotOR 2 applies nothing for slots 0x40000 and 0x80000, the second weapon set. |
 | Text encoding | Names are Windows-1252 (English). | Encode to the TLK language code page; reject characters outside it. |
 | Steam Cloud overwriting the edit | Cloud copy newer. | Close the game and Steam sync before editing; tell the user. |
 

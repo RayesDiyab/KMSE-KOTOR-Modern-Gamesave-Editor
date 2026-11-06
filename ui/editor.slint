@@ -166,7 +166,7 @@ component CharacterTab inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         Field {
-                            text: App.name;
+                            property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.name; } text: App.name;
                             changed: App.name-changed;
                             accepted(t) => { App.set-name(t); }
                             edited(t) => { App.set-name(t); }
@@ -189,9 +189,9 @@ component CharacterTab inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         Field {
-                            text: App.xp;
+                            property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.xp; } text: App.xp;
                             changed: App.xp-changed;
-                            accepted(t) => { App.set-xp(t.to-float()); }
+                            accepted(t) => { if t.is-float() { App.set-xp(t.to-float()); } else { self.text = App.xp; } }
                         }
                     }
                 }
@@ -463,7 +463,7 @@ component Money inherits Line {
         }
         VerticalLayout {
             alignment: center;
-            Field { width: min(170px, root.width - 150px); text: value; changed: changed; accepted(t) => { root.set(t.to-float()); } }
+            Field { width: min(170px, root.width - 150px); property <int> epoch: App.pool-epoch; changed epoch => { self.text = value; } text: value; changed: changed; accepted(t) => { if t.is-float() { root.set(t.to-float()); } else { self.text = value; } } }
         }
     }
 }
@@ -826,7 +826,7 @@ component PartyTab inherits Rectangle {
         }
         VerticalLayout {
             alignment: center;
-            Field { width: 170px; text: App.party-xp; changed: App.party-xp-changed; accepted(t) => { App.set-party-xp(t.to-float()); } }
+            Field { width: 170px; property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.party-xp; } text: App.party-xp; changed: App.party-xp-changed; accepted(t) => { if t.is-float() { App.set-party-xp(t.to-float()); } else { self.text = App.party-xp; } } }
         }
         Rectangle { horizontal-stretch: 1; }
     }
@@ -843,12 +843,12 @@ component GlobalsSection inherits Rectangle {
         height: 40px;
         spacing: 12px;
         Text { text: "SAVE NAME"; vertical-alignment: center; font-family: Theme.label-font; font-size: 11px * Theme.ts; letter-spacing: 3px; color: Theme.accent; }
-        Field { width: 300px; text: App.save-name; changed: App.save-name-changed; accepted(t) => { App.set-save-name(t); } }
+        Field { width: 300px; property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.save-name; } text: App.save-name; changed: App.save-name-changed; accepted(t) => { App.set-save-name(t); } }
         Rectangle { width: 18px; }
         Text { text: "TIME PLAYED"; vertical-alignment: center; font-family: Theme.label-font; font-size: 11px * Theme.ts; letter-spacing: 3px; color: Theme.accent; }
-        ph := Field { width: 80px; text: App.played-hours; changed: App.played-changed; accepted(t) => { App.set-played(ph.text, pm.text); } }
+        ph := Field { width: 80px; property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.played-hours; } text: App.played-hours; changed: App.played-changed; accepted(t) => { App.set-played(ph.text, pm.text); } }
         Text { text: "h"; vertical-alignment: center; color: Theme.faint; }
-        pm := Field { width: 64px; text: App.played-minutes; changed: App.played-changed; accepted(t) => { App.set-played(ph.text, pm.text); } }
+        pm := Field { width: 64px; property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.played-minutes; } text: App.played-minutes; changed: App.played-changed; accepted(t) => { App.set-played(ph.text, pm.text); } }
         Text { text: "min"; vertical-alignment: center; color: Theme.faint; }
         Rectangle { width: 18px; }
         VerticalLayout { alignment: center; Switch { on: App.cheat-used; changed: App.cheat-changed; toggled(v) => { App.set-cheat(v); } } }
@@ -946,9 +946,9 @@ component AreaSection inherits Rectangle {
             x: 0; y: 30px;
             height: 40px;
             spacing: 8px;
-            px := Field { text: App.position-x; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
-            py := Field { text: App.position-y; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
-            pz := Field { text: App.position-z; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
+            px := Field { property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.position-x; } text: App.position-x; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
+            py := Field { property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.position-y; } text: App.position-y; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
+            pz := Field { property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.position-z; } text: App.position-z; changed: App.position-changed; font-size: 15px * Theme.ts; accepted(t) => { App.set-position(px.text, py.text, pz.text); } }
         }
         Label { x: 0; y: 92px; text: "CONTAINERS AND STORES"; }
         Scroller {
@@ -986,7 +986,7 @@ component AreaSection inherits Rectangle {
                 height: parent.height - 48px;
                 content-height: App.box-items.length * 50px;
                 VerticalLayout {
-                    for r[i] in App.box-items: ItemLine { item: r; editable: true; remove => { App.remove-box-item(i); } }
+                    for r[i] in App.box-items: ItemLine { item: r; editable: true; remove => { App.remove-box-item(i); } stack(v) => { App.set-box-stack(i, v); } }
                 }
             }
         }

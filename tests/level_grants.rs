@@ -57,7 +57,7 @@ fn prestige_class_as_the_engine_adds_it() {
     let class = cat.class(12).cloned().unwrap();
     let npc = data.table("npc");
     let mut checked = 0;
-    for folder in find_saves(&installs, Game::K2, &[]) {
+    for folder in find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
         let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
         let work = scratch(&format!("prestige-{}", name));
         copy_dir(&folder.path, &work);
@@ -210,6 +210,29 @@ fn raised_levels_bring_their_granted_feats_and_points() {
     eprintln!("{} made-up creatures", checked);
 }
 
+#[test]
+fn adding_a_class_does_not_claim_a_feat_the_player_already_owned() {
+    let installs = find_installs(&[]);
+    let mut checked = 0;
+    for game in [Game::K1, Game::K2] {
+        let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
+        let cat = Catalog::build(&GameData::open(game, &install.path));
+        let guardian = cat.class(3).cloned().unwrap();
+        let mut c = made_up(game, true, "", 1, 3, 14);
+        creature::add_feat(&mut c, 101);
+        let before = creature::feats(&c);
+        assert!(creature::add_class(&mut c, &guardian, None));
+        assert!(creature::feats(&c).contains(&101));
+        let record = c.list("LvlStatList").unwrap().last().unwrap();
+        assert!(!record.list("FeatList").unwrap().iter().any(|f| f.int("Feat") == Some(101)));
+        assert!(record.list("FeatList").unwrap().iter().any(|f| f.int("Feat") == Some(107)));
+        creature::remove_class(&mut c, 1, &guardian, &|l| cat.xp_for(l));
+        assert_eq!(creature::feats(&c), before, "removing the class preserves the earlier grant");
+        checked += 1;
+    }
+    eprintln!("Already-owned first-class grants checked on {} games", checked);
+}
+
 /// The rules reproduce what the game wrote: every player level record in every save on this
 /// machine holds the feats the level grants on its own (those the creature did not have
 /// yet), with the creature's levels as they were after that level.
@@ -221,9 +244,9 @@ fn granted_feats_match_the_games_level_records() {
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
         let cat = Catalog::build(&data);
-        for folder in find_saves(&installs, game, &[]) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
-            if name.contains("KMRP") {
+            if name.contains("KMRP") || kse_core::save::summary(&folder.path).map_or(false, |s| s.name.contains("KMRP")) {
                 continue; // written by the editor
             }
             let Ok(save) = Save::open(&folder.path) else { continue };
@@ -235,7 +258,14 @@ fn granted_feats_match_the_games_level_records() {
             // Replay the records from the second one (the first is character creation).
             let ids: Vec<i64> = creature::classes(p).iter().map(|(k, _)| *k).collect();
             let mut levels = vec![0i64; ids.len()];
-            let mut have: Vec<i64> = Vec::new();
+            // Script and manual grants need not belong to any level record. They
+            // are already owned when replaying recorded grants. Their exact award
+            // time cannot be recovered from this save.
+            let recorded: std::collections::HashSet<i64> = records.iter()
+                .flat_map(|r| r.list("FeatList").into_iter().flatten())
+                .filter_map(|f| f.int("Feat")).collect();
+            let mut have: Vec<i64> = creature::feats(p).into_iter()
+                .filter(|f| !recorded.contains(f)).collect();
             for (i, r) in records.iter().enumerate() {
                 let k = r.int("LvlStatClass").unwrap_or(-1);
                 let Some(idx) = ids.iter().position(|x| *x == k) else { break };

@@ -67,6 +67,50 @@ Which game a folder holds: its executable or ini (`swkotor2.*` is KotOR 2), else
 `STORYHINT0` or `TIMESTAMP`, KotOR 1's never does. When both games are installed the list
 opens on the one used last, and one button switches; KotOR 2 then gets its own colours.
 
+The pen beside the preview's name opens a rename field. Enter or its save icon writes
+`savenfo.res`'s `SAVEGAMENAME`, through `Save::write` with a backup first. Escape or a
+click outside the field and its save icon cancels the draft. Switching games or selecting
+another save cancels it too (`ui/saves.slint`, `ui/app.slint`, `src/main.rs`, 2026-10-24).
+Other text fields still apply changed text when focus leaves them. Before this correction,
+an unchanged rename field stayed open across game switches, and changed text could be
+applied when focus left it. The shared `Field` treated focus loss as Enter.
+
+**Long-name correction, 2026-10-29:** the shared `Field` clipped a fixed-width
+`TextInput`, so the hidden part of a long name could not be reached visibly. It now
+uses a clipped viewport with an input wide enough for the text. Cursor-position
+changes adjust the horizontal offset, following keyboard movement and dragged
+selections while retaining the field's padding. Rename still applies only through
+Enter or the save icon, and outside clicks cancel it.
+Headless input checks on 2026-10-29 used a 195-character name: Home and repeated
+Right moved between its beginning and end, edits to both ends reached the rename
+callback intact, and dragging beyond the right edge selected hidden characters.
+Rendered beginning, end and selection states were inspected. The earlier seven
+rename interaction checks passed too. These checks used synthetic rows and wrote
+no saves; desktop mouse interaction remains for the user to check.
+
+To check: press the pen, type a different name, then click an empty part of the window.
+The field must close and the original name remain. Repeat by switching games and by
+selecting another save. Clicking inside the field must keep it open; Escape cancels.
+Check Enter and the save icon only on a copy of a save. On 2026-10-25, a headless
+interaction check of the generated Slint UI passed seven cases: empty-space click,
+game switch, click inside the field, Enter, save icon, Escape and save selection. Only
+Enter and the icon invoked the rename callback. It used synthetic rows and wrote no saves.
+The 33 existing tests passed too, including round trips of 23 saves and edits read back
+from copies of all 23. Desktop click checks were blocked by the automation approval
+check; in-game checks for this correction are **untested**.
+
+Copy and Save as a New Save make a new folder beside the save, numbered one past the
+highest number in the saves folder and named in the game's own pattern, `<number> -
+Game<number - 1>` (`save::next_save_folder` in `src/save.rs`). The name the player typed goes
+only into `savenfo.res`'s `SAVEGAMENAME`. The game reads a folder's number and accepts any
+name after it, but when it overwrites a save it writes to `<number> - Game<number - 1>`.
+From 2026-10-24 to 2026-10-29 the folder carried the typed name instead ("000913 - Game26 -
+Copy"). Overwriting such a save in the game left it in place and made a second save of the
+same name: "000920 - KMRPPazaak" gained a twin "000920 - Game919" (reported 2026-10-29).
+Folders made in that time keep their names; renaming one by hand to the pattern, with the
+game closed, ends the problem for it. Checked by `a_new_save_folder_is_named_as_the_game_names_it`
+in `tests/save_as.rs`; overwriting a new copy in the game is **untested**.
+
 ## 3. Every value the editor writes
 
 "Copies" means every copy of the creature the save holds (section 1). All names in lists come
@@ -99,10 +143,10 @@ modded game shows its mods.
 | Party | Influence (KotOR 2) | `PT_INFLUENCE[n].PT_NPC_INFLUENCE` | 0 to 100; hidden for someone not met (-1) |
 | Party | Bring or Replace from Another Save | `AVAILNPCn.utc` copied from another save of the same game, recruited and selectable | the other save must hold that member |
 | Party | Party experience | `PT_XP_POOL` | members who join later catch up to their share of it |
-| Story | Global variables | `ValBoolean` bit `7 - i % 8` of byte `i / 8`; `ValNumber` byte `i` (shown -128 to 127); `ValString[i]` | the catalogue lists are never reordered |
-| Story | Compare with Another Save | read only; "Take" copies the other save's value of one variable, "Take All Theirs" every differing one | matched by name and kind |
-| Story | Doors | `Locked` (unlocking also clears `KeyRequired`), `OpenState` (opening also unlocks) in the area's `Door List` | |
-| Story | Containers and stores | `ItemList` of a placeable (new items get an `ObjectId` above every id in the area) or a store (items numbered by position, `Infinite` kept when the store uses it) | |
+| Advanced | Global variables | `ValBoolean` bit `7 - i % 8` of byte `i / 8`; `ValNumber` byte `i` (shown -128 to 127); `ValString[i]` | the catalogue lists are never reordered |
+| Advanced | Compare with Another Save | read only; "Take" copies the other save's value of one variable, "Take All Theirs" every differing one | matched by name and kind |
+| Advanced | Doors | `Locked` (unlocking also clears `KeyRequired`), `OpenState` (opening also unlocks) in the area's `Door List` | |
+| Advanced | Containers and stores | `ItemList` of a placeable (new items get an `ObjectId` above every id in the area) or a store (items numbered by position, `Infinite` kept when the store uses it) | |
 | Story | Journal | removes an entry of `JNL_Entries` | the story switches stay as they are |
 | Story | Galaxy map | `GlxyMap.GlxyMapPlntMsk`: bit *i* and bit *i*+16 together | rows of `planetary.2da` |
 | Story | Pazaak side cards | `PT_PAZAAKCARDS[i].PT_PAZAAKCOUNT` | 0 to 9 |
@@ -169,7 +213,8 @@ before the picked one that the save has not played, in story order, then the pic
 | --- | --- |
 | Journal | the chapter's stages, then the quests the game itself removes (`journal_remove`) |
 | Story values | the milestone's globals |
-| Star maps | `K_STAR_MAP` counted the game's way (10 and 10 a planet whose map is found) and what reaching a count sets (the Leviathan capture after the third, the Unknown World after the fourth) |
+| Star maps | `K_STAR_MAP` counted the game's way (10 and 10 a planet whose map is found) and what reaching a count sets (the Leviathan capture after the third, the Unknown World after the fourth). Only the chapter's own `K_STAR_MAP_*` flag is set. Until 2026-11-02 closing a chapter's quests replayed every branch of the game's star map script, so a skip that included Tatooine or Korriban found all four maps, opened the Unknown World and left `K_STAR_MAP` at 10, and the capture never played. Checked by `tests/star_maps.rs`; in the game, **untested** |
+| Which planets | the timeline's order, Tatooine, Kashyyyk, Manaan, Korriban: a skip plays the planets the save has not played, first in that list first, and there is no choice of which. Planets a save played itself stay played, and the count follows them in any order. The Leviathan goes in before a fourth planet, as in the game (`leviathan_in_place` in `src/questdb.rs`), and a skip to the Leviathan leaves the fourth planet open. Until 2026-11-02 the Leviathan came after all four |
 | Items, loot | held items, the enemies' Dropable items, the containers' loot (class gear by the game's tests); credit chips (base item 57) add their stack size to the party's credits |
 | Credits, alignment | what the chapter's conversations and scripts pay and take, for a light-side and for a dark-side run (`tools/questdb/credits.py`, in the rewards file's `credits`), plus the payments the main path cannot avoid (`credits_fixed`: the droid on Taris, the assassin droid on Tatooine); the alignment moves by the side's points, never toward the other side |
 | Light or dark | asked in the confirmation when it changes anything (`side_matters`), the player's current leaning first; the dark side applies the chapter's `dark` block where the story branches: on Dantooine slot 5 is killed, not recruited; at the temple summit slot 0 rejoins and slots 4 and 5 are lost, then slots 2 and 6 leave the ship; the Star Forge plays the dark-side ending |
@@ -179,8 +224,12 @@ before the picked one that the save has not played, in story order, then the pic
 | Areas | every area of every chapter the player can return to is stored as played through (`src/stored.rs`): each object a full struct as the game stores a left area, one-time enemies omitted, doors on the path open and unlocked, looted containers empty, the area's, module's and objects' local flags as a run leaves them; never over an area the save has been to; only for save groups the trip on keeps (modulesave.2da) |
 | The trip | the last chapter's own route on, with its movies |
 
-Checked without the game (2026-10-23): a played-through copy of every one of the 117 modules
-builds and reads back (`played_through_copies_of_every_module`), and a synthesized `danm14ad`
+Checked without the game (2026-10-23; the audit of 2026-11-02 found the test needs only 50
+modules to pass and no script here repeats the `danm14ad` comparison, so read this as a record
+of that day): a played-through copy of every one of the 117 modules
+builds and reads back (`played_through_copies_of_every_module`; since 2026-11-02 the door and
+placeable counts leave out objects with no template anywhere, which a mod can ship and the
+editor cannot build), and a synthesized `danm14ad`
 matches the copy the game itself stored in a real save list for list and field for field (but
 for fields the game recomputes on load); companions from templates write and read back
 (`recruit_from_template_survives_a_write`); a new save skipped to the end of Dantooine, of
@@ -214,7 +263,7 @@ a side chapter (`tools/questdb/chapters_k2/`). What differs from KotOR 1:
 | Kill XP | read from swkotor2.exe 1.0.2 (`CalculateDeathExperience` at 0x00575B20): KotOR 2's tables, the row and column capped at 31, and an autobalanced creature (`MultiplierSet`, 316 of the 333 hostile kinds) counted at the player's level when it spawned plus its `autobalance.2da` crmod (`tools/xp/calc.py`) |
 | The trip | the save's event queue loads event 26 with the same layout as KotOR 1 (swkotor2.exe 0x005205F0) |
 
-A full KotOR 2 run reaches 249,610 XP; light / dark credits by chapter: Telos 8,545 / 9,545,
+A full KotOR 2 run reaches 240,360 XP (this page said 249,610 until 2026-11-02; the data has never held that); light / dark credits by chapter: Telos 8,545 / 9,545,
 Nar Shaddaa 4,550 / 8,953, Onderon 37,475 / 42,475 (each side's ruler pays the war's reward,
 `credits_side_only`), Dantooine 12,000 / 13,575. Checked without the game: a save on Peragus
 skipped through the whole game on each side reads back with the masters found, the XP, the
@@ -257,8 +306,115 @@ On a starfield (dark mode; light mode keeps the plain panel, whose text is dark)
 | Played | a chapter's journal entries reached, or its journal quests taken out of the journal by a chapter the save has played (`chapters_played`): the game removes the Endar Spire's quest on Taris, so every save past Taris would otherwise read the Endar Spire as never played, and Skip Ahead would have played it again |
 | Other saves | every other save of the game, any character's, just past the furthest chapter each has played; green (blue in KotOR II, where green is the accent); in one stretch grouped by character and in the order of their time played, side by side, and stacked in columns above the line where the stretch is too short; pointing at one shows its picture, name, character, level and XP, how far its story is ("Story: after Korriban") and where it loads, a click opens it |
 | Chapters | pointing at one shows it above the line, "Click to choose where to go back to" (played), "where to skip to" (ahead) or both (the one the save is in); a click opens its pop-up |
-| The pop-up | a scrolling list from the chapter's beginning (top) to its end (bottom), its quests between, each opening to its stages, each row's button on the right: Go Back to Here for what the save has played or reached, Skip to Here for the rest, leading to the Skip Ahead or Go Back confirmation. The beginning of a chapter ahead is skipped to by playing the chapter before it; the end of a played chapter is gone back to by taking the chapter after it back out |
+| The pop-up | a wider window with the chapter's beginning, expandable quests and stages, and its end on the left; the selected point's description, choices and measured changes on the right. The beginning of a chapter ahead is skipped to by playing the chapter before it; the end of a played chapter is gone back to by taking the chapter after it back out |
 | Side chapters | the Ebon Hawk's own quests and Yavin Station (KotOR; KotOR II: the Ebon Hawk) are not on the line, as Skip Ahead plays them only when picked themselves: their ships at the bottom middle open their pop-ups |
+
+**The selected point's preview** (2026-10-25, `src/story_preview.rs`,
+`src/main.rs`, `ui/app.slint`). The editor clones the current in-memory save, including
+pending edits, and runs the same story operation on that independent copy. Preparation
+runs away from the window. Apply stays disabled until it succeeds. Changing a story
+choice prepares a new result; an older selection's result cannot replace it. Apply uses
+that prepared save in memory. Cancel discards it. Neither action writes files; Save
+Changes still goes through the existing game-running check, Xbox refusal and backup.
+After applying Skip Ahead or Go Back, the popup closes directly to the editor with its
+pending change count. Map travel also stays in the editor. The extra "Gone back",
+"Skipped to" and travel success dialogs were removed on 2026-10-25; changes still wait
+for Save Changes. This covers whole chapters and individual quest stages through their
+shared Apply callbacks. Error messages and reports of quest steps left unapplied remain:
+the working tree dropped them for a while (audit finding 27), and since 2026-11-02 anything
+that could not be applied is shown after Apply (`story_problems`), success reports not.
+The earlier removal covered only Go Back; the other success paths are now covered too.
+
+Experience, credits, level and recruited companions always appear. A total that does not
+change is shown once, with no difference label. Other changes appear when present:
+alignment, party XP, components, chemicals, classes, Health and Force, attributes, skills,
+influence, feats, Force powers and companions recruited or lost. The preview reports what
+is stored after the operation; XP that has not been spent on levels still lets the game
+offer its normal level-up. There is no quest-journal row in the totals table. The selected
+stage's full journal text remains in its description.
+
+Inventory changes have their own scroller with two columns, real icons read from the
+installed game, and small signed quantities: green for added items, red for removed
+items. The count includes shared inventory and equipment held by the player and recruited
+companions. Stack splits, row order, object IDs and inventory positions do not count as
+changes. Different upgrades and charges remain distinct. If the game supplies no icon,
+the item's name and quantity remain visible.
+
+Going back always uses the story's items and credits (`keep_items = false` in the existing
+story engine). It removes mapped rewards still held and restores what the story operation
+restores. This is not an earlier snapshot of everything the player bought, sold or used;
+that limit still applies. **Correction:** the earlier interface offered a keep-items
+choice, and this reference described a separate confirmation with a button on each row.
+The choice has been removed; the selected row's prepared result is reviewed and applied
+in this one popup.
+
+Go Back restores classes from the chronological `LvlStatList` records that remain at
+the target level. It removes the recorded gains from later levels, restores XP and party
+XP, and updates Health and Force maxima. It caps retained levels before a class granted
+by an undone chapter. Later edits to `ClassList` do not prevent restoring usable earlier
+records. Missing or unusable retained records stop the operation before story changes.
+This restores recorded level gains; unrelated manual stat edits are not an earlier
+snapshot. A removed companion is also removed from `PT_MEMBERS`; `PT_NUM_MEMBERS` and
+`PT_CONTROLLED_NP` are updated. A side-quest return includes a companion whose recruitment
+module is an earlier chapter's recorded arrival module.
+
+Go Back defaults to alignment 50, Neutral. Its preview offers a red-to-cyan slider, a
+numeric field from 0 to 100 and Reset to Neutral. Opening a chapter starts a new choice
+at 50; changing stages in the same popup keeps the chosen value. The slider supports
+dragging, arrow keys and Home/End. Releasing the slider prepares the new preview. The
+chosen alignment is part of the prepared result and is applied after any quest-stage
+replay, so that replay cannot change it. The stored field is the player's `GoodEvil`
+value, edited in the same player copies as other character changes. Cancel discards the
+prepared result; writing still requires Save Changes and its backup.
+
+**Alignment correction, 2026-10-25:** Go Back previously subtracted estimated chapter
+light-side or dark-side gains. In the reported KotOR 1 save this subtracted 69 from 79
+and wrote 10. Chapter totals do not identify the player's actual choices. That
+subtraction has been removed. The neutral default and explicit choice replace it;
+they do not claim to reconstruct historical alignment. Forward skips retain their
+existing alignment behavior. `tests/story_safety.rs` checks neutral defaults, chosen
+values including both endpoints, quest-stage returns, invalid inputs without mutation,
+and neutral alignment after writing and reopening a temporary copy.
+Automated checks on 2026-10-25 exercised those cases with copies from both installed
+games. Headless window input checks also covered hover without edits, dragging to both
+endpoints, preview refresh on release, arrow keys, Home/End and Reset to Neutral. Renders
+were inspected at 1600x900 Medium and 1280x780 Large, plus KotOR II light mode. These are
+software-rendered checks; desktop interaction and loading this alignment change in the
+game remain **untested**.
+
+**Correction, 2026-10-25:** the former level-removal loop could stop when the current
+class list disagreed with the recorded classes, then still reduce XP. In the reported
+KotOR 1 Steam Taris failure, a copied written save had level 20 with 3085 XP and active
+party members who were no longer recruited. Replaying the selected Taris stage
+(`tar_selvenbounty`, 1) on a separate copy of its backup now writes and reads back Scout
+level 3, 3085 XP, three matching level records, an empty active party and Carth recruited.
+`tests/story_safety.rs` checks active-party removal, refusal before mutation for an
+unusable retained record, and reconstruction despite a changed current class list, on
+copies from both installed games. Two creature unit tests cover later synthetic levels
+and the retained-record check. The original crash's native cause has not been established;
+loading the corrected copy in the game remains **untested**.
+
+To check by hand, use a copy of a save. Open a chapter on the timeline, expand a quest,
+and select a stage. Check the totals and both columns of item changes. Try a different
+story choice and wait for its new preview. Cancel, then verify that the pending edit
+count and values have not changed. Apply a prepared point, check the values in the editor,
+then Save Changes and inspect the backup. Load that copy in the game to check its arrival
+and normal level-up. Desktop and in-game checks of this popup are **untested** here.
+
+Automated checks on 2026-10-25: `tests/story_preview.rs` prepared forward and backward
+changes on copies of saves from both installed games, including pending edits. It compared
+the result with the story engine and checked that the source in-memory save and every
+file of the test copy remained unchanged. KotOR 1 quest-stage skips and returns were also
+compared. The three unit tests in `src/story_preview.rs` check summed stacks, runtime IDs,
+inventory positions, field order and distinct upgrades. Headless renders of the generated
+Slint window were inspected at 1600x900 with Medium text, 1280x780 with Large text, and
+1600x900 in KotOR II light mode. These used sample rows and item icons from the installed
+game; they are layout checks, not desktop interaction or in-game checks.
+The selected row's divider previously painted over the bottom of its yellow border.
+It is hidden while the row is selected or hovered. In the 1600x900 headless sample, the
+top and bottom border pixels both read `#f4d03f` after the correction.
+The final Windows `build.ps1` run passed all 37 tests on 2026-10-25 and copied the
+release executable to `dist`.
 
 The Ebon Hawk is a free-to-use render from Deadly Stream (`assets/timeline/ebon-hawk.png`,
 its background removed with rembg's BiRefNet model). Yavin Station is a frame of KotOR's own
@@ -289,10 +445,11 @@ chapters' credits in parallel.
 Seen in the game: the Endar Spire skip from a fresh save gave 3,085 XP, the level-ups, the
 loot, the escape pod movie and the vision, and the Taris apartment with Carth's opening.
 **Not known:** random treasure rolled by scripts at death (left out); chapters after the
-Endar Spire (Taris is drafted, without a milestone yet); KotOR 2.
+Endar Spire (Taris has had a milestone for some time; this line said otherwise until
+2026-11-02); KotOR 2.
 
 **The quest tracker** (Story, Quests; 2026-10-22, the maintainer: "what a person wants when
-he enters the story mode ... is a quest tracker"): Story opens on Quests, listed first before
+he enters the story mode ... is a quest tracker"): Story opened on Quests then (it opens on the timeline since 2026-10-24), listed first before
 the modder sections, and the party list steps aside. Left: the quests in three tabs, Active,
 Completed (the journal entry is one of the quest's endings) and Not Started, each with where it
 stands. Right: the picked quest, its current journal entry in full, and every stage as a
@@ -365,13 +522,23 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
 
 1. **Nothing is written until Save Changes.** Every change is held in memory; the bottom bar
    counts them, and Revert reads the save from disk again. Leaving a save with changes not
-   saved is refused with a message.
+   saved is refused with a message, by Back and by a click on the timeline (the timeline had
+   no check until 2026-11-02). Closing the window asks once; closing again with the same
+   changes leaves without saving them.
 2. **The game must be closed.** Save Changes checks for `swkotor.exe` / `swkotor2.exe`
-   (`tasklist`; `pgrep` elsewhere) and refuses while it runs.
+   (`tasklist`; `pgrep` elsewhere) and refuses while it runs. A check that itself fails counts
+   as running.
+   The save's files must also be the ones read: their sizes and times are noted on open, and a
+   difference refuses the write (`CHANGED_ON_DISK`), so a slot the game overwrote is not mixed
+   with older edits.
 3. **A backup first.** The whole save folder is copied to
-   `Save Editor Backup/<save folder>/<date time>/` in the folder that holds the save (the
-   game's `saves` folder) before anything is written; a KotOR 2 Steam Cloud save's backup
-   goes to the game's local `saves/Save Editor Backup` instead, so Steam does not upload it.
+   `Save Editor Backup/<save folder>/<date time>/` in the game's folder, beside the saves,
+   before anything is written. A save outside the game keeps its backups in the folder that
+   holds it.
+   *Corrected 2026-11-02:* backups were in the folder that holds the save until then, and for a
+   KotOR 2 Steam Cloud save in the game's `saves` folder. Steam Cloud syncs all of KotOR 1's
+   `Saves`, backups too (`remotecache.vdf` listed them), so they moved out. Backups made before
+   that date stay where they are and are not moved.
    After a save the editor says "Saved! Backup of the unedited save is in" and the folder.
    *Corrected 2026-10-22:* backups were kept in `<data>/KMRP/Save Editor/backups/` until the
    maintainer asked for them beside the saves. **Untested**: whether the game's Load screen
@@ -389,11 +556,17 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
 
 | Limit | Why |
 | --- | --- |
+| Saves with external player state are read only | `pifo.ifo` holds a player copy the editor does not write. The measured KotOR 1 arrival autosave has no archived player, so the reader falls back to this file; the measured KotOR II autosave has both external and archived copies. Both are read only. Save Changes, Save as a New Save and rename are refused; Copy changes only the new copy's Load-screen name. Saving to a normal slot in the game gives an editable save when it has no external player file. Until 2026-10-29 the KotOR 1 arrival save failed to open. `a_save_with_its_player_in_pifo_opens_read_only` checks refusals and unchanged player files on temporary copies from both games. |
 | Original Xbox saves are read only | the Xbox checks a signature on each save; re-signing needs the console's and the title's keys, and no verified procedure for KotOR was found. The maintainer chose (2026-10-22) to re-sign with keys read from the player's own files; **not built**: there is no Xbox save or game here to test it with |
 | Nintendo Switch saves | open if they are plain PC-format folders; a compressed wrapper, if the Switch uses one, is not documented and not handled |
 | Global variable list shows 200 rows at a time | drawing every row of 1,185 slowed the tab by over a second; typing part of a name narrows it |
 | Names typed into the game | Windows-1252 only, as the Western releases store them |
 | Two classes | the engine knows two |
+| A quest stage's way | a save does not record how a stage was reached. `one_way` takes one way per stage, the one that suits the side played, the first listed on a tie. It can differ from what a player chose |
+| Go Back and story values with no end value | a value a kept chapter also writes, with no known end value, stays as it is, and the report names it |
+| The fourth planet on a return to the Leviathan | the save does not say which planet came last, so it is the last on the timeline |
+| Load-screen portrait of the leader | savenfo `PORTRAIT1` and `2` follow the party, by hand and after a skip, a return or an import (since 2026-11-02); `PORTRAIT0` is the leader's and is left to the game's next save |
+| Attributes shown with effects | an item equipped in the editor counts towards them only once the game has saved, because its effects are not in the save until then; the engine's caps and its rule for effects of one source are not modelled |
 
 ## 7. What is deliberately not changed
 
@@ -401,7 +574,9 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
   recomputed by the game (section 1).
 * `EffectList`, beyond equipping: equipment bonuses are effects created by the items, so the
   editor only removes the effects of an item it takes off (section 3a) and never edits an
-  effect on its own.
+  effect on its own. An equipped item needs no stored effect: the game applies an item's
+  properties when it loads a creature and drops stored item effects (save-editor-format.md,
+  "Effects left by removed items"; read in the executables, not yet seen in the game).
 * `ObjectId`s of existing objects, struct ids, field order, labels. `Mod_NextObjId0` moves
   on only when the editor gives a new object an id (section 3a).
 
@@ -513,3 +688,19 @@ the game.
 To check a save by hand: open it in the editor, change one value, Save Changes; the line
 under Save Changes names the backup folder (it was a bottom bar until 2026-10-22). Open the save in the game. To undo, copy the backup's files over
 the save folder.
+
+Verification on 2026-10-29: the original feat-record check assumed every owned feat
+was listed in a level record. The edited Trial copy already owned feat 101 outside
+that history, so adding Jedi Guardian correctly left it out of the new level record.
+The check now carries unrecorded grants as already owned when replaying recorded
+grants; their original award time cannot be recovered. It still requires every new
+class grant to be owned and, in KotOR 1, recorded when first acquired. The explicit
+`adding_a_class_does_not_claim_a_feat_the_player_already_owned` regression checks
+that adding and removing the class preserves this earlier feat in both games. No
+player save was repaired or excluded by folder number to make this check pass.
+
+The 2026-10-29 `build.ps1` run passed all 46 tests and produced the executable in
+`dist`. The focused Copy/Save As checks used temporary saves from both installed
+games; the external-player-state refusal check used one autosave from each. The
+editor was launched from `dist`. In-game overwrite of a newly copied save and
+in-game loading after these changes remain **untested**.

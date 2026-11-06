@@ -131,8 +131,9 @@ fn label(game: Game, name: &str, who: Who) -> String {
 }
 
 /// The engine's rules, as the editor computes them, give the maxima the game wrote into
-/// every save it wrote. (Saves the editor wrote, named KMRP..., are left out: before issue
-/// 70 the editor left their stored maxima stale, which the game ignores.)
+/// every save it wrote. (Saves the editor wrote, named KMRP... in their folder or on the
+/// Load screen, are left out: before issue 70 the editor left their stored maxima stale,
+/// which the game ignores.)
 #[test]
 fn computed_maxima_match_what_the_game_wrote() {
     let installs = find_installs(&[]);
@@ -141,9 +142,9 @@ fn computed_maxima_match_what_the_game_wrote() {
         if !installs.iter().any(|i| i.game == game) {
             continue;
         }
-        for folder in find_saves(&installs, game, &[]) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
-            if name.contains("KMRP") {
+            if name.contains("KMRP") || kse_core::save::summary(&folder.path).map_or(false, |s| s.name.contains("KMRP")) {
                 continue;
             }
             let save = Save::open(&folder.path).unwrap();
@@ -183,7 +184,7 @@ fn on_every_save(tag: &str, edit: &dyn Fn(&mut Save, &Catalog, Who) -> bool, che
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
         let cat = Catalog::build(&data);
-        for folder in find_saves(&installs, game, &[]) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let work = scratch(&format!("{}-{:?}-{}", tag, game, name));
             copy_dir(&folder.path, &work);
@@ -622,7 +623,7 @@ fn recruited_companions_keep_the_templates_values() {
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
         let Some(template) = data.gff(resref, "utc", RES_TYPE_UTC) else { continue };
-        for folder in find_saves(&installs, game, &[]) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let work = scratch(&format!("recruit-{:?}-{}", game, name));
             copy_dir(&folder.path, &work);
@@ -752,7 +753,7 @@ fn the_ends_of_a_level_set_exactly() {
         if !installs.iter().any(|i| i.game == game) {
             continue;
         }
-        for folder in find_saves(&installs, game, &[]) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let save = Save::open(&folder.path).unwrap();
             for who in whos(&save) {

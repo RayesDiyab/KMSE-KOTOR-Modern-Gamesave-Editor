@@ -149,6 +149,73 @@ pub fn path(q: &Quest, ending: i64) -> (Vec<Step>, Vec<Step>) {
     (sure, choices)
 }
 
+/// Whether a step's "before this line: if player alignment ..." holds at `alignment`. The
+/// game's alignment-scaled rewards are one step per band, and exactly one of them runs.
+fn alignment_fits(branch: Option<&str>, alignment: i64) -> bool {
+    let Some(text) = branch.and_then(|b| b.split("if player alignment ").nth(1)) else { return true };
+    let numbers: Vec<i64> = text.split(|c: char| !c.is_ascii_digit()).filter_map(|n| n.parse().ok()).collect();
+    match numbers.as_slice() {
+        [high, ..] if text.starts_with("at most") => alignment <= *high,
+        [low, ..] if text.starts_with("at least") => alignment >= *low,
+        [low, high, ..] if text.starts_with("from") => (*low..=*high).contains(&alignment),
+        _ => true,
+    }
+}
+
+/// The ways through one stage are told apart by the line that runs them: the conversation
+/// node or script (`via`). Steps with neither belong to every way.
+fn way_of(step: &Step) -> String {
+    match &step.via {
+        Some(v) => v.to_string(),
+        None => step.branch.as_deref().filter(|b| b.starts_with("way ")).map(|b| b.split(':').next().unwrap_or(b).to_string()).unwrap_or_default(),
+    }
+}
+
+/// What a way moves alignment by, light above dark.
+fn way_alignment(steps: &[&Step]) -> i64 {
+    let of = |e: &serde_json::Value, k: &str| e.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+    steps.iter().flat_map(|s| &s.does).map(|e| of(e, "light_side") - of(e, "dark_side")).sum()
+}
+
+/// The steps one play of a quest takes to `ending`. `path` keeps every way of the ending's
+/// stage, so a stage with five ways gave five rewards (measured 2026-11-02: 5,000 XP where one
+/// way gives 1,000; alignment 50 to 0). Here each stage takes one way, the one that suits the
+/// side played, ties to the first the data lists, and of the alignment-scaled steps only the
+/// band the player is in.
+pub fn one_way(q: &Quest, ending: i64, dark: bool, alignment: i64) -> Vec<Step> {
+    let mut stages: Vec<&Stage> = q.stages.iter().filter(|s| s.stage == ending || (s.stage < ending && !s.end)).collect();
+    stages.sort_by_key(|s| s.stage);
+    let mut out = Vec::new();
+    for s in stages {
+        let fits: Vec<&Step> = s.steps.iter().filter(|t| alignment_fits(t.branch.as_deref(), alignment)).collect();
+        let sets_stage = |t: &Step| t.does.iter().any(|e| e.get("journal").and_then(|j| j.get(0)).and_then(|v| v.as_str()).map_or(false, |x| x.eq_ignore_ascii_case(&q.tag)));
+        let mut ways: Vec<String> = Vec::new();
+        for t in fits.iter().filter(|t| sets_stage(t)) {
+            let w = way_of(t);
+            if !ways.contains(&w) {
+                ways.push(w);
+            }
+        }
+        let score = |w: &String| way_alignment(&fits.iter().copied().filter(|t| way_of(t) == *w).collect::<Vec<_>>());
+        let mut pick = ways.first().cloned();
+        for w in &ways {
+            if pick.as_ref().map_or(false, |p| if dark { score(w) < score(p) } else { score(w) > score(p) }) {
+                pick = Some(w.clone());
+            }
+        }
+        for t in fits {
+            let w = way_of(t);
+            let chosen = w.is_empty() || Some(&w) == pick.as_ref();
+            // a stage with no line of its own: what `path` takes from it
+            let plain = pick.is_none() && (s.stage == ending || t.branch.as_deref().map_or(true, |b| b.trim().is_empty()));
+            if chosen || plain {
+                out.push(t.clone());
+            }
+        }
+    }
+    out
+}
+
 fn str_of(v: &serde_json::Value) -> String {
     v.as_str().unwrap_or_default().to_string()
 }
@@ -213,6 +280,9 @@ pub fn apply(save: &mut Save, data: &GameData, step: &Step, key: &str) -> Vec<St
                         found = true;
                         match g.kind {
                             crate::globals::Kind::Boolean => crate::globals::set_bool(root, g.index, value != 0),
+                            // The game keeps booleans and numbers apart: a boolean write never
+                            // reaches a number of that name (MAN_MISSING_PLOT in the quest data).
+                            crate::globals::Kind::Number if kind == "set_global_bool" => {}
                             crate::globals::Kind::Number => crate::globals::set_number(root, g.index, value),
                             crate::globals::Kind::String => {}
                         }
@@ -775,7 +845,7 @@ pub fn skip_to_stage(save: &mut Save, data: &GameData, chapters: &[serde_json::V
 
 #[allow(clippy::too_many_arguments)]
 fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], jedi_class: Option<usize>, dark: bool, prestige: Option<i64>, train: bool, partial: Option<(String, i64)>) -> Result<Vec<String>, String> {
-    let all: Vec<serde_json::Value> = chapters.iter().map(|m| for_side(m, dark)).collect();
+    let all: Vec<serde_json::Value> = leviathan_in_place(save, chapters).iter().map(|m| for_side(m, dark)).collect();
     let target = all.last().cloned().ok_or("no chapter to skip to")?;
     // a skip to a quest stage plays the chapters before its own in full
     let chapters: Vec<serde_json::Value> = if partial.is_some() { all[..all.len() - 1].to_vec() } else { all.clone() };
@@ -783,6 +853,13 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
     let mut notes = Vec::new();
     let before = Before::of(save);
     let met: Vec<bool> = chapters.iter().map(|m| master_met(save, m)).collect();
+    // Read before the chapters change the journal.
+    let played = chapters_played(save.game, &save.quests());
+    let mut run: Vec<String> = milestones_ref(save.game).iter().zip(&played).filter(|(_, p)| **p).map(|((planet, _), _)| planet.to_string()).collect();
+    run.extend(chapters.iter().filter_map(|m| m.get("planet").and_then(|p| p.as_str()).map(str::to_string)));
+    // What the game itself took out of the journal stays out (the chapters already played too).
+    let mut removed: Vec<String> = milestones_ref(save.game).iter().zip(&played).filter(|(_, p)| **p).flat_map(|((_, m), _)| removed_by(m)).collect();
+    removed.extend(all.iter().flat_map(removed_by));
     let (mut credits, mut shift) = (0i64, 0i64);
     // KotOR 2: influence won or lost with each companion over the chapters (credits.py).
     let mut influence: std::collections::BTreeMap<usize, i64> = Default::default();
@@ -824,10 +901,10 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
             crate::creature::set_alignment(c, (now + shift).clamp(0, 100));
         });
     }
-    // The XP a full run reaches by the end of the last chapter (the rewards file's
-    // cumulative total), for the player and the party pool; never lowered.
+    // The XP of the chapters played, each counted once whatever the order, for the player and
+    // the party pool; never lowered.
     let planet = last.get("planet").and_then(|p| p.as_str()).unwrap_or_default().to_string();
-    let full_xp = if chapters.is_empty() { None } else { rewards(save.game, &planet).and_then(|r| r.get("xp_at_end").and_then(|v| v.as_i64())) };
+    let full_xp = if chapters.is_empty() { None } else { Some(xp_of(save.game, &run)) };
     if let Some(xp) = full_xp {
         save.edit(Who::Player, &format!("skip.{}.xp", planet.to_ascii_lowercase()), |c| {
             let now = crate::creature::experience(c);
@@ -854,14 +931,18 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
     }
     if let Some((tag, stage)) = partial {
         // the stage's chapter: the quest up to it, then the trip to where it happens
-        let (more, module) = apply_partial(save, data, &target, &tag, stage);
+        let (more, module, became_jedi) = apply_partial(save, data, &target, &tag, stage, dark);
         notes.extend(more);
+        if became_jedi {
+            notes.extend(apply_jedi(save, data, &target, jedi_class, &before));
+        }
+        notes.extend(count_star_maps(save, data, &target));
         let trip = vec![module.to_ascii_lowercase()];
         for m in &chapters {
             notes.extend(write_cleared(save, data, m, &trip));
         }
         for m in &chapters {
-            notes.extend(close_quests(save, data, m));
+            notes.extend(close_quests(save, data, m, dark, &removed));
         }
         let waypoint = crate::map::any_waypoint(data, &module).unwrap_or_default();
         save.queue_transition(&module, &waypoint, &[])?;
@@ -882,7 +963,7 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
         notes.extend(write_cleared(save, data, m, &trip));
     }
     for m in &chapters {
-        notes.extend(close_quests(save, data, m));
+        notes.extend(close_quests(save, data, m, dark, &removed));
     }
     save.queue_transition(module, waypoint, &movies)?;
     notes.dedup();
@@ -890,9 +971,13 @@ fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], j
 }
 
 /// A quest of a chapter up to a stage, as if played, with the main-story stages its steps
-/// need. Returns the notes and the module where the stage happens.
-fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &str, stage: i64) -> (Vec<String>, String) {
+/// need. Returns the notes, the module where the stage happens, and whether the route passes
+/// the script that makes the player a Jedi.
+fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &str, stage: i64, dark: bool) -> (Vec<String>, String, bool) {
     let mut notes = Vec::new();
+    let alignment = save.player().map_or(50, crate::creature::alignment);
+    let mut became_jedi = false;
+    let makes_jedi = m.get("jedi_class").and_then(|j| j.get("class_by")).and_then(|v| v.as_str()).and_then(|s| s.split(':').next()).map(|s| s.trim().to_ascii_lowercase());
     let planet = m.get("planet").and_then(|p| p.as_str()).unwrap_or_default().to_string();
     let file_quests: Vec<Quest> = quest_files()
         .iter()
@@ -908,8 +993,7 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
         if plan.iter().any(|(p, s)| p.tag.eq_ignore_ascii_case(&q.tag) && *s >= st) {
             continue;
         }
-        let (steps, _) = path(&q, st);
-        for step in &steps {
+        for step in &one_way(&q, st, dark, alignment) {
             for n in &step.needs {
                 if let (Some(sv), Some(op)) = (n.get("stage").and_then(|v| v.as_array()), n.get("op").and_then(|v| v.as_str())) {
                     if let (Some(nt), Some(nv)) = (sv.first().and_then(|v| v.as_str()), sv.get(1).and_then(|v| v.as_i64())) {
@@ -931,15 +1015,17 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
         if now >= *st {
             continue; // the save is there already: nothing given twice
         }
-        let (steps, _) = path(q, *st);
-        for (i, step) in steps.iter().enumerate() {
+        for (i, step) in one_way(q, *st, dark, alignment).iter().enumerate() {
             // stages the save has passed already gave their rewards
             let reached = step.does.iter().any(|e| e.get("journal").and_then(|j| j.get(1)).and_then(|v| v.as_i64()).map_or(false, |v| v <= now));
             if reached {
                 continue;
             }
             let found = area_items(data, m, &step.does);
-            let step = Step { found, ..step.clone() };
+            let step = Step { found, does: without_star_map_branches(save.game, m, &step.does), ..step.clone() };
+            if makes_jedi.as_ref().map_or(false, |s| step.does.iter().any(|e| e.to_string().to_ascii_lowercase().contains(s.as_str()))) {
+                became_jedi = true;
+            }
             notes.extend(apply(save, data, &step, &format!("skip.stage.{}.{}", q.tag.to_ascii_lowercase(), i)).into_iter().filter(|n| !n.contains("happens when you first enter")));
             if !step.module.is_empty() {
                 module = step.module.clone();
@@ -958,30 +1044,183 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
     // reached joins (a companion who joins on entering an area, not in a quest step).
     let critical = m.get("critical_path").and_then(|c| c.as_array()).cloned().unwrap_or_default();
     let reach = critical.iter().rposition(|e| e.get("module").and_then(|v| v.as_str()).map_or(false, |x| touched.iter().any(|t| t.eq_ignore_ascii_case(x))));
-    if let Some(reach) = reach {
-        for r in m.get("party").and_then(|p| p.get("recruit")).and_then(|r| r.as_array()).cloned().unwrap_or_default() {
-            let script = r.get("script").and_then(|v| v.as_str()).unwrap_or_default().split('|').next().unwrap_or_default().to_ascii_lowercase();
-            let at = critical.iter().position(|e| e.get("source").and_then(|v| v.as_str()).map_or(false, |x| x.split('|').next().unwrap_or_default().eq_ignore_ascii_case(&script)));
-            if at.map_or(true, |a| a > reach) {
-                continue;
-            }
-            let (Some(slot), Some(template)) = (r.get("slot").and_then(|v| v.as_u64()), r.get("template").and_then(|v| v.as_str())) else { continue };
-            let female = save.player().map_or(false, |p| p.int("Gender") == Some(1));
-            match r.get("when").and_then(|w| w.as_str()) {
-                Some("male") if female => continue,
-                Some("female") if !female => continue,
-                _ => {}
-            }
-            let step = Step { module: r.get("module").and_then(|v| v.as_str()).unwrap_or_default().to_string(), via: None, needs: Vec::new(),
-                does: vec![serde_json::json!({ "other": format!("AddAvailableNPCByTemplate({}, \"{}\")", slot, template) })], branch: None, found: Default::default() };
-            notes.extend(recruits_in(save, data, m, &step));
+    // A side room need not be on the critical path, but reaching any quest stage in
+    // the chapter still passes its entry (for example Carth joining at Taris's hideout).
+    let entry_modules: Vec<String> = milestones_ref(save.game).iter()
+        .filter(|(_, previous)| previous.get("order").and_then(|v| v.as_i64()).unwrap_or(99) < m.get("order").and_then(|v| v.as_i64()).unwrap_or(0))
+        .filter_map(|(_, previous)| previous.get("next_chapter").and_then(|n| n.get("module")).and_then(|v| v.as_str()).map(str::to_ascii_lowercase)).collect();
+    for r in m.get("party").and_then(|p| p.get("recruit")).and_then(|r| r.as_array()).cloned().unwrap_or_default() {
+        let script = r.get("script").and_then(|v| v.as_str()).unwrap_or_default().split('|').next().unwrap_or_default().to_ascii_lowercase();
+        let at = critical.iter().position(|e| e.get("source").and_then(|v| v.as_str()).map_or(false, |x| x.split('|').next().unwrap_or_default().eq_ignore_ascii_case(&script)));
+        let at_entry = r.get("module").and_then(|v| v.as_str()).map_or(false, |module| entry_modules.iter().any(|e| e.eq_ignore_ascii_case(module)));
+        if !at_entry && !at.zip(reach).map_or(false, |(a, reach)| a <= reach) {
+            continue;
         }
+        let (Some(slot), Some(template)) = (r.get("slot").and_then(|v| v.as_u64()), r.get("template").and_then(|v| v.as_str())) else { continue };
+        let female = save.player().map_or(false, |p| p.int("Gender") == Some(1));
+        match r.get("when").and_then(|w| w.as_str()) {
+            Some("male") if female => continue,
+            Some("female") if !female => continue,
+            _ => {}
+        }
+        let step = Step { module: r.get("module").and_then(|v| v.as_str()).unwrap_or_default().to_string(), via: None, needs: Vec::new(),
+            does: vec![serde_json::json!({ "other": format!("AddAvailableNPCByTemplate({}, \"{}\")", slot, template) })], branch: None, found: Default::default() };
+        notes.extend(recruits_in(save, data, m, &step));
     }
     if module.is_empty() {
         module = m.get("cleared").and_then(|c| c.as_array()).and_then(|c| c.first()).and_then(|c| c.get("module")).and_then(|v| v.as_str()).unwrap_or_default().to_string();
     }
     notes.push(format!("{}: {} quests played up to the picked stage", planet, plan.len()));
-    (notes, module)
+    (notes, module, became_jedi)
+}
+
+fn removed_by(m: &serde_json::Value) -> Vec<String> {
+    m.get("journal_remove").and_then(|j| j.as_array()).into_iter().flatten().filter_map(|t| t.as_str().map(str::to_string)).collect()
+}
+
+/// The XP of a set of chapters. The rewards files hold running totals along the timeline; one
+/// chapter's own share is its total less the one before it, so a save that played the free
+/// planets in another order counts each planet once, and the Leviathan where it belongs. A
+/// side chapter's share is its total less the largest main total under it.
+fn xp_of(game: Game, planets: &[String]) -> i64 {
+    let total = |p: &str| rewards(game, p).and_then(|r| r.get("xp_at_end").and_then(|v| v.as_i64()));
+    let mut mains: Vec<(i64, &str, i64)> = milestones_ref(game).iter()
+        .filter(|(_, m)| m.get("side_chapter").and_then(|v| v.as_bool()) != Some(true))
+        .filter_map(|(p, m)| Some((m.get("order").and_then(|v| v.as_i64()).unwrap_or(99), *p, total(p)?)))
+        .collect();
+    mains.sort_by_key(|x| x.0);
+    let share = |planet: &str| -> i64 {
+        if let Some(k) = mains.iter().position(|x| x.1.eq_ignore_ascii_case(planet)) {
+            return mains[k].2 - if k == 0 { 0 } else { mains[k - 1].2 };
+        }
+        let Some(t) = total(planet) else { return 0 };
+        t - mains.iter().map(|x| x.2).filter(|x| *x <= t).max().unwrap_or(0)
+    };
+    let mut seen: Vec<String> = Vec::new();
+    planets.iter().filter(|p| {
+        let new = !seen.iter().any(|s| s.eq_ignore_ascii_case(p));
+        if new {
+            seen.push(p.to_string());
+        }
+        new
+    }).map(|p| share(p)).sum()
+}
+
+/// Which chapters a save has played, by milestone index: those whose journal entries it has
+/// reached on either side, and those whose journal quests a chapter it has played takes out
+/// of the journal (the game removes the Endar Spire's quest on Taris, so a save past Taris no
+/// longer shows it). `k_starforge` is left out on a star map planet: it holds the last map
+/// found, so an earlier planet would read unplayed. KotOR 2's chapters count their main-path
+/// quests alone, those their critical path names: most of Telos's list is side content.
+pub fn chapters_played(game: Game, quests: &[(String, i64)]) -> Vec<bool> {
+    let all = milestones_ref(game);
+    let tags = |m: &serde_json::Value, journal: Option<&serde_json::Value>| -> Vec<(String, i64)> {
+        let mut out: Vec<(String, i64)> = journal
+            .and_then(|j| j.as_array())
+            .map(|a| a.iter().filter_map(|e| Some((e.get("tag")?.as_str()?.to_string(), e.get("stage").and_then(|v| v.as_i64()).unwrap_or(0)))).collect())
+            .unwrap_or_default();
+        if m.get("star_map").map_or(false, |s| !s.is_null()) {
+            out.retain(|(t, _)| !t.eq_ignore_ascii_case("k_starforge"));
+        }
+        if game == Game::K2 {
+            let main = critical_stages(m);
+            let kept: Vec<(String, i64)> = out.iter().filter_map(|(t, _)| main.iter().find(|(c, _)| c.eq_ignore_ascii_case(t)).cloned()).collect();
+            if !kept.is_empty() {
+                return kept;
+            }
+        }
+        out
+    };
+    let reached = |tag: &str, stage: i64| quests.iter().any(|(t, v)| t.eq_ignore_ascii_case(tag) && *v >= stage);
+    let needs: Vec<Vec<(String, i64)>> = all.iter().map(|(_, m)| tags(m, m.get("journal"))).collect();
+    let darks: Vec<Vec<(String, i64)>> = all.iter().map(|(_, m)| tags(m, m.get("dark").and_then(|d| d.get("journal")))).collect();
+    let removes: Vec<Vec<String>> = all.iter().map(|(_, m)| removed_by(m)).collect();
+    let done = |n: &Vec<(String, i64)>| !n.is_empty() && n.iter().all(|(t, s)| reached(t, *s));
+    let mut played: Vec<bool> = needs.iter().zip(&darks).map(|(n, d)| done(n) || done(d)).collect();
+    loop {
+        let mut more = false;
+        for i in 0..all.len() {
+            if played[i] || needs[i].is_empty() {
+                continue;
+            }
+            let gone = |t: &String| (0..all.len()).any(|j| played[j] && removes[j].iter().any(|r| r.eq_ignore_ascii_case(t)));
+            if needs[i].iter().all(|(t, s)| reached(t, *s) || gone(t)) && needs[i].iter().any(|(t, _)| gone(t)) {
+                played[i] = true;
+                more = true;
+            }
+        }
+        if !more {
+            break;
+        }
+    }
+    played
+}
+
+/// The journal stages a chapter's critical path names ("the arrest: journal arrested 10"),
+/// the highest of each quest.
+fn critical_stages(m: &serde_json::Value) -> Vec<(String, i64)> {
+    let mut out: Vec<(String, i64)> = Vec::new();
+    for e in m.get("critical_path").and_then(|c| c.as_array()).into_iter().flatten() {
+        let Some(what) = e.get("what").and_then(|v| v.as_str()) else { continue };
+        for part in what.split("journal ").skip(1) {
+            let mut w = part.split_whitespace();
+            let (Some(tag), Some(stage)) = (w.next(), w.next().and_then(|s| s.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<i64>().ok())) else { continue };
+            match out.iter_mut().find(|(t, _)| t.eq_ignore_ascii_case(tag)) {
+                Some(x) => x.1 = x.1.max(stage),
+                None => out.push((tag.to_string(), stage)),
+            }
+        }
+    }
+    out
+}
+
+/// A chapter on the timeline, as far as what a skip or a return covers depends on it.
+#[derive(Clone, Copy, Debug)]
+pub struct ChapterState {
+    pub index: i32,
+    pub order: i64,
+    pub side: bool,
+    pub played: bool,
+}
+
+/// The chapters a skip to chapter `index` applies, in story order: every main chapter before
+/// it this save has not played, then it. A side chapter (the Ebon Hawk, Yavin Station) stands
+/// alone: it comes last on the timeline only because it has no place on it, so everything
+/// counted as before it would be the whole game.
+pub fn skip_path(chapters: &[ChapterState], index: i32) -> Vec<i32> {
+    let Some(target) = chapters.iter().find(|c| c.index == index) else { return Vec::new() };
+    if target.side {
+        return vec![index];
+    }
+    let mut out: Vec<i32> = chapters.iter().filter(|c| c.index != index && !c.played && !c.side && c.order < target.order).map(|c| c.index).collect();
+    out.push(index);
+    out
+}
+
+/// What a return to chapter `index` keeps and undoes, in story order, and the chapter the
+/// player is in, which is undone but was never finished.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Return {
+    pub kept: Vec<i32>,
+    pub undo: Vec<i32>,
+    pub unfinished: Option<i32>,
+}
+
+/// Side chapters stay played when a return goes to a main chapter, and a return to a side
+/// chapter undoes that chapter alone: neither lies on the line of the main story.
+pub fn return_to(chapters: &[ChapterState], index: i32) -> Return {
+    let Some(target) = chapters.iter().find(|c| c.index == index) else { return Return::default() };
+    let played_others = |side: bool| chapters.iter().filter(move |c| c.played && c.side == side && c.index != index).map(|c| c.index);
+    if target.side {
+        let kept = chapters.iter().filter(|c| c.played && c.index != index).map(|c| c.index).collect();
+        return Return { kept, undo: vec![index], unfinished: None };
+    }
+    let current = chapters.iter().find(|c| !c.played && !c.side).map(|c| c.index);
+    let mut kept: Vec<i32> = played_others(false).filter(|i| chapters.iter().any(|c| c.index == *i && c.order < target.order)).collect();
+    kept.extend(played_others(true));
+    let undo = chapters.iter().filter(|c| !c.side && c.order >= target.order && (c.played || Some(c.index) == current)).map(|c| c.index).collect::<Vec<_>>();
+    let unfinished = current.filter(|c| undo.contains(c));
+    Return { kept, undo, unfinished }
 }
 
 /// The companions a quest step brings into the party (AddAvailableNPCByTemplate, or KotOR 2's
@@ -1112,14 +1351,23 @@ fn apply_k2_powers(save: &mut Save, data: &GameData, m: &serde_json::Value, dark
 /// values, the NPCs' own flags, doors, people who leave. Credits, items, XP and alignment are
 /// left out (the rewards file counts them). Runs after the areas are stored, so the flags of an
 /// area stored as played through land in it too.
-fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value) -> Vec<String> {
+fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value, dark: bool, removed: &[String]) -> Vec<String> {
     const STATE: [&str; 7] = ["journal", "set_global_bool", "set_global_number", "local", "destroy", "door_open", "door_unlock"];
+    let alignment = save.player().map_or(50, crate::creature::alignment);
+    let gone = |tag: &str| removed.iter().any(|r| r.eq_ignore_ascii_case(tag));
     let planet = m.get("planet").and_then(|p| p.as_str()).unwrap_or_default();
     let milestone_stage = |tag: &str| {
         m.get("journal").and_then(|j| j.as_array()).and_then(|j| {
             j.iter().find(|e| e.get("tag").and_then(|t| t.as_str()).map_or(false, |t| t.eq_ignore_ascii_case(tag))).and_then(|e| e.get("stage").and_then(|s| s.as_i64()))
         })
     };
+    // What the milestone sets stands: this runs after every chapter of the skip, so a route's
+    // write here would undo a later chapter's (Dantooine's K_STAR_MAP 10 over the count).
+    let mut settled: Vec<String> = m.get("globals").and_then(|g| g.as_array()).into_iter().flatten()
+        .filter(|g| g.get("value").map_or(false, |v| !v.is_null()))
+        .filter_map(|g| g.get("name").and_then(|n| n.as_str()).map(str::to_string)).collect();
+    // The Jedi path is the player's pick: a route's write would leave it always the last one.
+    settled.extend(m.get("jedi_class").and_then(|j| j.get("variable")).and_then(|v| v.as_str()).map(str::to_string));
     let mut closed = 0;
     let mut later = 0;
     for (g, file) in quest_files() {
@@ -1131,9 +1379,14 @@ fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value) -> Vec<
         }
         for q in file.quests.iter().filter(|q| q.own) {
             let Some(ending) = milestone_stage(&q.tag).or(q.run_ending) else { continue };
-            let (steps, _choices) = path(q, ending);
-            for (i, st) in steps.iter().enumerate() {
-                let does: Vec<serde_json::Value> = st.does.iter().filter(|e| e.as_object().and_then(|o| o.keys().next()).map_or(false, |k| STATE.contains(&k.as_str()))).cloned().collect();
+            for (i, st) in one_way(q, ending, dark, alignment).iter().enumerate() {
+                let does: Vec<serde_json::Value> = without_star_map_branches(save.game, m, &st.does).into_iter()
+                    .filter(|e| e.as_object().and_then(|o| o.keys().next()).map_or(false, |k| STATE.contains(&k.as_str())))
+                    .filter(|e| !e.get("journal").and_then(|j| j.get(0)).and_then(|t| t.as_str()).map_or(false, |t| gone(t)))
+                    // a route's step does not take a quest past where the milestone leaves it
+                    .filter(|e| e.get("journal").and_then(|j| Some((j.get(0)?.as_str()?, j.get(1)?.as_i64()?))).map_or(true, |(t, s)| milestone_stage(t).map_or(true, |top| s <= top)))
+                    .filter(|e| !global_written(e).map_or(false, |n| settled.iter().any(|s| s.eq_ignore_ascii_case(n))))
+                    .collect();
                 if does.is_empty() {
                     continue;
                 }
@@ -1141,7 +1394,7 @@ fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value) -> Vec<
                 later += apply(save, data, &step, &format!("skip.close.{}.{}", q.tag.to_ascii_lowercase(), i)).len();
             }
             let now = save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map(|(_, v)| v).unwrap_or(-1);
-            if ending > now {
+            if ending > now && !gone(&q.tag) {
                 save.set_quest(&q.tag, ending);
             }
             closed += 1;
@@ -1151,6 +1404,138 @@ fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value) -> Vec<
     if closed > 0 {
         notes.push(format!("{}: {} quests closed as a full run ends them, so their people do not offer them again{}", planet, closed,
             if later > 0 { format!(" ({} of their changes wait in areas the save has not been to; the game sets those itself there)", later) } else { String::new() }));
+    }
+    notes
+}
+
+/// A global the step writes, by name.
+fn global_written(effect: &serde_json::Value) -> Option<&str> {
+    effect.get("set_global_bool").or_else(|| effect.get("set_global_number")).and_then(|a| a.get(0)).and_then(|n| n.as_str())
+}
+
+/// A quest step's effects, without the other branches of the game's star map script. The
+/// script (UT_StarMap1VariableSet) sets one planet's flag and what the new count calls for,
+/// but the quest data lists every branch in one step, so replaying that step found all four
+/// maps, opened the Unknown World and queued the capture at the first planet (measured
+/// 2026-11-02). What is left of such a step is the chapter's own flag; `count_star_maps`
+/// sets the rest. A step that is not the script's is returned as it is.
+fn without_star_map_branches(game: Game, m: &serde_json::Value, does: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let all = milestones_ref(game);
+    let Some(sm) = all.iter().find_map(|(_, v)| v.get("star_map").filter(|s| !s.is_null())) else { return does.to_vec() };
+    let text = |v: &serde_json::Value| v.as_str().unwrap_or_default().to_ascii_lowercase();
+    let counter = sm.get("counter").map(text).unwrap_or_default();
+    let flags: Vec<String> = sm.get("planet_flags").and_then(|f| f.as_array()).map(|f| f.iter().map(text).collect()).unwrap_or_default();
+    let mut names = flags.clone();
+    names.push(counter.clone());
+    for on in sm.get("on_count").and_then(|v| v.as_array()).into_iter().flatten() {
+        names.extend(on.get("set").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|st| st.get("name")).map(text));
+    }
+    let is_script = does.iter().any(|e| {
+        global_written(e).map_or(false, |n| flags.contains(&n.to_ascii_lowercase()))
+            || e.get("other").and_then(|o| o.as_str()).map_or(false, |o| o.to_ascii_lowercase().contains(&format!("\"{}\"", counter)))
+    });
+    if !is_script {
+        return does.to_vec();
+    }
+    let own = m.get("star_map").and_then(|s| s.get("planet_flag")).map(text).unwrap_or_default();
+    let journal = sm.get("journal").and_then(|j| j.get(0)).map(text).unwrap_or_default();
+    does.iter()
+        .filter(|e| {
+            if let Some(n) = global_written(e) {
+                let n = n.to_ascii_lowercase();
+                return n == own || !names.contains(&n);
+            }
+            e.get("journal").and_then(|j| j.get(0)).map(text) != Some(journal.clone())
+        })
+        .cloned()
+        .collect()
+}
+
+/// Chapters in the order the game plays them. The timeline lists KotOR 1's four free planets
+/// and then the Leviathan, but the game plays the capture after the third map, and its
+/// take-off script only starts it while K_STAR_MAP is 40: past that it never plays, and
+/// Bastila stays. So the Leviathan goes in before a fourth planet, and a skip to the
+/// Leviathan itself leaves the fourth planet to play, as the game does.
+fn leviathan_in_place(save: &Save, chapters: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    let name = |m: &serde_json::Value| m.get("planet").and_then(|p| p.as_str()).unwrap_or_default().eq_ignore_ascii_case("Leviathan");
+    let globals = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
+    let is_on = |flag: &str| globals.iter().any(|g| g.name.eq_ignore_ascii_case(flag) && g.value == crate::globals::GlobalValue::Bool(true));
+    let captured = globals.iter().any(|g| g.name.eq_ignore_ascii_case("K_CAPTURED_LEV") && matches!(g.value, crate::globals::GlobalValue::Number(n) if n >= 10));
+    let all = milestones_ref(save.game);
+    let (Some(leviathan), false) = (all.iter().find(|(_, m)| name(m)).map(|(_, m)| (*m).clone()), captured) else { return chapters.to_vec() };
+    let flag = |m: &serde_json::Value| m.get("star_map").and_then(|s| s.get("planet_flag")).and_then(|f| f.as_str()).map(str::to_string);
+    let to_leviathan = chapters.last().map_or(false, |m| name(m));
+    let mut found = all.iter().filter_map(|(_, m)| flag(m)).filter(|f| is_on(f)).count();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for m in chapters {
+        if name(m) {
+            continue;
+        }
+        if flag(m).map_or(false, |f| !is_on(&f)) {
+            if found == 3 {
+                if to_leviathan {
+                    continue;
+                }
+                if !out.iter().any(|o| name(o)) {
+                    out.push(leviathan.clone());
+                }
+            }
+            found += 1;
+        }
+        out.push(m.clone());
+    }
+    if chapters.iter().any(|m| name(m)) && !out.iter().any(|o| name(o)) {
+        out.push(leviathan);
+    }
+    out
+}
+
+/// The star maps, counted the game's way: the counter is the base and so much per planet
+/// whose map is found, and reaching a count sets what the game's own script sets then
+/// (the Leviathan capture after the third planet, the Unknown World after the fourth).
+fn count_star_maps(save: &mut Save, data: &GameData, m: &serde_json::Value) -> Vec<String> {
+    let mut notes = Vec::new();
+    let planet = m.get("planet").and_then(|p| p.as_str()).unwrap_or_default().to_ascii_lowercase();
+    if let Some(sm) = m.get("star_map").filter(|v| !v.is_null()) {
+        let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
+        let found = save
+            .globals
+            .as_ref()
+            .map(|g| crate::globals::list(&g.root))
+            .unwrap_or_default()
+            .iter()
+            .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true))
+            .count() as i64;
+        let count = sm.get("base").and_then(|v| v.as_i64()).unwrap_or(10) + sm.get("per_planet").and_then(|v| v.as_i64()).unwrap_or(10) * found;
+        let mut does = Vec::new();
+        if let Some(counter) = sm.get("counter").and_then(|v| v.as_str()) {
+            does.push(serde_json::json!({ "set_global_number": [counter, count] }));
+        }
+        for on in sm.get("on_count").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            if on.get("count").and_then(|v| v.as_i64()) != Some(count) {
+                continue;
+            }
+            let now = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
+            for st in on.get("set").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+                let (Some(name), Some(value)) = (st.get("name").and_then(|v| v.as_str()), st.get("value").and_then(|v| v.as_i64())) else { continue };
+                if let Some(below) = st.get("only_if_below").and_then(|v| v.as_i64()) {
+                    let cur = now.iter().find(|g| g.name.eq_ignore_ascii_case(name)).and_then(|g| match g.value {
+                        crate::globals::GlobalValue::Number(n) => Some(n),
+                        _ => None,
+                    });
+                    if cur.map_or(false, |c| c >= below) {
+                        continue;
+                    }
+                }
+                does.push(serde_json::json!({ "set_global_number": [name, value] }));
+            }
+            if let Some(j) = on.get("journal").and_then(|v| v.as_array()) {
+                if let (Some(tag), Some(stage)) = (j.first().and_then(|v| v.as_str()), j.get(1).and_then(|v| v.as_i64())) {
+                    does.push(serde_json::json!({ "journal": [tag, stage] }));
+                }
+            }
+        }
+        notes.extend(apply(save, data, &Step { module: String::new(), via: None, needs: Vec::new(), does, branch: None, found: Default::default() }, &format!("skip.{}.starmap", planet)));
     }
     notes
 }
@@ -1275,50 +1660,7 @@ fn apply_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_c
         notes.extend(apply(save, data, &Step { module: String::new(), via: None, needs: Vec::new(), does: vec![serde_json::json!({ "set_global_number": [name, value] })], branch: None, found: Default::default() }, &format!("skip.{}.inc", planet)));
     }
 
-    // The star maps, counted the game's way: the counter is the base and so much per planet
-    // whose map is found, and reaching a count sets what the game's own script sets then
-    // (the Leviathan capture after the third planet, the Unknown World after the fourth).
-    if let Some(sm) = m.get("star_map").filter(|v| !v.is_null()) {
-        let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
-        let found = save
-            .globals
-            .as_ref()
-            .map(|g| crate::globals::list(&g.root))
-            .unwrap_or_default()
-            .iter()
-            .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true))
-            .count() as i64;
-        let count = sm.get("base").and_then(|v| v.as_i64()).unwrap_or(10) + sm.get("per_planet").and_then(|v| v.as_i64()).unwrap_or(10) * found;
-        let mut does = Vec::new();
-        if let Some(counter) = sm.get("counter").and_then(|v| v.as_str()) {
-            does.push(serde_json::json!({ "set_global_number": [counter, count] }));
-        }
-        for on in sm.get("on_count").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-            if on.get("count").and_then(|v| v.as_i64()) != Some(count) {
-                continue;
-            }
-            let now = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
-            for st in on.get("set").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-                let (Some(name), Some(value)) = (st.get("name").and_then(|v| v.as_str()), st.get("value").and_then(|v| v.as_i64())) else { continue };
-                if let Some(below) = st.get("only_if_below").and_then(|v| v.as_i64()) {
-                    let cur = now.iter().find(|g| g.name.eq_ignore_ascii_case(name)).and_then(|g| match g.value {
-                        crate::globals::GlobalValue::Number(n) => Some(n),
-                        _ => None,
-                    });
-                    if cur.map_or(false, |c| c >= below) {
-                        continue;
-                    }
-                }
-                does.push(serde_json::json!({ "set_global_number": [name, value] }));
-            }
-            if let Some(j) = on.get("journal").and_then(|v| v.as_array()) {
-                if let (Some(tag), Some(stage)) = (j.first().and_then(|v| v.as_str()), j.get(1).and_then(|v| v.as_i64())) {
-                    does.push(serde_json::json!({ "journal": [tag, stage] }));
-                }
-            }
-        }
-        notes.extend(apply(save, data, &Step { module: String::new(), via: None, needs: Vec::new(), does, branch: None, found: Default::default() }, &format!("skip.{}.starmap", planet)));
-    }
+    notes.extend(count_star_maps(save, data, m));
 
     // Companions: who joins (AddAvailableNPCByTemplate) and who leaves.
     let party = m.get("party").cloned().unwrap_or_default();
@@ -1353,8 +1695,16 @@ fn apply_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_c
         }
     }
 
-    // Becoming a Jedi: the class the player picks, a level of it, its lightsaber, and the
-    // story value the game sets for that path.
+    notes.extend(apply_jedi(save, data, m, jedi_class, before));
+    notes.extend(unsure);
+    notes
+}
+
+/// Becoming a Jedi: the class the player picks, a level of it, its lightsaber, and the story
+/// value the game sets for that path.
+fn apply_jedi(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_class: Option<usize>, before: &Before) -> Vec<String> {
+    let mut notes = Vec::new();
+    let planet = m.get("planet").and_then(|p| p.as_str()).unwrap_or_default().to_ascii_lowercase();
     if let (Some(jc), Some(pick)) = (m.get("jedi_class"), jedi_class) {
         if let Some(choice) = jc.get("choices").and_then(|c| c.as_array()).and_then(|c| c.get(pick)).cloned() {
             let variable = jc.get("variable").and_then(|v| v.as_str()).unwrap_or("DAN_PATH_STATE");
@@ -1376,7 +1726,6 @@ fn apply_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_c
             }
         }
     }
-    notes.extend(unsure);
     notes
 }
 
@@ -1631,65 +1980,108 @@ pub fn chapter_quests(game: Game, planet: &str) -> Vec<(String, bool)> {
 /// Goes back to the start of the earliest chapter in `undo` (chapters the save has played,
 /// in story order), or, with `stage`, to a quest's stage in that chapter. `kept` are the
 /// chapters that stay played, in story order. `keep_items` keeps the items and credits.
+/// Alignment defaults to 50, Neutral; use go_back_with_alignment for a chosen value.
 pub fn go_back(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>) -> Result<Vec<String>, String> {
+    go_back_with_alignment(save, data, kept, undo, keep_items, stage, 50)
+}
+
+/// Alignment is a chosen target, not an estimate of the player's past choices.
+pub fn go_back_with_alignment(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>, alignment: i64) -> Result<Vec<String>, String> {
+    go_back_part_played(save, data, kept, undo, keep_items, stage, alignment, None)
+}
+
+/// The side a chapter was played on, by the journal where the sides end differently, and by
+/// alignment where the journal cannot tell.
+fn played_dark(m: &serde_json::Value, quests: &[(String, i64)], leans_dark: bool) -> bool {
+    let stage_of = |j: Option<&serde_json::Value>, tag: &str| j.and_then(|j| j.as_array()).and_then(|a| a.iter().find(|e| e.get("tag").and_then(|t| t.as_str()).map_or(false, |t| t.eq_ignore_ascii_case(tag)))).and_then(|e| e.get("stage").and_then(|s| s.as_i64()));
+    for e in m.get("dark").and_then(|d| d.get("journal")).and_then(|j| j.as_array()).into_iter().flatten() {
+        let Some(tag) = e.get("tag").and_then(|t| t.as_str()) else { continue };
+        let (Some(dark), Some(light)) = (e.get("stage").and_then(|s| s.as_i64()), stage_of(m.get("journal"), tag)) else { continue };
+        if dark == light {
+            continue;
+        }
+        match quests.iter().find(|(t, _)| t.eq_ignore_ascii_case(tag)).map(|(_, v)| *v) {
+            Some(v) if v == dark => return true,
+            Some(v) if v == light => return false,
+            _ => {}
+        }
+    }
+    leans_dark
+}
+
+/// As go_back_with_alignment. `unfinished` names the chapter of `undo` the player is in: its
+/// values and journal go back, but what only a finished chapter gave is not taken away.
+#[allow(clippy::too_many_arguments)]
+pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>, alignment: i64, unfinished: Option<&str>) -> Result<Vec<String>, String> {
+    if !(0..=100).contains(&alignment) { return Err("Alignment must be between 0 and 100.".into()); }
     let first = undo.first().cloned().ok_or("nothing to go back over")?;
+    let asked = undo;
+    let (kept, undo) = fourth_planet_with_the_leviathan(save, kept, undo);
     let dark = save.player().map_or(false, |p| crate::creature::alignment(p) < 50);
-    let side = if dark { "dark" } else { "light" };
+    let quests = save.quests();
     let mut notes = Vec::new();
-    let kept_side: Vec<serde_json::Value> = kept.iter().map(|m| for_side(m, dark)).collect();
+    for m in undo.iter().filter(|m| m.get("star_map").map_or(false, |s| !s.is_null()) && !asked.iter().any(|a| a.get("planet") == m.get("planet"))) {
+        notes.push(format!("{} is undone too: the capture comes before the fourth planet", m.get("planet").and_then(|p| p.as_str()).unwrap_or_default()));
+    }
+    let kept_side: Vec<serde_json::Value> = kept.iter().map(|m| for_side(m, played_dark(m, &quests, dark))).collect();
+    let names: Vec<String> = kept.iter().filter_map(|m| m.get("planet").and_then(|p| p.as_str()).map(str::to_string)).collect();
+    // Never raised: a return gives no XP the player did not have.
+    let xp = xp_of(save.game, &names).min(save.player().map_or(0, crate::creature::experience));
+    let table = data.table("exptable");
+    let mut target = (1..=60).take_while(|l| table.int((l - 1) as usize, "xp").map_or(false, |need| xp >= need)).last().unwrap_or(1);
+    // A story-granted class from an undone chapter cannot remain merely because the
+    // player had unspent XP before taking it. Stop before its first recorded level.
+    let lost_classes: Vec<i64> = undo.iter().filter(|m| m.get("planet").and_then(|p| p.as_str()).map_or(true, |p| Some(p) != unfinished)).flat_map(|m| m.get("jedi_class").and_then(|j| j.get("choices")).and_then(|c| c.as_array()).cloned().unwrap_or_default())
+        .filter_map(|c| c.get("class").and_then(|id| id.as_i64())).collect();
+    if let Some(stop) = save.player().and_then(|p| p.list("LvlStatList")).and_then(|r| r.iter().position(|r| r.int("LvlStatClass").map_or(false, |id| lost_classes.contains(&id)))).filter(|i| *i > 0) {
+        target = target.min(stop as i64);
+    }
+    let cat = crate::catalog::Catalog::build(data);
+    crate::creature::validate_rewind_prefix(save.player().ok_or("This save has no player to rewind.")?, target, &cat)?;
     let before = Before::of(save);
     for m in undo.iter().rev() {
-        let m = for_side(m, dark);
-        notes.extend(undo_chapter(save, data, &m, &kept_side, keep_items, side, &before));
+        let on_dark = played_dark(m, &quests, dark);
+        let side = if on_dark { "dark" } else { "light" };
+        let m = for_side(m, on_dark);
+        let part = m.get("planet").and_then(|p| p.as_str()).map_or(false, |p| Some(p) == unfinished);
+        notes.extend(undo_chapter(save, data, &m, &kept_side, keep_items, side, &before, part));
     }
-    // the star maps (KotOR 1), counted again from the flags that stay
-    for m in &kept_side {
-        if let Some(sm) = m.get("star_map").filter(|v| !v.is_null()) {
-            let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
-            let found = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default().iter()
-                .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true)).count() as i64;
-            if let Some(counter) = sm.get("counter").and_then(|v| v.as_str()) {
-                let n = sm.get("base").and_then(|v| v.as_i64()).unwrap_or(10) + sm.get("per_planet").and_then(|v| v.as_i64()).unwrap_or(10) * found;
-                set_value(save, data, counter, serde_json::json!(n), "goback.starmap");
+    restore_star_maps(save, data, &kept_side, &undo);
+    // Prestige class story state goes with the class (KotOR 2).
+    let prestige_left = save.player().map_or(false, |p| crate::creature::classes(p).iter().any(|c| PRESTIGE_LIGHT.contains(&c.0) || PRESTIGE_DARK.contains(&c.0)));
+    let levels_stay = save.player().and_then(|p| p.list("LvlStatList")).map_or(false, |r| r.iter().take(target.max(0) as usize).any(|x| x.int("LvlStatClass").map_or(false, |c| PRESTIGE_LIGHT.contains(&c) || PRESTIGE_DARK.contains(&c))));
+    if save.game == Game::K2 && prestige_left && !levels_stay {
+        set_value(save, data, "000_Prestige", serde_json::json!(0), "goback.prestige");
+    }
+    // Companions a later chapter trained (KotOR 2): the chain's values, for those no longer here.
+    if save.game == Game::K2 {
+        for (slot, _, _, values, _) in TRAINABLE {
+            if !save.recruited(slot) {
+                for (name, _) in values.iter() {
+                    set_value(save, data, name, serde_json::json!(0), "goback.train");
+                }
             }
         }
     }
-    // XP and levels: the end of the last chapter that stays, the levels gained since off
-    let xp = kept_side.iter().rev().find_map(|m| m.get("planet").and_then(|p| p.as_str()).and_then(|p| rewards(save.game, p)).and_then(|r| r.get("xp_at_end").and_then(|v| v.as_i64()))).unwrap_or(0);
-    let now = save.player().map(crate::creature::experience).unwrap_or(0);
-    // the reverse of the skip's XP step: always the end of the chapter before (a class taken
-    // off above may have reset it to its level's floor)
-    if xp != now {
-        let table = data.table("exptable");
-        let xp_for = |level: i64| table.int((level - 1).max(0) as usize, "xp");
-        let target = (1..=60).take_while(|l| xp_for(*l).map_or(false, |need| xp >= need)).last().unwrap_or(1);
-        let cat = crate::catalog::Catalog::build(data);
-        save.edit(Who::Player, "goback.levels", |c| {
-            while crate::creature::level(c) > target {
-                let Some(last) = c.list("LvlStatList").and_then(|l| l.last()).and_then(|r| r.int("LvlStatClass")) else { break };
-                let classes = crate::creature::classes(c);
-                let Some(index) = classes.iter().position(|(id, _)| *id == last) else { break };
-                let Some(class) = cat.class(last).cloned() else { break };
-                let lvl = classes[index].1;
-                if lvl <= 1 && classes.len() > 1 {
-                    crate::creature::remove_class(c, index, &class, &xp_for);
-                } else if lvl > 1 {
-                    crate::creature::set_class_level(c, index, lvl - 1, &class, &xp_for);
-                } else {
-                    break;
-                }
-            }
-            crate::creature::set_experience(c, xp);
-        });
-        save.set_party_int("PT_XP_POOL", xp);
-        notes.push(format!("XP back to {} (level {}), the levels gained since taken off newest first", xp, target));
-    }
+    // Rebuild the earlier class list from the retained records, even when a later
+    // edit changed the current classes. Never leave old levels behind with reduced XP.
+    let restored = std::cell::RefCell::new(Ok(0));
+    save.edit(Who::Player, "goback.levels", |c| {
+        let result = crate::creature::rewind_level_history(c, target, &cat);
+        if result.is_ok() { crate::creature::set_experience(c, xp); }
+        if restored.borrow().is_ok() { *restored.borrow_mut() = result; }
+    });
+    let level = restored.into_inner()?;
+    save.set_party_int("PT_XP_POOL", xp);
+    notes.push(format!("XP back to {} (level {}), later recorded levels taken away", xp, level));
     if keep_items {
         notes.push("Items and credits kept as they are now".to_string());
     }
     // where the story starts again: a stage inside the first undone chapter, or its start
     if let Some((tag, st)) = stage {
         notes.extend(skip_to_stage(save, data, &[first.clone()], &tag, st, None, dark, None, false)?);
+        save.edit(Who::Player, "goback.alignment", |c| crate::creature::set_alignment(c, alignment));
+        notes.push(format!("Alignment set to {} (chosen for this return)", alignment));
         return Ok(notes);
     }
     let start = kept_side.iter().rev().find(|m| m.get("side_chapter").and_then(|v| v.as_bool()) != Some(true)).and_then(|m| m.get("next_chapter").cloned());
@@ -1709,8 +2101,62 @@ pub fn go_back(save: &mut Save, data: &GameData, kept: &[serde_json::Value], und
             save.queue_transition(&module, &waypoint, &[])?;
         }
     }
+    save.edit(Who::Player, "goback.alignment", |c| crate::creature::set_alignment(c, alignment));
+    notes.push(format!("Alignment set to {} (chosen for this return)", alignment));
     notes.dedup();
     Ok(notes)
+}
+
+/// The capture plays after the third map, so with all four found the Leviathan was played
+/// before the last planet. A return to it takes that planet back too, or the count stays past
+/// the 40 the capture's script tests and neither it nor the Unknown World can come. Which
+/// planet was last the save cannot say: it is the last on the timeline.
+fn fourth_planet_with_the_leviathan(save: &Save, kept: &[serde_json::Value], undo: &[serde_json::Value]) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let (mut kept, mut undo) = (kept.to_vec(), undo.to_vec());
+    let leviathan = undo.iter().any(|m| m.get("planet").and_then(|p| p.as_str()).map_or(false, |p| p.eq_ignore_ascii_case("Leviathan")));
+    let globals = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
+    let on = |m: &serde_json::Value| m.get("star_map").and_then(|s| s.get("planet_flag")).and_then(|f| f.as_str()).map_or(false, |f| globals.iter().any(|g| g.name.eq_ignore_ascii_case(f) && g.value == crate::globals::GlobalValue::Bool(true)));
+    if leviathan && kept.iter().filter(|m| on(m)).count() == 4 {
+        if let Some(at) = kept.iter().rposition(on) {
+            undo.push(kept.remove(at));
+        }
+    }
+    (kept, undo)
+}
+
+/// The star maps after a return: the planets undone lose their flags, the counter is counted
+/// from those left, what the counter set goes back to what the kept chapters leave, and the
+/// count then sets again what it calls for. Without this, a kept chapter that lists a value
+/// with no known end stopped the reset, and the capture could no longer come (measured
+/// 2026-11-02).
+fn restore_star_maps(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value]) {
+    let all = milestones_ref(save.game);
+    let Some(carrier) = all.iter().map(|(_, m)| *m).find(|m| m.get("star_map").map_or(false, |s| !s.is_null())) else { return };
+    let sm = carrier.get("star_map").cloned().unwrap_or_default();
+    let kept_value = |name: &str| kept.iter().filter_map(|k| k.get("globals").and_then(|g| g.as_array()).and_then(|g| {
+        g.iter().find(|x| x.get("name").and_then(|n| n.as_str()).map_or(false, |n| n.eq_ignore_ascii_case(name))).and_then(|x| x.get("value").cloned()).filter(|v| !v.is_null())
+    })).last();
+    for m in undo {
+        if let Some(flag) = m.get("star_map").and_then(|s| s.get("planet_flag")).and_then(|f| f.as_str()) {
+            set_value(save, data, flag, serde_json::json!(false), "goback.starmap.flag");
+        }
+    }
+    for on in sm.get("on_count").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+        for st in on.get("set").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            if let Some(name) = st.get("name").and_then(|n| n.as_str()) {
+                set_value(save, data, name, kept_value(name).unwrap_or(serde_json::json!(0)), "goback.starmap.set");
+            }
+        }
+    }
+    let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
+    let found = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default().iter()
+        .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true)).count();
+    let counter = sm.get("counter").and_then(|v| v.as_str()).unwrap_or_default();
+    if found > 0 {
+        count_star_maps(save, data, carrier);
+    } else {
+        set_value(save, data, counter, kept_value(counter).unwrap_or(serde_json::json!(0)), "goback.starmap");
+    }
 }
 
 fn set_value(save: &mut Save, data: &GameData, name: &str, value: serde_json::Value, key: &str) {
@@ -1719,7 +2165,8 @@ fn set_value(save: &mut Save, data: &GameData, name: &str, value: serde_json::Va
 }
 
 /// Takes one played chapter back out of the save.
-fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &[serde_json::Value], keep_items: bool, side: &str, before: &Before) -> Vec<String> {
+#[allow(clippy::too_many_arguments)]
+fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &[serde_json::Value], keep_items: bool, side: &str, before: &Before, unfinished: bool) -> Vec<String> {
     let mut notes = Vec::new();
     let planet = m.get("planet").and_then(|p| p.as_str()).unwrap_or_default().to_string();
     let key = format!("goback.{}", planet.to_ascii_lowercase());
@@ -1733,12 +2180,16 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
     let earlier_writes = |name: &str| kept.iter().any(|k| k.get("globals").and_then(|g| g.as_array()).map_or(false, |g| g.iter().any(|x| x.get("name").and_then(|n| n.as_str()).map_or(false, |n| n.eq_ignore_ascii_case(name)))));
     let all = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
     let mut values = 0;
+    let mut left: Vec<String> = Vec::new();
     for g in m.get("globals").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
         let Some(name) = g.get("name").and_then(|n| n.as_str()) else { continue };
         let Some(cur) = all.iter().find(|x| x.name.eq_ignore_ascii_case(name)) else { continue };
         let value = match earlier_value(name) {
             Some(v) => v,
-            None if earlier_writes(name) => continue,
+            None if earlier_writes(name) => {
+                left.push(name.to_string());
+                continue;
+            }
             None => match cur.value {
                 crate::globals::GlobalValue::Bool(_) => serde_json::json!(false),
                 crate::globals::GlobalValue::Number(_) => serde_json::json!(0),
@@ -1748,8 +2199,11 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
         set_value(save, data, name, value, &format!("{}.g.{}", key, name));
         values += 1;
     }
-    // the masters found and the forms taught (KotOR 2)
-    for inc in m.get("increments").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+    if !left.is_empty() {
+        notes.push(format!("{}: story values left as they are, the data has no earlier value for them: {}", planet, left.join(", ")));
+    }
+    // the masters found and the forms taught (KotOR 2): a chapter not finished gave neither
+    for inc in m.get("increments").and_then(|v| v.as_array()).cloned().unwrap_or_default().into_iter().filter(|_| !unfinished) {
         let (Some(name), Some(add)) = (inc.get("name").and_then(|v| v.as_str()), inc.get("add").and_then(|v| v.as_i64())) else { continue };
         let now = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default().iter().find(|g| g.name.eq_ignore_ascii_case(name)).and_then(|g| match g.value { crate::globals::GlobalValue::Number(n) => Some(n), _ => None }).unwrap_or(0);
         set_value(save, data, name, serde_json::json!((now - add).max(0)), &format!("{}.inc", key));
@@ -1799,7 +2253,7 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
     }
     // the form its master taught (KotOR 2): the reverse of the teaching, by the same rule, the
     // count one lower and the form it gave off the known list
-    if m.get("teach_form").and_then(|v| v.as_bool()) == Some(true) {
+    if m.get("teach_form").and_then(|v| v.as_bool()) == Some(true) && !unfinished {
         let all = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
         let form = all.iter().find(|g| g.name.eq_ignore_ascii_case("G_PC_FORM")).and_then(|g| match g.value { crate::globals::GlobalValue::Number(n) => Some(n), _ => None }).unwrap_or(0);
         if form > 0 {
@@ -1822,23 +2276,9 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
             set_value(save, data, "G_PC_FORM", serde_json::json!(form - 1), &format!("{}.formcount", key));
         }
     }
-    // the class it gave (KotOR 1's Jedi class on Dantooine): taken off with its levels
-    if let Some(choices) = m.get("jedi_class").and_then(|j| j.get("choices")).and_then(|c| c.as_array()) {
-        let ids: Vec<i64> = choices.iter().filter_map(|c| c.get("class").and_then(|v| v.as_i64())).collect();
-        let cat = crate::catalog::Catalog::build(data);
-        let table = data.table("exptable");
-        let xp_for = |level: i64| table.int((level - 1).max(0) as usize, "xp");
-        save.edit(Who::Player, &format!("{}.class", key), |c| {
-            let classes = crate::creature::classes(c);
-            if let Some(index) = classes.iter().position(|(id, _)| ids.contains(id)) {
-                if let Some(class) = cat.class(classes[index].0).cloned() {
-                    crate::creature::remove_class(c, index, &class, &xp_for);
-                }
-            }
-        });
-    }
+    // Class levels are restored once, from their chronological records, in go_back.
     // the powers and feats its story granted (KotOR 2)
-    for g in m.get("grants").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+    for g in m.get("grants").and_then(|v| v.as_array()).cloned().unwrap_or_default().into_iter().filter(|_| !unfinished) {
         if g.get("side").and_then(|v| v.as_str()).map_or(false, |s| s != side) {
             continue;
         }
@@ -1852,20 +2292,14 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
             }
         });
     }
-    // credits, alignment and influence the chapter's conversations gave
-    if let Some(c) = rewards(save.game, &planet).and_then(|r| r.get("credits").cloned()) {
+    // Credits and influence the chapter's conversations gave. Alignment is chosen
+    // once for the return; estimated chapter gains cannot recover past choices.
+    if let Some(c) = rewards(save.game, &planet).and_then(|r| r.get("credits").cloned()).filter(|_| !unfinished) {
         let empty = Before { quests: Vec::new(), recruited: before.recruited.clone(), items: Default::default() };
         let g = chapter_gains(&c, side, &planet, save.game, &empty);
         if !keep_items && g.credits != 0 {
             let gold = save.party_int("PT_GOLD").unwrap_or(0);
             save.set_party_int("PT_GOLD", (gold - g.credits).max(0));
-        }
-        let net = if side == "dark" { g.net_alignment.min(0) } else { g.net_alignment.max(0) };
-        if net != 0 {
-            save.edit(Who::Player, &format!("{}.alignment", key), |p| {
-                let now = crate::creature::alignment(p);
-                crate::creature::set_alignment(p, (now - net).clamp(0, 100));
-            });
         }
         for (slot, d) in g.influence {
             if let Some(now) = save.influence(slot).filter(|v| *v >= 0) {
@@ -1874,8 +2308,16 @@ fn undo_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, kept: &
         }
     }
     // the items it gave (story, drops, containers), as far as the player still has them
-    if !keep_items {
+    if !keep_items && !unfinished {
         let mut give: Vec<(String, i64)> = Vec::new();
+        // the Jedi lightsaber, and the path's story value with it
+        if let Some(jc) = m.get("jedi_class") {
+            for choice in jc.get("choices").and_then(|c| c.as_array()).into_iter().flatten() {
+                if let Some(saber) = choice.get("lightsaber").and_then(|v| v.as_str()) {
+                    give.push((saber.to_ascii_lowercase(), 1));
+                }
+            }
+        }
         for it in m.get("items").and_then(|i| i.get("held_at_end")).and_then(|h| h.as_array()).cloned().unwrap_or_default() {
             if let Some(r) = it.get("resref").and_then(|v| v.as_str()) {
                 give.push((r.to_ascii_lowercase(), it.get("count").and_then(|v| v.as_i64()).unwrap_or(1)));

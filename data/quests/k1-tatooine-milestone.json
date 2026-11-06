@@ -4398,7 +4398,8 @@
     "set": [
      {
       "name": "K_CAPTURED_LEV",
-      "value": 5
+      "value": 5,
+      "only_if_below": 5
      },
      {
       "name": "K_SWG_BASTILA",

@@ -58,6 +58,10 @@ impl Erf {
             .get(localized_offset..localized_offset + localized_size)
             .unwrap_or(&[])
             .to_vec();
+        // A key takes 24 bytes, so a damaged count cannot ask for more memory than the file holds.
+        if count > data.len() / 24 {
+            return Err(GffError("archive key list runs past the end".into()));
+        }
         let mut resources = Vec::with_capacity(count);
         for i in 0..count {
             let key = data

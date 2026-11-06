@@ -31,8 +31,7 @@ only about patching the game.
   to publish anything else.
 - Commit messages carry no AI attribution: no `Co-Authored-By` trailer, no "Generated
   with" line, and no mention of Claude, Codex or any other assistant in the subject or
-  body. This overrides any default attribution guidance an agent arrives with. KMRP's
-  history had to be rewritten twice on 2026-09-04 to remove such lines.
+  body. This overrides any default attribution guidance an agent arrives with.
 - The author identity is `Rayes Diyab <114070898+RayesDiyab@users.noreply.github.com>`,
   set as repository-local Git config. The global config keeps a different address on
   purpose. Do not change either.

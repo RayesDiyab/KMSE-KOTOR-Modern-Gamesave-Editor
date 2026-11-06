@@ -59,6 +59,8 @@ export component Stepper inherits Rectangle {
     in property <bool> changed;
     in property <length> font-size: 20px * Theme.ts;
     callback set(int);
+    // Typing ends `text: value`, so the box is told, or it would keep what was typed.
+    changed value => { input.text = root.value; }
     height: 40px;
     min-width: 110px;
     border-radius: 5px;
@@ -81,13 +83,19 @@ export component Stepper inherits Rectangle {
                 vertical-alignment: center;
                 input-type: number;
                 accepted => {
-                    root.set(Math.clamp(self.text.to-float(), minimum, maximum));
+                    if self.text.is-float() {
+                        root.set(Math.clamp(self.text.to-float(), minimum, maximum));
+                    }
+                    self.text = root.value;
                     self.clear-focus();
                 }
                 // Clicking anywhere else is Enter too (main.rs takes the focus away).
                 changed has-focus => {
-                    if !self.has-focus && self.text.to-float() != root.value {
-                        root.set(Math.clamp(self.text.to-float(), minimum, maximum));
+                    if !self.has-focus {
+                        if self.text.is-float() && self.text.to-float() != root.value {
+                            root.set(Math.clamp(self.text.to-float(), minimum, maximum));
+                        }
+                        self.text = root.value;
                     }
                 }
             }
@@ -106,6 +114,7 @@ export component Field inherits Rectangle {
     in property <string> placeholder;
     in property <bool> changed;
     in property <bool> read-only;
+    in property <bool> accept-on-blur: true;
     in property <string> font: Theme.list-font;
     in property <length> font-size: 18px * Theme.ts;
     callback edited(string);
@@ -132,29 +141,43 @@ export component Field inherits Rectangle {
         vertical-alignment: center;
         height: parent.height;
     }
-    input := TextInput {
+    Rectangle {
         x: 12px;
         width: parent.width - 24px;
         height: parent.height;
-        text <=> root.text;
-        read-only: root.read-only;
-        font-family: root.font;
-        font-size: root.font-size;
-        color: changed ? Theme.changed : Theme.text;
-        vertical-alignment: center;
-        single-line: true;
-        edited => { root.edited(self.text); }
-        accepted => {
-            root.at-focus = self.text;
-            root.accepted(self.text);
-        }
-        // Clicking anywhere else is Enter too, when the text changed since the box was entered.
-        changed has-focus => {
-            if self.has-focus {
-                root.at-focus = self.text;
-            } else if self.text != root.at-focus {
+        clip: true;
+        input := TextInput {
+            property <length> scroll-x: 0px;
+            x: min(0px, max(parent.width - self.width - self.text-cursor-width, self.scroll-x));
+            width: max(parent.width - self.text-cursor-width, self.preferred-width);
+            cursor-position-changed(cursor) => {
+                if cursor.x + self.scroll-x < 2px {
+                    self.scroll-x = -cursor.x + 2px;
+                } else if cursor.x + self.scroll-x > parent.width - 2px - self.text-cursor-width {
+                    self.scroll-x = parent.width - cursor.x - 2px - self.text-cursor-width;
+                }
+            }
+            height: parent.height;
+            text <=> root.text;
+            read-only: root.read-only;
+            font-family: root.font;
+            font-size: root.font-size;
+            color: changed ? Theme.changed : Theme.text;
+            vertical-alignment: center;
+            single-line: true;
+            edited => { root.edited(self.text); }
+            accepted => {
                 root.at-focus = self.text;
                 root.accepted(self.text);
+            }
+            // Clicking anywhere else is Enter too, when the text changed since the box was entered.
+            changed has-focus => {
+                if self.has-focus {
+                    root.at-focus = self.text;
+                } else if root.accept-on-blur && self.text != root.at-focus {
+                    root.at-focus = self.text;
+                    root.accepted(self.text);
+                }
             }
         }
     }
@@ -436,6 +459,89 @@ export component BackArrow inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+
+// Story rewind's alignment target. The pointer updates the value while dragging;
+// only release prepares a new story result. Keyboard and numeric input commit directly.
+export component AlignmentChoice inherits Rectangle {
+    in property <int> value: 50;
+    callback set(int);
+    callback committed();
+    changed value => { number.text = root.value; }
+    property <bool> narrow: self.width < 720px;
+    height: narrow ? 152px : 110px;
+    property <string> side: value == 50 ? "Neutral" : value < 50 ? "Dark side" : "Light side";
+    VerticalLayout {
+        x: 0px; y: 0px;
+        width: root.narrow ? parent.width : parent.width - 350px;
+        height: 40px;
+        Label { text: "ALIGNMENT AFTER GOING BACK"; font-size: 11px * Theme.ts; letter-spacing: 1px; }
+        Note { text: "Starts at 50 (Neutral). Adjust before applying."; font-size: 12px * Theme.ts; }
+    }
+    HorizontalLayout {
+        x: root.narrow ? 0px : parent.width - 330px;
+        y: root.narrow ? 44px : 0px;
+        width: 330px;
+        height: 40px;
+        spacing: 12px;
+        number := Field {
+            width: 70px;
+            text: root.value;
+            font-size: 16px * Theme.ts;
+            accepted(v) => {
+                if v.is-float() { root.set(Math.round(Math.clamp(v.to-float(), 0, 100))); }
+                self.text = root.value;
+                root.committed();
+            }
+        }
+        Text { width: 80px; text: root.side; color: Theme.text; font-size: 13px * Theme.ts; vertical-alignment: center; }
+        Link { text: "Reset to Neutral"; clicked => { root.set(50); root.committed(); } }
+    }
+    slider := FocusScope {
+        x: 10px; y: root.narrow ? 90px : 48px; width: parent.width - 20px; height: 34px;
+        key-pressed(e) => {
+            if e.text == Key.LeftArrow || e.text == Key.DownArrow { root.set(max(0, root.value - 1)); root.committed(); return accept; }
+            if e.text == Key.RightArrow || e.text == Key.UpArrow { root.set(min(100, root.value + 1)); root.committed(); return accept; }
+            if e.text == Key.Home { root.set(0); root.committed(); return accept; }
+            if e.text == Key.End { root.set(100); root.committed(); return accept; }
+            reject
+        }
+        Rectangle {
+            y: 14px; height: 7px; border-radius: 4px;
+            background: @linear-gradient(90deg, #ff405d33 0%, #c6d5e322 50%, #20d8ff33 100%);
+        }
+        Rectangle {
+            y: 16px; height: 3px; border-radius: 2px;
+            background: @linear-gradient(90deg, #ff405d 0%, #d2dae5 50%, #20d8ff 100%);
+        }
+        Rectangle {
+            x: parent.width * root.value / 100 - 10px; y: 7px; width: 20px; height: 20px;
+            border-radius: 10px; border-width: 2px;
+            border-color: slider.has-focus || touch.has-hover ? Theme.hover-edge : #91dfff;
+            background: Theme.field;
+            Rectangle { width: 5px; height: 5px; border-radius: 3px; background: Theme.text; }
+        }
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down {
+                    slider.focus();
+                    root.set(Math.round(Math.clamp(self.mouse-x / self.width * 100, 0, 100)));
+                }
+                if e.kind == PointerEventKind.up { root.committed(); }
+            }
+            moved => {
+                if self.pressed { root.set(Math.round(Math.clamp(self.mouse-x / self.width * 100, 0, 100))); }
+            }
+        }
+    }
+    HorizontalLayout {
+        y: root.narrow ? 126px : 84px; height: 20px;
+        Note { text: "0 آ· Dark"; font-size: 11px * Theme.ts; }
+        Text { text: "50 آ· Neutral"; font-size: 11px * Theme.ts; color: Theme.muted; horizontal-alignment: center; }
+        Text { text: "100 آ· Light"; font-size: 11px * Theme.ts; color: Theme.muted; horizontal-alignment: right; }
     }
 }
 

@@ -6,6 +6,75 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The audit's findings fixed** (2026-11-02; [the worklist](docs/audit-2026-11-02-worklist.md)
+  has each one and how it was checked). No work is lost without asking: a timeline click
+  is refused and closing asks once. Cancel in Copy and Save as a New Save cancels. A save the
+  game changed since it was opened is not written over. A write that fails part way puts the
+  old files back and says truly that nothing changed; a failed Save as leaves no folder. A
+  skip-recruited companion's item comes off as the whole item. A panic shows a message and
+  leaves `crash.txt`. Skip Ahead reaches a quest stage by one way only, side chapters stand
+  alone, Go Back restores the star maps and capture, leaves side chapters and takes the
+  fourth planet with the Leviathan, dark runs read as played, removed quests stay removed,
+  XP counts each chapter once and is never raised by Go Back, and what could not be applied
+  is reported. Two-handed weapons empty the left hand. Stealth Field Generators can be added,
+  map notes show, total level is capped, and read-only saves refuse edits at once. Rename
+  backups go to `Save Editor Backup`. 78 tests pass (`tests/audit_fixes.rs`). **In the game,
+  untested; in the program, started once and not clicked.**
+- **Backups leave what Steam syncs** (2026-11-02): they go to `Save Editor Backup` in the game's
+  folder, not inside `Saves`. Backups already made stay where they are.
+- **Load-screen pictures follow the party** after a skip, a return or an import (2026-11-02).
+- **Attribute decreases count** (2026-11-02): effects of type 37 lower what the Health and Force
+  figures are worked from; the floor of 3 is confirmed for both games.
+- **Skip Ahead finds one star map at a time** (2026-11-02). A skip that included Tatooine
+  or Korriban found all four maps, opened the Unknown World and left `K_STAR_MAP` at 10, so
+  the Leviathan capture never played. Closing a quest replayed every branch of the game's
+  star map script. Each planet now sets its own flag and the count follows, in any order.
+  The Leviathan goes in before a fourth planet, as in the game, and a skip to the Leviathan
+  leaves the fourth planet open, and a stage skip after the Leviathan does not set the
+  capture up again. Saves already skipped keep the wrong values. Measured on
+  in-memory copies (`tests/star_maps.rs`); in the game, untested.
+- **Long save names scroll while editing** (2026-10-29). The rename field follows the
+  caret when moving with the keyboard or dragging a selection past its visible edge.
+  The shared single-line field keeps the caret visible inside its padded viewport.
+- **External player-state saves open, read only** (2026-10-29). A KotOR 1 arrival
+  autosave keeps its player only in `pifo.ifo`, so it failed to open. The reader now falls
+  back to that file when the archive has no player. Saves with `pifo.ifo` are read only,
+  including the measured KotOR II autosave that also has archived player copies. Save
+  Changes, Save as a New Save and rename are refused. Copy preserves the player files
+  and changes only the new copy's Load-screen name. Normal saves remain editable.
+- **New save folders named as the game names them** (2026-10-29). Copy and Save as a New
+  Save name the new folder `<number> - Game<number - 1>` again, not after the save's name.
+  The game overwrites a save by writing to that pattern, so overwriting a copy named
+  "000920 - KMRPPazaak" left it in place beside a new "000920 - Game919" of the same name.
+  The typed name still shows on the game's Load screen.
+- **No extra story or travel success screen** (2026-10-25). Skip Ahead, Go Back and
+  map travel return directly to the editor with the pending change count. Removed the
+  remaining "Skipped to" report and travel result popup. Save Changes still writes
+  the edits with a backup.
+- **Choose alignment when going back** (2026-10-25). Go Back defaults to 50, Neutral.
+  The chapter preview has a red-to-cyan slider, a numeric field and Reset to Neutral.
+  Apply uses that chosen value, including returns inside a quest. Removed the estimated
+  chapter alignment subtraction that changed a reported save from 79 to 10.
+- **Go Back restores recorded earlier levels** (2026-10-25). Rebuilds classes from
+  the retained level history, removes later recorded gains and restores the earlier XP.
+  Later class edits no longer leave high levels behind with low XP. Removing a future
+  companion also removes their active-party entry. Returning to a side quest includes
+  companions who joined at the chapter's entry. Verified on copied saves; the reported
+  Taris loading crash still needs an in-game retry.
+- **Go Back returns directly to the editor** (2026-10-25). Removed the extra
+  "Gone back" result popup. The applied changes remain unsaved until Save Changes.
+- **Timeline chapter preview** (2026-10-25). The wider chapter popup keeps expandable
+  quests and their stages on the left, with the selected point's details on the right.
+  It prepares the change on an independent in-memory save and shows the actual before
+  and after values, abilities and companion changes. Inventory gains and losses use the
+  game's icons in a scrollable two-column list, with small green plus and red minus
+  quantities. Unchanged totals appear once. Apply uses the prepared result; Cancel
+  discards it. Going back always uses the story's inventory and credits, with no policy
+  selector. Row dividers leave the full yellow selection and hover outline visible.
+  Save Changes still makes the backup before writing.
+- **Cancel a pending rename** (2026-10-24). Clicking outside the save's name field
+  and save icon closes the field and discards the draft. Switching games or selecting
+  another save cancels it too. Enter and the save icon still apply the rename.
 - **Its own repository, and its own name** (2026-10-24). Moved out of KMRP with its
   history, and renamed KOTOR Modern Gamesave Editor (KMSE) so nobody takes it to need KMRP: the window,
   the program file (`KOTOR Modern Gamesave Editor.exe`), the crest (the KMRP sigil over KMSE, `assets/sigil.png`
@@ -33,7 +102,8 @@ CHANGELOG.
   saves page and beside Settings in the editor copies the save as it is on disk into the
   next free slot, under a name asked for ("<name> - Copy"); changes not saved yet stay out
   of it; its folder carries that name after the slot's number ("000913 - Game26 - Copy"),
-  as does a save made with Save as a New Save. A pen at the name's top right turns the name into a text box: Enter or the save
+  as does a save made with Save as a New Save (undone 2026-10-29: the game's overwrite
+  then made a second save; see above). A pen at the name's top right turns the name into a text box: Enter or the save
   icon renames the save on the game's Load screen (backed up first), Escape cancels. The
   character, time played and date sit on the party's row. Save as a New Save is greyed
   out until something is changed, like Save Changes, which is wider now with its arrow in

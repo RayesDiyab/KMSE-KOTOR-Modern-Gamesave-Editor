@@ -109,6 +109,7 @@ pub enum Who {
     Npc(usize),
 }
 
+#[derive(Clone)]
 pub struct Save {
     pub game: Game,
     pub folder: PathBuf,
@@ -133,10 +134,35 @@ pub struct Save {
     archive_dirty: bool,
     /// What changed, by a key per value, so changing one value twice counts once.
     pub changes: BTreeSet<String>,
+    /// The save's files as they were when read, to see that the game has not written since.
+    on_disk: Vec<(String, u64, Option<std::time::SystemTime>)>,
 }
+
+/// Every file of the save folder: name, size and time, in name order.
+fn files_on_disk(folder: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
+    let mut files: Vec<_> = fs::read_dir(folder)
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter_map(|e| Some((e.file_name().to_string_lossy().to_string(), e.metadata().ok()?)))
+                .filter(|(n, m)| m.is_file() && !n.ends_with(".kmrp-new") && !n.ends_with(".kmrp-old"))
+                .map(|(n, m)| (n, m.len(), m.modified().ok()))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// How an error starts when a write stopped part way and could not be undone.
+pub const HALF_WRITTEN: &str = "The save may be half written";
+
+/// Why a write was refused: the files are not the ones the changes were made on.
+pub const CHANGED_ON_DISK: &str = "This save changed on disk after it was opened, so writing now would mix two points in the game. Press Revert to read it again, then make the changes again.";
 
 impl Save {
     pub fn open(folder: &Path) -> Result<Save> {
+        // Before the read: a write that lands during it then counts as a change.
+        let on_disk = files_on_disk(folder);
         let (nfo_path, nfo) = read_gff(folder, "savenfo.res")?;
         let (party_path, party) = read_gff(folder, "PARTYTABLE.res")?;
         let globals = read_gff(folder, "GLOBALVARS.res").ok();
@@ -164,6 +190,7 @@ impl Save {
             dirty_archive: BTreeSet::new(),
             archive_dirty: false,
             changes: BTreeSet::new(),
+            on_disk,
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -175,6 +202,9 @@ impl Save {
                     save.loaded.push((r.name.clone(), r.kind, g));
                 }
             }
+        }
+        if save.player().is_none() && file_ci(folder, "pifo.ifo").is_some() {
+            save.ifo = Some(read_gff(folder, "pifo.ifo")?.1);
         }
         if save.player().is_none() {
             return Err("this save has no player character in it".into());
@@ -247,6 +277,9 @@ impl Save {
 
     /// Moves the player (every copy) to `pos` in the current area, facing `facing`.
     pub fn move_player(&mut self, pos: [f32; 3], facing: Option<f32>) {
+        if pos.iter().any(|v| !v.is_finite()) {
+            return;
+        }
         self.edit(Who::Player, "position", |c| {
             crate::area::set_position(c, pos);
             if let Some(a) = facing {
@@ -260,6 +293,9 @@ impl Save {
     /// into that module's player list, and the save resumes there (savenfo LASTMODULE and
     /// AREANAME). The game reads the player from the module it resumes in.
     pub fn move_to_module(&mut self, module: &str, pos: [f32; 3], area_name: &str) -> Result<()> {
+        if pos.iter().any(|v| !v.is_finite()) {
+            return Err("that spot is not a position in the area".into());
+        }
         if module.eq_ignore_ascii_case(&self.module_name) {
             self.move_player(pos, None);
             return Ok(());
@@ -272,6 +308,14 @@ impl Save {
             .find(|r| r.kind == RES_TYPE_SAV && r.name.eq_ignore_ascii_case(module))
             .map(|r| r.name.clone())
             .ok_or("this save has not been to that area")?;
+        // A trip set up here would wait in this module's queue for the player's return.
+        if let Some(q) = self.ifo.as_mut().and_then(|i| i.root.list_mut("EventQueue")) {
+            let before = q.len();
+            q.retain(|e| e.int("EventId") != Some(26));
+            if q.len() != before {
+                self.dirty.insert("ifo");
+            }
+        }
         self.flush_module();
         // The target module, with the player put in.
         let data = self.archive.find(&target, RES_TYPE_SAV).unwrap().data.clone();
@@ -280,6 +324,12 @@ impl Save {
         let mut ifo = Gff::read(&ifo_res.data).map_err(|e| e.to_string())?;
         let mut moved = player;
         crate::area::set_position(&mut moved, pos);
+        // What it was doing and who it saw are ids of the old area.
+        for list in ["PerceptionList", "ActionList"] {
+            if moved.list(list).is_some() {
+                moved.set(list, Value::List(Vec::new()));
+            }
+        }
         let old_self = ifo.root.list("Mod_PlayerList").and_then(|l| l.first()).cloned();
         if let Some(o) = old_self.as_ref() {
             moved.id = o.id;
@@ -428,10 +478,39 @@ impl Save {
         if other.game != self.game {
             return Err("that save is from the other game".into());
         }
-        let creature = other
+        let mut creature = other
             .loaded(&format!("availnpc{}", npc), RES_TYPE_UTC)
             .ok_or("that save does not have this party member")?
             .clone();
+        // Object ids are each save's own: every item gets a new one, and effects follow.
+        let ids: Vec<u32> = (0..crate::area::creature_items_mut(&mut creature.root).len()).map(|_| self.new_object_id()).collect();
+        let mut moved: Vec<(i64, u32)> = Vec::new();
+        for (item, new) in crate::area::creature_items_mut(&mut creature.root).into_iter().zip(ids) {
+            if let Some(old) = item.int("ObjectId") {
+                moved.push((old, new));
+            }
+            item.set("ObjectId", Value::Dword(new));
+        }
+        for e in creature.root.list_mut("EffectList").into_iter().flatten() {
+            if let Some((_, new)) = e.int("CreatorId").and_then(|c| moved.iter().find(|(o, _)| *o == c)).copied() {
+                e.set("CreatorId", Value::Dword(new));
+            }
+        }
+        // The copy standing in the area, by the tag and classes `edit` finds it by, becomes
+        // the same person where they stand.
+        let (tag, classes) = (self.creature(Who::Npc(npc)).and_then(|c| c.string("Tag")).unwrap_or_default(), self.creature(Who::Npc(npc)).map(crate::creature::classes).unwrap_or_default());
+        const STAY: [&str; 9] = ["ObjectId", "AreaId", "XPosition", "YPosition", "ZPosition", "XOrientation", "YOrientation", "ZOrientation", "PerceptionList"];
+        let new_body = creature.root.clone();
+        let standing = self.area_git().and_then(|g| g.root.list(crate::area::CREATURES)).and_then(|l| l.iter().position(|c| !tag.is_empty() && c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag)) && crate::creature::classes(c) == classes));
+        if let Some(at) = standing {
+            self.edit_area(&format!("npc{}.import", npc), |git| {
+                if let Some(c) = git.list_mut(crate::area::CREATURES).and_then(|l| l.get_mut(at)) {
+                    let stay: Vec<(String, Value)> = c.fields.iter().filter(|(l, _)| STAY.contains(&l.as_str())).cloned().collect();
+                    c.fields = new_body.fields.iter().filter(|(l, _)| !STAY.contains(&l.as_str())).cloned().collect();
+                    c.fields.extend(stay);
+                }
+            });
+        }
         self.put_npc(npc, creature);
         self.changed(format!("npc{}.import", npc));
         Ok(())
@@ -546,6 +625,22 @@ impl Save {
         self.set_npc_list_int("PT_AVAIL_NPCS", npc, "PT_NPC_AVAIL", on as i64);
         if !on {
             self.set_npc_list_int("PT_AVAIL_NPCS", npc, "PT_NPC_SELECT", 1);
+            let controlled = self.party_int("PT_CONTROLLED_NP") == Some(npc as i64);
+            if self.in_party(npc) || controlled {
+                self.edit_party_table("members", |p| {
+                    let count = if let Some(members) = p.list_mut("PT_MEMBERS") {
+                        members.retain(|m| m.int("PT_MEMBER_ID") != Some(npc as i64));
+                        if controlled {
+                            for member in members.iter_mut() {
+                                member.set_int("PT_IS_LEADER", 0, Value::Byte(0));
+                            }
+                        }
+                        members.len()
+                    } else { 0 };
+                    p.set_int("PT_NUM_MEMBERS", count as i64, Value::Byte(0));
+                    if controlled { p.set_int("PT_CONTROLLED_NP", -1, Value::Int(0)); }
+                });
+            }
         }
         true
     }
@@ -589,7 +684,7 @@ impl Save {
 
     /// A new object id from the module's counter (Mod_NextObjId0), which then moves on;
     /// the area's highest id + 1 when the module has no counter.
-    fn new_object_id(&mut self) -> u32 {
+    pub fn new_object_id(&mut self) -> u32 {
         if let Some(ifo) = self.ifo.as_mut() {
             if let Some(next) = ifo.root.int("Mod_NextObjId0") {
                 ifo.root.set_int("Mod_NextObjId0", next + 1, Value::Dword(0));
@@ -600,11 +695,32 @@ impl Save {
         self.git.as_ref().map(|(_, g)| crate::area::next_object_id(&g.root)).unwrap_or(0x10000)
     }
 
+    /// Whether `slot` holds a template entry (only `EquippedRes`, as a creature made from its
+    /// template wears items) and not a whole item, so nothing can go to the inventory yet.
+    pub fn slot_is_template(&self, who: Who, slot: u32) -> Option<String> {
+        let item = self.creature(who).and_then(|c| crate::creature::in_slot(c, slot))?;
+        if item.get("BaseItem").is_some() {
+            return None;
+        }
+        item.string("EquippedRes")
+    }
+
+    /// The template entry in `slot` replaced by the whole item made from its template, on
+    /// every copy of the creature.
+    pub fn fill_template_slot(&mut self, who: Who, slot: u32, item: Struct) {
+        let id = self.new_object_id();
+        self.edit(who, &format!("equip{}", slot), |c| crate::creature::equip(c, slot, item.clone(), id));
+    }
+
     /// Equips one of inventory item `index` in `slot`, on every copy of the creature; what
-    /// was in the slot goes back to the party inventory.
+    /// was in the slot goes back to the party inventory. False, with nothing changed, over a
+    /// template entry: see `fill_template_slot`.
     pub fn equip(&mut self, who: Who, slot: u32, index: usize) -> bool {
         let inventory = self.inventory();
         let Some(mut item) = inventory.get(index).cloned() else { return false };
+        if self.slot_is_template(who, slot).is_some() {
+            return false;
+        }
         let stack = item.int("StackSize").unwrap_or(1);
         item.set_int("StackSize", 1, Value::Word(1));
         let old = self.creature(who).and_then(|c| crate::creature::in_slot(c, slot)).cloned();
@@ -628,8 +744,12 @@ impl Save {
         true
     }
 
-    /// Takes the item out of `slot` on every copy and puts it in the party inventory.
+    /// Takes the item out of `slot` on every copy and puts it in the party inventory. False,
+    /// with nothing changed, for a template entry: see `fill_template_slot`.
     pub fn unequip(&mut self, who: Who, slot: u32) -> bool {
+        if self.slot_is_template(who, slot).is_some() {
+            return false;
+        }
         let Some(mut item) = self.creature(who).and_then(|c| crate::creature::in_slot(c, slot)).cloned() else { return false };
         self.edit(who, &format!("equip{}", slot), |c| {
             crate::creature::unequip(c, slot);
@@ -776,6 +896,12 @@ impl Save {
     pub fn spawn_creature(&mut self, mut c: Struct) -> u32 {
         let id = self.new_object_id();
         c.set("ObjectId", Value::Dword(id));
+        // Copied from a creature of the area when it has one; the player stands there too.
+        if c.get("AreaId").is_none() {
+            if let Some(area) = self.player().and_then(|p| p.int("AreaId")) {
+                c.set_int("AreaId", area, Value::Dword(0));
+            }
+        }
         let items = crate::area::creature_items_mut(&mut c).len();
         let ids: Vec<u32> = (0..items).map(|_| self.new_object_id()).collect();
         for (item, new) in crate::area::creature_items_mut(&mut c).into_iter().zip(ids) {
@@ -825,6 +951,8 @@ impl Save {
         if ifo.root.list("EventQueue").is_none() {
             ifo.root.set("EventQueue", Value::List(Vec::new()));
         }
+        // One trip at a time: the new one replaces any waiting in the queue.
+        ifo.root.list_mut("EventQueue").unwrap().retain(|e| e.int("EventId") != Some(26));
         // First in the queue: the game looks at its queue in order, and behind the save's own
         // delayed events (Trask's opening, on the Endar Spire) the trip waited until those
         // ran or the player did something (the maintainer's test, 2026-10-23).
@@ -925,6 +1053,12 @@ impl Save {
     /// Copies the whole save folder into `backups`, then writes every changed file.
     /// Returns the backup folder.
     pub fn write(&mut self, backups: &Path) -> Result<PathBuf> {
+        if player_outside_archive(&self.folder) {
+            return Err(PLAYER_OUTSIDE_ARCHIVE.into());
+        }
+        if files_on_disk(&self.folder) != self.on_disk {
+            return Err(CHANGED_ON_DISK.into());
+        }
         let backup = backup_folder(backups, self.game, &self.folder);
         copy_dir(&self.folder, &backup).map_err(|e| format!("the backup could not be made: {}", e))?;
         self.write_files()?;
@@ -933,12 +1067,24 @@ impl Save {
 
     /// Writes the save, its changes and all, as a new save in `target` (a folder beside it
     /// that does not exist yet) named `name` on the game's Load screen, and leaves the save it
-    /// was read from exactly as it was. From then on this is the new save.
+    /// was read from exactly as it was. From then on this is the new save; if it fails, this
+    /// stays the save it was and the new folder is gone.
     pub fn write_as(&mut self, target: &Path, name: &str) -> Result<()> {
+        if player_outside_archive(&self.folder) {
+            return Err(PLAYER_OUTSIDE_ARCHIVE.into());
+        }
+        if files_on_disk(&self.folder) != self.on_disk {
+            return Err(CHANGED_ON_DISK.into());
+        }
         if target.exists() {
             return Err(format!("{} already exists", target.display()));
         }
-        copy_dir(&self.folder, target).map_err(|e| format!("the save could not be copied: {}", e))?;
+        if let Err(e) = copy_dir(&self.folder, target) {
+            let _ = fs::remove_dir_all(target);
+            return Err(format!("the save could not be copied: {}", e));
+        }
+        let before = (self.folder.clone(), self.nfo_path.clone(), self.party_path.clone(), self.archive_path.clone(), self.globals_path.clone());
+        let (nfo, changes) = (self.nfo.clone(), self.changes.clone());
         let moved = |p: &Path| target.join(p.file_name().unwrap_or_default());
         self.nfo_path = moved(&self.nfo_path);
         self.party_path = moved(&self.party_path);
@@ -946,7 +1092,14 @@ impl Save {
         self.globals_path = self.globals_path.as_deref().map(moved);
         self.folder = target.to_path_buf();
         self.rename(name);
-        self.write_files()
+        let result = self.write_files();
+        if result.is_err() {
+            (self.folder, self.nfo_path, self.party_path, self.archive_path, self.globals_path) = before;
+            self.nfo = nfo;
+            self.changes = changes;
+            let _ = fs::remove_dir_all(target);
+        }
+        result
     }
 
     /// Copies the save folder `folder` as it is on disk into `target` (a folder beside it that
@@ -956,14 +1109,20 @@ impl Save {
         if target.exists() {
             return Err(format!("{} already exists", target.display()));
         }
-        copy_dir(folder, target).map_err(|e| format!("the save could not be copied: {}", e))?;
-        let mut copy = Save::open(target)?;
-        copy.rename(name);
-        copy.write_files()
+        let result = copy_dir(folder, target).map_err(|e| format!("the save could not be copied: {}", e)).and_then(|()| {
+            let mut copy = Save::open(target)?;
+            copy.rename(name);
+            copy.write_files()
+        });
+        if result.is_err() {
+            let _ = fs::remove_dir_all(target);
+        }
+        result
     }
 
     /// Writes every changed file into the save's folder, each new file in full before any old
-    /// one is replaced.
+    /// one is replaced. If a file cannot be replaced, the ones already replaced go back, so a
+    /// failed write leaves the save as it was.
     fn write_files(&mut self) -> Result<()> {
         self.flush_module();
         let module_dirty = self.archive_dirty;
@@ -1009,18 +1168,94 @@ impl Save {
         let mut staged = Vec::new();
         for (path, bytes) in &files {
             let tmp = path.with_extension("kmrp-new");
-            fs::write(&tmp, bytes).map_err(|e| format!("{}: {}", path.display(), e))?;
+            if let Err(e) = fs::write(&tmp, bytes) {
+                let _ = fs::remove_file(&tmp);
+                staged.iter().for_each(|(t, _): &(PathBuf, PathBuf)| drop(fs::remove_file(t)));
+                return Err(format!("{}: {}", path.display(), e));
+            }
             staged.push((tmp, path.clone()));
         }
-        for (tmp, path) in staged {
-            fs::rename(&tmp, &path).map_err(|e| format!("{}: {}", path.display(), e))?;
-        }
+        replace_all(&staged)?;
         self.dirty.clear();
         self.dirty_archive.clear();
         self.archive_dirty = false;
         self.changes.clear();
+        self.on_disk = files_on_disk(&self.folder);
         Ok(())
     }
+}
+
+/// Puts each new file in place of its old one. Each old file waits under a second name until
+/// all are done, so a failure part way can put every old file back.
+fn replace_all(staged: &[(PathBuf, PathBuf)]) -> Result<()> {
+    let old_of = |path: &PathBuf| path.with_extension("kmrp-old");
+    let mut failed = None;
+    let mut done = 0;
+    for (tmp, path) in staged {
+        let swapped = fs::rename(path, old_of(path)).and_then(|()| {
+            fs::rename(tmp, path).map_err(|e| {
+                // this one's old file goes straight back
+                let _ = fs::rename(old_of(path), path);
+                e
+            })
+        });
+        if let Err(e) = swapped {
+            failed = Some(format!("{}: {}", path.display(), e));
+            break;
+        }
+        done += 1;
+    }
+    let Some(error) = failed else {
+        for (_, path) in staged {
+            let _ = fs::remove_file(old_of(path));
+        }
+        return Ok(());
+    };
+    let mut stuck = None;
+    for (_, path) in staged[..done].iter().rev() {
+        let back = fs::remove_file(path).and_then(|()| fs::rename(old_of(path), path));
+        if let Err(e) = back {
+            stuck = Some(format!("{}: {}", path.display(), e));
+        }
+    }
+    for (tmp, _) in staged {
+        let _ = fs::remove_file(tmp);
+    }
+    match stuck {
+        None => Err(error),
+        Some(s) => Err(format!("{}. Restore it from the backup. {}; {}", HALF_WRITTEN, error, s)),
+    }
+}
+
+/// Whether the save has an external player-state file the editor does not write.
+/// KotOR 1's measured arrival autosave has no archived player; Save::open falls back
+/// to pifo.ifo. KotOR 2's measured autosave has both pifo.ifo and archived copies.
+/// Both stay read only until writing all player-state files is supported and checked.
+pub fn player_outside_archive(folder: &Path) -> bool {
+    file_ci(folder, "pifo.ifo").is_some()
+}
+
+/// Why an external player-state file makes a save read only.
+pub const PLAYER_OUTSIDE_ARCHIVE: &str = "This save has player state in pifo.ifo, which the editor does not write. It can be looked at but not changed. Save again in a normal slot in the game, then open that save.";
+
+/// The folder for a new save beside `folder`: the next number after the highest in its saves
+/// folder, in the game's own pattern ("000135 - Game134"). The game reads only the number, but
+/// when it overwrites a save it writes to "<number> - Game<number - 1>", so a folder named any
+/// other way is left in place and the overwrite becomes a second save of the same name. From
+/// 2026-10-24 to 2026-10-29 the folder carried the save's name instead ("000913 - Game26 -
+/// Copy"), which is how "000920 - KMRPPazaak" came to have a twin "000920 - Game919".
+pub fn next_save_folder(folder: &Path) -> Option<PathBuf> {
+    let parent = folder.parent()?;
+    let highest = fs::read_dir(parent)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_string_lossy().split(" - ").next().and_then(|n| n.trim().parse::<u32>().ok()))
+        .max()
+        .unwrap_or(0);
+    let n = highest.checked_add(1)?;
+    let target = parent.join(format!("{:06} - Game{}", n, n - 1));
+    (!target.exists()).then_some(target)
 }
 
 fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
@@ -1035,16 +1270,15 @@ fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
     path
 }
 
-/// Where a save's backups go: "Save Editor Backup" in the folder that holds the save (the
-/// game's saves folder), as the maintainer asked on 2026-10-22. A Steam Cloud save of
-/// KotOR 2 keeps its backups in the game's local saves folder instead, so Steam does not
-/// upload them.
+/// Where a save's backups go: "Save Editor Backup" in the game's folder, beside the saves,
+/// since 2026-11-02. Steam Cloud syncs KotOR 1's `Saves` with everything in it and KotOR 2's
+/// `cloudsaves`, so a backup inside either used up the quota and moved between PCs. A save
+/// outside the game (a port, VirtualStore, one added by hand) keeps its backups beside it.
 pub fn backup_root(folder: &Path, game_root: Option<&Path>) -> PathBuf {
-    let parent = folder.parent().unwrap_or(folder);
-    let cloud = folder.ancestors().any(|a| a.file_name().map_or(false, |n| n.eq_ignore_ascii_case("cloudsaves")));
-    match (cloud, game_root) {
-        (true, Some(root)) => root.join("saves").join("Save Editor Backup"),
-        _ => parent.join("Save Editor Backup"),
+    let plain = |p: &Path| p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase();
+    match game_root {
+        Some(root) if folder.ancestors().any(|a| plain(a) == plain(root)) => root.join("Save Editor Backup"),
+        _ => folder.parent().unwrap_or(folder).join("Save Editor Backup"),
     }
 }
 

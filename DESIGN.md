@@ -141,6 +141,11 @@ components:
 
 # Design System: KOTOR Modern Gamesave Editor
 
+Go Back's alignment choice defaults to 50, Neutral. The approved 2026-10-25 control
+uses a thin red-to-cyan track with a restrained halo and a circular thumb. A numeric
+field and Reset to Neutral sit above it. At narrow widths those controls move below
+the label and helper. The inventory list remains a separate two-column scroller.
+
 ## Overview
 
 **Creative North Star: "The Ebon Hawk's Console"**
@@ -157,7 +162,7 @@ The one loud colour is orange, and it means one thing: changed and not yet saved
 - KMRP's Original HD Font throughout, in four cuts with fixed jobs.
 - Hairline panels, 5px controls, flat surfaces, no shadows.
 - Orange is reserved for unsaved changes.
-- Static: no transitions, no motion of any kind.
+- Static: no transitions, no motion of any kind. (Corrected 2026-11-02: `animate` is used in the program, so this is the aim, not the state.)
 
 ## Colors
 
@@ -174,6 +179,9 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 - **Crest Gold**: the selected save's name, the selected party member's name, the player's portrait border, the border of party members in the party, the current portrait in the look picker, and the moon and sun of the theme toggle. Gold says "this one".
 - **Unsaved Orange**: a changed value's text and border, the dot beside a tab that holds changes, the change count, a changed party member's name, and warnings about a save. Nothing else.
 - **Saved Green**: the "SAVED" status label after a write.
+- **Gain Green**: positive quantities and granted abilities in the story preview, paired
+  with a plus sign. `Theme.gain` uses a darker green in light mode so small quantities
+  remain readable. Negative quantities use Danger Red and a minus sign.
 - **Danger Red**: "COULD NOT SAVE", the status box border on failure, and a remove cross on hover.
 
 ### Neutral
@@ -273,6 +281,8 @@ Engraved-caption buttons in the Menu Medium cut, never animated.
 - **Dialog:** centred on the scrim, panel tone, 1px edge, 12px corners, 32px by 28px inset; headline title, note, content, and right-aligned buttons.
 
 ### Signature: the save bar
+(Corrected 2026-11-02: the audit found this bottom bar gone from the program. The text is kept as the record of the idea.)
+
 The editor's bottom bar is the system's promise made visible: the change count (orange number, Menu 24px), a field-toned status box whose spaced label reads "A BACKUP IS MADE BEFORE SAVING" over the backup path (then SAVED in green or COULD NOT SAVE in red), then Revert and Save Changes. Both buttons stay disabled until something has changed.
 
 ## Do's and Don'ts

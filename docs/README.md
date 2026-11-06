@@ -23,6 +23,8 @@ Every document in the KOTOR Modern Gamesave Editor (KMSE) repository.
 | --- | --- |
 | [save-editor.md](save-editor.md) | **What the editor reads and writes, field by field:** where saves are found, every value written and its rule, the map, travel and Skip Ahead, the timeline, how a write stays safe, limits, what is deliberately not changed, and what was tested and how. |
 | [save-editor-format.md](save-editor-format.md) | **The KotOR 1 and KotOR 2 PC save format:** every file, struct and field, what the games read and recompute when a save loads, and where saves live on each platform, each fact tagged with its source. |
+| [audit-2026-11-02.md](audit-2026-11-02.md) | **The bugs found by the audit of 2026-11-02,** with how each was checked. A list of work to do, not a description of the program. |
+| [audit-2026-11-02-worklist.md](audit-2026-11-02-worklist.md) | **All 55 audit findings as a checklist,** in the order to work them off, with the state of each. |
 | [documentation-standard.md](documentation-standard.md) | **The standard every document here is held to.** Read before writing or updating one. |
 
 ## Beside the code

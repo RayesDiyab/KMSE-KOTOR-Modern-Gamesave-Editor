@@ -16,12 +16,12 @@
 // the verdict, and DESIGN.md
 
 import { Theme } from "theme.slint";
-import { App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle } from "state.slint";
-import { Button, Field, Note, Scroller, Brand, Link, Sign, Stepper, Label, Choice, SettingsButton, Switch } from "widgets.slint";
+import { App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem } from "state.slint";
+import { Button, Field, Note, Scroller, Brand, Link, Sign, Stepper, Label, Choice, SettingsButton, Switch, AlignmentChoice } from "widgets.slint";
 import { SavesPage } from "saves.slint";
 import { EditorPage } from "editor.slint";
 
-export { Theme, App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle }
+export { Theme, App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem }
 
 component Overlay inherits Rectangle {
     in property <length> panel-width: 760px;
@@ -47,6 +47,140 @@ component Overlay inherits Rectangle {
     }
 }
 
+component StoryPreviewDetails inherits Rectangle {
+    property <bool> back: App.overlay == 11 || (App.overlay == 12 && App.pop-action == 2);
+    VerticalLayout {
+        spacing: 12px;
+        Scroller {
+            vertical-stretch: 1;
+            min-height: 120px;
+            content-height: details.preferred-height;
+            details := VerticalLayout {
+                x: 0px; y: 0px;
+                width: parent.width - 12px;
+                spacing: 10px;
+                Text {
+                    text: App.pop-action == 0 && App.overlay == 12 ? "Choose a subchapter" : App.pop-detail;
+                    font-family: Theme.title-font; font-size: 25px * Theme.ts;
+                    color: Theme.text; wrap: word-wrap;
+                }
+                if App.pop-action != 0 || App.overlay != 12: Scroller {
+                    height: min(summary.preferred-height + 4px, 110px);
+                    content-height: summary.preferred-height;
+                    summary := Note {
+                        x: 0px; y: 0px;
+                        width: parent.width - 12px;
+                        text: root.back ? App.back-summary : App.skip-summary;
+                        font-size: 13px * Theme.ts;
+                    }
+                }
+                if !root.back && App.pop-action != 0: VerticalLayout {
+                    spacing: 8px;
+                    if App.skip-jedi: Label { text: "YOUR JEDI CLASS"; font-size: 11px * Theme.ts; }
+                    if App.skip-jedi: Choice {
+                        height: 40px; font-size: 14px * Theme.ts;
+                        options: ["Jedi Guardian", "Jedi Sentinel", "Jedi Consular"];
+                        current: App.skip-class;
+                        picked(k) => { App.skip-class = k; App.refresh-story-preview(); }
+                    }
+                    if App.skip-side: Label { text: "YOUR PATH"; font-size: 11px * Theme.ts; }
+                    if App.skip-side: Choice {
+                        height: 40px; font-size: 14px * Theme.ts;
+                        options: ["Light side", "Dark side"]; current: App.skip-dark;
+                        picked(k) => { App.skip-dark = k; App.refresh-story-preview(); }
+                    }
+                    if App.skip-prestige: Label { text: "YOUR PRESTIGE CLASS"; font-size: 11px * Theme.ts; }
+                    if App.skip-prestige: Choice {
+                        height: 40px; font-size: 14px * Theme.ts;
+                        options: App.skip-dark == 1 ? ["Sith Marauder", "Sith Assassin", "Sith Lord", "Not now"] : ["Jedi Weapon Master", "Jedi Watchman", "Jedi Master", "Not now"];
+                        current: App.skip-prestige-pick;
+                        picked(k) => { App.skip-prestige-pick = k; App.refresh-story-preview(); }
+                    }
+                    if App.skip-train: Label { text: "COMPANIONS AS JEDI"; font-size: 11px * Theme.ts; }
+                    if App.skip-train: Choice {
+                        height: 40px; font-size: 14px * Theme.ts;
+                        options: ["Trained, no conversations", "I'll talk to them"]; current: App.skip-train-pick;
+                        picked(k) => { App.skip-train-pick = k; App.refresh-story-preview(); }
+                    }
+                }
+                if root.back: AlignmentChoice {
+                    value: App.back-alignment;
+                    set(v) => { App.back-alignment = v; }
+                    committed => { App.refresh-story-preview(); }
+                }
+                if !App.story-preview-ready: Note { text: App.story-preview-status; font-size: 14px * Theme.ts; }
+                if App.story-preview-ready: VerticalLayout {
+                    spacing: 4px;
+                    Label { text: "CHANGES TO YOUR SAVE"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                    HorizontalLayout {
+                        height: 26px;
+                        Text { width: parent.width * 0.34; text: "CHANGE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+                        Text { width: parent.width * 0.43; text: "CURRENT  →  AFTER"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+                        Text { text: "DIFFERENCE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+                    }
+                    for r in App.story-values: Rectangle {
+                        height: root.back ? 34px : 40px;
+                        HorizontalLayout {
+                            spacing: 0px;
+                            Text { width: parent.width * 0.34; text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; }
+                            Text { width: parent.width * 0.43; text: r.changed ? r.before + " → " + r.after : r.before; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; wrap: word-wrap; overflow: elide; }
+                            Text { text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center; }
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                    }
+                    for r in App.story-grants: HorizontalLayout {
+                        height: 38px;
+                        spacing: 10px;
+                        Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
+                        Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                        Text { text: r.note; font-size: 11px * Theme.ts; color: Theme.soft; vertical-alignment: center; }
+                    }
+                }
+            }
+        }
+        if App.story-preview-ready: Label { text: "INVENTORY CHANGES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+        if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
+        if App.story-preview-ready && App.story-items.length > 0: Rectangle {
+            height: root.back ? 144px : 184px;
+            border-width: 1px; border-color: Theme.edge; border-radius: 5px;
+            Scroller {
+                x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
+                content-height: Math.ceil(App.story-items.length / 2) * 76px;
+                Rectangle {
+                    x: 0px; y: 0px;
+                    width: parent.width - 12px;
+                    height: Math.ceil(App.story-items.length / 2) * 76px;
+                    for r[i] in App.story-items: Rectangle {
+                        x: Math.mod(i, 2) * self.width;
+                        y: Math.floor(i / 2) * 76px;
+                        width: parent.width / 2;
+                        height: 76px;
+                        Rectangle {
+                            x: 8px; y: 14px; width: 48px; height: 48px;
+                            background: Theme.field; border-width: 1px; border-color: Theme.edge; border-radius: 3px;
+                            if r.has-icon: Image { source: r.icon; image-fit: contain; }
+                        }
+                        Text {
+                            x: 66px; y: 9px; width: parent.width - 154px; height: 40px;
+                            text: r.name; font-size: 13px * Theme.ts; color: Theme.text;
+                            vertical-alignment: center; wrap: word-wrap; overflow: elide;
+                        }
+                        Text { x: 66px; y: 51px; width: parent.width - 154px; text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
+                        Text {
+                            x: parent.width - 80px; width: 72px; height: parent.height;
+                            text: r.difference; font-size: 13px * Theme.ts;
+                            color: r.gained ? Theme.gain : Theme.danger;
+                            vertical-alignment: center; horizontal-alignment: right;
+                        }
+                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                        if Math.mod(i, 2) == 1: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.row-line; }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "KOTOR Modern Gamesave Editor";
     icon: @image-url("../assets/save-editor-icon.png");
@@ -61,6 +195,15 @@ export component AppWindow inherits Window {
     // typed in then takes what was typed, as if Enter were pressed.
     sink := FocusScope { width: 0; height: 0; }
     public function drop-focus() {
+        // Rename is explicit: outside presses cancel, while the field and save icon
+        // keep their focus and draft until Enter or the icon is pressed.
+        if App.renaming-save {
+            if !App.rename-hovered {
+                App.renaming-save = false;
+                sink.focus();
+            }
+            return;
+        }
         sink.focus();
     }
 
@@ -324,7 +467,7 @@ export component AppWindow inherits Window {
                 font-size: 15px * Theme.ts;
                 options: ["Jedi Guardian", "Jedi Sentinel", "Jedi Consular"];
                 current: App.skip-class;
-                picked(k) => { App.skip-class = k; }
+                picked(k) => { App.skip-class = k; App.refresh-story-preview(); }
             }
             if App.skip-side: Label { text: "YOUR PATH"; }
             if App.skip-side: Choice {
@@ -332,7 +475,7 @@ export component AppWindow inherits Window {
                 font-size: 15px * Theme.ts;
                 options: ["Light side", "Dark side"];
                 current: App.skip-dark;
-                picked(k) => { App.skip-dark = k; }
+                picked(k) => { App.skip-dark = k; App.refresh-story-preview(); }
             }
             if App.skip-prestige: Label { text: "YOUR PRESTIGE CLASS"; }
             if App.skip-prestige: Choice {
@@ -340,7 +483,7 @@ export component AppWindow inherits Window {
                 font-size: 15px * Theme.ts;
                 options: App.skip-dark == 1 ? ["Sith Marauder", "Sith Assassin", "Sith Lord", "Not now"] : ["Jedi Weapon Master", "Jedi Watchman", "Jedi Master", "Not now"];
                 current: App.skip-prestige-pick;
-                picked(k) => { App.skip-prestige-pick = k; }
+                picked(k) => { App.skip-prestige-pick = k; App.refresh-story-preview(); }
             }
             if App.skip-train: Label { text: "COMPANIONS TRAINED AS JEDI"; }
             if App.skip-train: Choice {
@@ -348,14 +491,14 @@ export component AppWindow inherits Window {
                 font-size: 15px * Theme.ts;
                 options: ["Yes, without their conversations", "No, I'll talk to them in the game"];
                 current: App.skip-train-pick;
-                picked(k) => { App.skip-train-pick = k; }
+                picked(k) => { App.skip-train-pick = k; App.refresh-story-preview(); }
             }
             Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup of the save is made first."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
                 Button { width: 170px; text: "Cancel"; clicked => { App.close-overlay(); } }
-                Button { width: 240px; kind: 0; text: "Skip Ahead"; clicked => { App.do-skip(); } }
+                Button { width: 240px; kind: 0; enabled: App.story-preview-ready; text: "Skip Ahead"; clicked => { App.do-skip(); } }
             }
         }
     }
@@ -374,6 +517,8 @@ export component AppWindow inherits Window {
                     : "Your changes go into a new save in the next free slot, under this name on the game's Load screen. The save you opened stays exactly as it was.";
             }
             save-as-field := Field {
+                // Pressing Cancel takes the focus; that must not count as Enter.
+                accept-on-blur: false;
                 text <=> App.save-as-name;
                 font-size: 17px * Theme.ts;
                 accepted(t) => { if App.save-as-copy { App.do-copy-save(t); } else { App.do-save-as(t); } }
@@ -456,175 +601,103 @@ export component AppWindow inherits Window {
             }
         }
     }
-    // A chapter clicked on the timeline: where in it to go, from its beginning (top) to its
-    // end (bottom), its quests (each opens to its stages) between. A click picks a row (in
-    // yellow); what that does and its choices (the Jedi class, the side, the items kept)
-    // then show below, and the button beside Cancel skips or goes back there; greyed until a
-    // row is picked (2026-10-24, the maintainer: "all in one big popup").
+    // Chapter navigation stays on the left. Selection details and the prepared save's
+    // measured changes stay on the right, with a separate two-column inventory scroller.
     if App.overlay == 12: Overlay {
-        panel-width: 1120px;
+        panel-width: 1440px;
         panel-height: 900px;
         VerticalLayout {
-            spacing: 6px;
+            spacing: 10px;
             Label { text: App.pop-kicker; font-size: 13px * Theme.ts; }
             Text { text: App.pop-title; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; }
             Note { text: App.pop-note; }
-            Rectangle { height: 8px; }
             Rectangle { height: 1px; background: Theme.row-line; }
-            Scroller {
-                vertical-stretch: 1;
-                min-height: 160px;
-                content-height: App.skip-height;
-                VerticalLayout {
-                    for r[ri] in App.skip-rows: row := Rectangle {
-                        property <bool> pickable: (r.depth == 2 || r.depth >= 5) && r.state != 3;
-                        property <bool> picked: ri == App.pop-picked;
-                        height: r.depth == 2 ? 40px : 44px;
-                        border-radius: 5px;
-                        // pointed at: a thin yellow edge; picked: a thick one, tinted
-                        border-width: self.picked ? 2px : row-touch.has-hover && (self.pickable || r.depth == 1) ? 1px : 0px;
-                        border-color: Theme.hover-edge;
-                        background: self.picked ? Theme.hover-edge.with-alpha(0.12) : row-touch.has-hover && (self.pickable || r.depth == 1) ? Theme.hover : transparent;
-                        row-touch := TouchArea {
-                            mouse-cursor: parent.pickable || r.depth == 1 ? pointer : default;
-                            clicked => {
-                                if (r.depth == 1) {
-                                    App.toggle-skip(r.key);
-                                } else if (parent.pickable) {
-                                    App.pick-row(ri);
-                                }
-                            }
-                        }
-                        HorizontalLayout {
-                            padding-left: r.depth == 2 ? 30px : 6px;
-                            padding-right: 12px;
-                            spacing: 12px;
-                            // a quest opens and closes: pointing down open, right closed
-                            // (drawn: the fonts have no arrows)
-                            if r.depth == 1: VerticalLayout {
-                                alignment: center;
-                                Path {
-                                    width: 10px;
-                                    height: 10px;
-                                    viewbox-width: 10;
-                                    viewbox-height: 10;
-                                    fill: Theme.soft;
-                                    commands: r.open ? "M 0 2 L 10 2 L 5 8 Z" : "M 2 0 L 8 5 L 2 10 Z";
-                                }
-                            }
-                            // a stage: a dot, filled when the save has reached it
-                            if r.depth == 2: VerticalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 10px;
-                                    height: 10px;
-                                    border-radius: 5px;
-                                    border-width: 1.5px;
-                                    border-color: r.state == 0 ? Theme.accent : Theme.edge;
-                                    background: r.state == 0 ? Theme.accent : transparent;
-                                }
-                            }
-                            Text {
-                                text: r.title;
-                                horizontal-stretch: r.depth == 1 ? 0 : 1;
-                                vertical-alignment: center;
-                                font-family: r.depth == 2 ? Theme.body-font : Theme.list-font;
-                                font-size: (r.depth == 2 ? 14px : 16px) * Theme.ts;
-                                color: row.picked ? Theme.text : r.depth >= 5 ? Theme.accent : r.depth == 2 ? Theme.muted : Theme.text;
-                                overflow: elide;
-                            }
-                            if r.depth == 1 && r.note != "": Text { text: "MAIN STORY"; font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2px; color: Theme.faint; vertical-alignment: center; }
-                            if r.depth == 1: Rectangle { horizontal-stretch: 1; }
-                            // what picking the row does
-                            if row.pickable: Text {
-                                text: r.state == 0 ? "GO BACK" : "SKIP";
-                                font-family: Theme.label-font;
-                                font-size: 10px * Theme.ts;
-                                letter-spacing: 2px;
-                                color: row.picked ? Theme.hover-edge : Theme.faint;
-                                vertical-alignment: center;
-                            }
-                        }
-                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                    }
-                }
-            }
-            // what the picked row does, and its choices: below a clear divider
-            if App.pop-action != 0: VerticalLayout {
-                vertical-stretch: 0;
-                spacing: 8px;
-                padding-top: 4px;
-                Rectangle { height: 2px; background: Theme.edge; }
-                Label { text: "YOUR CHOICE"; font-size: 11px * Theme.ts; letter-spacing: 3px; color: Theme.soft; }
-                Text {
-                    text: App.pop-action == 1 ? App.skip-title : App.back-title;
-                    font-family: Theme.list-font;
-                    font-size: 17px * Theme.ts;
-                    color: Theme.text;
-                    overflow: elide;
-                }
-                Scroller {
-                    height: min(summary.preferred-height + 4px, 96px);
-                    content-height: summary.preferred-height;
-                    summary := Note { width: parent.width - 16px; text: App.pop-action == 1 ? App.skip-summary : App.back-summary; font-size: 13px * Theme.ts; color: Theme.muted; }
-                }
-                if App.pop-action == 1 && App.skip-jedi: HorizontalLayout {
-                    spacing: 14px;
-                    Label { width: 220px; text: "YOUR JEDI CLASS"; font-size: 12px * Theme.ts; vertical-alignment: center; }
-                    Choice { width: parent.width - 234px; height: 40px; font-size: 14px * Theme.ts; options: ["Jedi Guardian", "Jedi Sentinel", "Jedi Consular"]; current: App.skip-class; picked(k) => { App.skip-class = k; } }
-                }
-                if App.pop-action == 1 && App.skip-side: HorizontalLayout {
-                    spacing: 14px;
-                    Label { width: 220px; text: "YOUR PATH"; font-size: 12px * Theme.ts; vertical-alignment: center; }
-                    Choice { width: parent.width - 234px; height: 40px; font-size: 14px * Theme.ts; options: ["Light side", "Dark side"]; current: App.skip-dark; picked(k) => { App.skip-dark = k; } }
-                }
-                if App.pop-action == 1 && App.skip-prestige: HorizontalLayout {
-                    spacing: 14px;
-                    Label { width: 220px; text: "YOUR PRESTIGE CLASS"; font-size: 12px * Theme.ts; vertical-alignment: center; }
-                    Choice {
-                        width: parent.width - 234px;
-                        height: 40px;
-                        font-size: 14px * Theme.ts;
-                        options: App.skip-dark == 1 ? ["Sith Marauder", "Sith Assassin", "Sith Lord", "Not now"] : ["Jedi Weapon Master", "Jedi Watchman", "Jedi Master", "Not now"];
-                        current: App.skip-prestige-pick;
-                        picked(k) => { App.skip-prestige-pick = k; }
-                    }
-                }
-                if App.pop-action == 1 && App.skip-train: HorizontalLayout {
-                    spacing: 14px;
-                    Label { width: 220px; text: "COMPANIONS AS JEDI"; font-size: 12px * Theme.ts; vertical-alignment: center; }
-                    Choice { width: parent.width - 234px; height: 40px; font-size: 14px * Theme.ts; options: ["Trained, no conversations", "I'll talk to them"]; current: App.skip-train-pick; picked(k) => { App.skip-train-pick = k; } }
-                }
-                if App.pop-action == 2: HorizontalLayout {
-                    spacing: 14px;
-                    Label { width: 220px; text: "ITEMS AND CREDITS"; font-size: 12px * Theme.ts; vertical-alignment: center; }
-                    Choice { width: parent.width - 234px; height: 40px; font-size: 14px * Theme.ts; options: ["Keep what you have now", "As the story was"]; current: App.back-keep; picked(k) => { App.back-keep = k; } }
-                }
-            }
-            if App.pop-action == 0: Rectangle { height: 1px; background: Theme.row-line; }
             HorizontalLayout {
-                vertical-stretch: 0;
+                vertical-stretch: 1;
+                spacing: 24px;
+                Scroller {
+                    width: min(480px, parent.width * 0.37);
+                    content-height: App.skip-height;
+                    VerticalLayout {
+                        for r[ri] in App.skip-rows: row := Rectangle {
+                            property <bool> pickable: (r.depth == 2 || r.depth >= 5) && r.state != 3;
+                            property <bool> picked: ri == App.pop-picked;
+                            height: r.depth == 2 ? 64px : r.note != "" ? 56px : 44px;
+                            border-radius: 5px;
+                            border-width: self.picked ? 1px : row-touch.has-hover && (self.pickable || r.depth == 1) ? 1px : 0px;
+                            border-color: Theme.hover-edge;
+                            background: self.picked ? Theme.hover-edge.with-alpha(0.12) : row-touch.has-hover && (self.pickable || r.depth == 1) ? Theme.hover : transparent;
+                            row-touch := TouchArea {
+                                mouse-cursor: parent.pickable || r.depth == 1 ? pointer : default;
+                                clicked => {
+                                    if r.depth == 1 { App.toggle-skip(r.key); }
+                                    else if parent.pickable { App.pick-row(ri); }
+                                }
+                            }
+                            HorizontalLayout {
+                                padding-left: r.depth == 2 ? 28px : 6px;
+                                padding-right: 12px;
+                                spacing: 10px;
+                                if r.depth == 1: VerticalLayout {
+                                    alignment: center;
+                                    Path {
+                                        width: 10px; height: 10px;
+                                        viewbox-width: 10; viewbox-height: 10;
+                                        fill: Theme.soft;
+                                        commands: r.open ? "M 0 2 L 10 2 L 5 8 Z" : "M 2 0 L 8 5 L 2 10 Z";
+                                    }
+                                }
+                                if r.depth == 2: VerticalLayout {
+                                    alignment: center;
+                                    Rectangle {
+                                        width: 12px; height: 12px; border-radius: 6px;
+                                        border-width: 1.5px;
+                                        border-color: row.picked ? Theme.gold : r.state == 0 ? Theme.accent : Theme.edge;
+                                        background: row.picked ? Theme.gold : transparent;
+                                    }
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text {
+                                        text: r.title;
+                                        font-family: r.depth == 2 ? Theme.body-font : Theme.list-font;
+                                        font-size: (r.depth == 2 ? 14px : 16px) * Theme.ts;
+                                        color: row.picked ? Theme.gold : r.depth >= 5 ? Theme.accent : r.depth == 2 ? Theme.muted : Theme.text;
+                                        wrap: word-wrap;
+                                        overflow: elide;
+                                    }
+                                    if r.depth == 1 && r.note != "": Text {
+                                        text: "MAIN STORY"; font-family: Theme.label-font;
+                                        font-size: 9px * Theme.ts; letter-spacing: 2px; color: Theme.faint;
+                                    }
+                                }
+                            }
+                            if !row.picked && !row-touch.has-hover: Rectangle {
+                                y: parent.height - 1px; height: 1px; background: Theme.row-line;
+                            }
+                        }
+                    }
+                }
+                Rectangle { width: 1px; background: Theme.edge; }
+                StoryPreviewDetails { horizontal-stretch: 1; }
+            }
+            Rectangle { height: 1px; background: Theme.row-line; }
+            HorizontalLayout {
                 spacing: 14px;
-                alignment: end;
-                padding-top: 8px;
-                Note { vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup is made first."; }
+                padding-top: 4px;
+                Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup is made first."; }
                 Button { width: 150px; text: "Cancel"; clicked => { App.close-overlay(); } }
                 Button {
                     kind: 0;
-                    enabled: App.pop-action != 0;
+                    enabled: App.pop-action != 0 && App.story-preview-ready;
                     text: (App.pop-action == 2 ? "Go Back to " : "Skip to ") + App.pop-place;
-                    clicked => {
-                        if (App.pop-action == 1) {
-                            App.do-skip();
-                        } else if (App.pop-action == 2) {
-                            App.do-back();
-                        }
-                    }
+                    clicked => { if App.pop-action == 2 { App.do-back(); } else { App.do-skip(); } }
                 }
             }
         }
     }
-    // Going back on the timeline: what is undone, and whether the player keeps today's items.
+    // Going back on the timeline: the story's inventory and credits, without a policy choice.
     if App.overlay == 11: Overlay {
         panel-width: 760px;
         panel-height: 560px;
@@ -632,20 +705,12 @@ export component AppWindow inherits Window {
             spacing: 14px;
             Text { text: App.back-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
             Note { text: App.back-summary; font-size: 14px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
-            Label { text: "YOUR ITEMS AND CREDITS"; }
-            Choice {
-                height: 42px;
-                font-size: 15px * Theme.ts;
-                options: ["Keep what you have now", "Go back as the story was"];
-                current: App.back-keep;
-                picked(k) => { App.back-keep = k; }
-            }
             Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup of the save is made first."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
                 Button { width: 170px; text: "Cancel"; clicked => { App.close-overlay(); } }
-                Button { width: 240px; kind: 0; text: "Go Back"; clicked => { App.do-back(); } }
+                Button { width: 240px; kind: 0; enabled: App.story-preview-ready; text: "Go Back"; clicked => { App.do-back(); } }
             }
         }
     }

@@ -16,6 +16,7 @@ use kse_core::gamedata::GameData;
 use kse_core::games::{self, Game, Install, SaveFolder, SaveKind};
 use kse_core::globals::{self, Global, GlobalValue, Kind};
 use kse_core::save::{self, Save, Summary, Who};
+use kse_core::story_preview::{self, Plan as StoryPlan, Prepared as PreparedStory};
 use slint::{Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -133,12 +134,14 @@ fn game_running(game: Game) -> bool {
             .args(["/FI", &format!("IMAGENAME eq {}", names[0]), "/NH"])
             .creation_flags(0x0800_0000)
             .output();
-        return out.map_or(false, |o| String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains(names[0]));
+        // A check that failed says nothing, so it counts as running: nothing is written.
+        return out.map_or(true, |o| !o.status.success() || String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains(names[0]));
     }
     #[cfg(not(windows))]
     {
-        return names[1..].iter().any(|n| {
-            std::process::Command::new("pgrep").args(["-x", n]).output().map_or(false, |o| o.status.success())
+        // Under Proton the process is swkotor.exe. pgrep exits 1 for no match, above that it failed.
+        return names.iter().any(|n| {
+            std::process::Command::new("pgrep").args(["-x", n]).output().map_or(true, |o| o.status.code() != Some(1))
         });
     }
 }
@@ -164,8 +167,9 @@ impl Settings {
 
     fn load() -> Settings {
         let mut s = Settings { text_size: 1, ..Settings::default() };
-        if let Ok(text) = std::fs::read_to_string(Self::path()) {
-            for line in text.lines() {
+        // Bytes, not a string: one bad byte in a path must not lose every other setting.
+        if let Ok(bytes) = std::fs::read(Self::path()) {
+            for line in String::from_utf8_lossy(&bytes).lines() {
                 if let Some(p) = line.strip_prefix("added=") {
                     s.added.push(PathBuf::from(p));
                 } else if let Some(p) = line.strip_prefix("k1dir=") {
@@ -317,6 +321,8 @@ struct State {
     // picked among them (its id)
     quest_open: bool,
     stage_pick: Option<i64>,
+    /// spawned.txt lines of spawns not saved yet.
+    pending_spawns: Vec<String>,
     // the chapter whose pop-up is open on the timeline (a milestone index), and the row
     // picked in it: (depth, chapter index, quest tag, stage), as SkipRow has them
     timeline_pick: Option<i32>,
@@ -325,6 +331,9 @@ struct State {
     pool_ask: Option<PoolAsk>,
     // the point going back asks about: the chapter, a quest and stage (None: its start)
     back_to: Option<(i32, Option<(String, i64)>)>,
+    story_plan: Option<StoryPlan>,
+    story_prepared: Option<PreparedStory>,
+    story_result: Arc<Mutex<Option<Result<PreparedStory, String>>>>,
     status: (String, bool),
 }
 
@@ -582,11 +591,15 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     load_shots(ui, st);
 }
 
+/// Counts the save lists filled, so a picture knows when its row number has gone out of date.
+static SHOT_LIST: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Decodes the save pictures away from the window and puts each in its row as it comes.
 fn load_shots(ui: &AppWindow, st: &State) {
     let paths: Vec<PathBuf> = st.saves.iter().map(|(f, _)| f.path.clone()).collect();
     let cache = st.shots.clone();
     let weak = ui.as_weak();
+    let list = SHOT_LIST.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     std::thread::spawn(move || {
         for (i, path) in paths.into_iter().enumerate() {
             if cache.lock().unwrap().contains_key(&path) {
@@ -598,6 +611,10 @@ fn load_shots(ui: &AppWindow, st: &State) {
             let weak = weak.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = weak.upgrade() else { return };
+                // the list was filled again since: `i` is another save's row now
+                if SHOT_LIST.load(std::sync::atomic::Ordering::SeqCst) != list {
+                    return;
+                }
                 let app = ui.global::<App>();
                 let rows = app.get_saves();
                 if let Some(mut row) = rows.row_data(i) {
@@ -623,6 +640,50 @@ fn is_xbox_save(path: &Path) -> bool {
     })
 }
 
+/// Why the save in `path` can be looked at but not changed, if it cannot.
+fn read_only_reason(path: &Path) -> Option<&'static str> {
+    if is_xbox_save(path) {
+        Some("It is an original Xbox save; the Xbox would call it damaged.")
+    } else if save::player_outside_archive(path) {
+        Some(save::PLAYER_OUTSIDE_ARCHIVE)
+    } else {
+        None
+    }
+}
+
+/// A save added on its own: its copy sits in a folder the list does not scan, so it is added
+/// the same way, or the new save would not be listed.
+fn add_beside(st: &mut State, source: &Path, target: &Path) {
+    if st.settings.added.iter().any(|a| a == source) && !st.settings.added.iter().any(|a| a == target) {
+        st.settings.added.push(target.to_path_buf());
+        st.settings.store();
+    }
+}
+
+/// Stops a step that would drop changes not saved, and says why.
+fn unsaved(ui: &AppWindow, st: &State) -> bool {
+    let any = st.save.as_ref().map_or(false, |s| !s.changes.is_empty());
+    if any {
+        message(ui, "There are changes not saved", "Save them or press Revert first, so nothing is lost by accident.");
+    }
+    any
+}
+
+/// Undoes an edit that reached a read-only save (a path with no check of its own), and says
+/// why. Nothing there can be saved, so keeping it would only be work lost later.
+fn undo_read_only(ui: &AppWindow, st: &mut State) -> bool {
+    if !st.read_only || st.save.as_ref().map_or(true, |s| s.changes.is_empty()) {
+        return false;
+    }
+    let folder = st.save.as_ref().unwrap().folder.clone();
+    if let Ok(fresh) = Save::open(&folder) {
+        st.save = Some(fresh);
+    }
+    let why = read_only_reason(&folder).unwrap_or("It is read only.");
+    message(ui, "This save cannot be changed", why);
+    true
+}
+
 fn fill_preview(ui: &AppWindow, st: &mut State) {
     let app = ui.global::<App>();
     let Some((folder, sm)) = st.saves.get(st.selected).cloned() else { return };
@@ -643,9 +704,12 @@ fn fill_preview(ui: &AppWindow, st: &mut State) {
     }
     app.set_preview_pc(s(pc));
     let xbox = is_xbox_save(&folder.path);
-    app.set_preview_read_only(xbox);
+    let outside = save::player_outside_archive(&folder.path);
+    app.set_preview_read_only(xbox || outside);
     app.set_preview_warning(s(if xbox {
         "An original Xbox save. The Xbox checks a signature on every save, so this one can be looked at but not changed."
+    } else if outside {
+        save::PLAYER_OUTSIDE_ARCHIVE
     } else if folder.kind == SaveKind::Cloud {
         "A Steam Cloud save. Close the game and let Steam finish syncing before changing it; Steam sends the changed save to the cloud the next time the game starts."
     } else {
@@ -658,11 +722,14 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
     st.ensure_game(folder.game);
     match (Save::open(&folder.path), Save::open(&folder.path)) {
         (Ok(sv), Ok(orig)) => {
-            st.read_only = is_xbox_save(&folder.path);
+            st.read_only = read_only_reason(&folder.path).is_some();
             st.save = Some(sv);
             st.original = Some(orig);
             st.who = 0;
             st.tab = 0;
+            st.stage_pick = None;
+            st.equip_slot = None;
+            forget_pending_spawns(st);
             // Story opens on the timeline (2026-10-24, the maintainer)
             st.story = 5;
             st.compare = None;
@@ -689,7 +756,10 @@ fn message(ui: &AppWindow, title: &str, body: &str) {
 }
 
 fn fill_editor(ui: &AppWindow, st: &mut State) {
+    undo_read_only(ui, st);
     let app = ui.global::<App>();
+    // A box typed in stops following its value; this has every box read it again.
+    app.set_pool_epoch(app.get_pool_epoch().wrapping_add(1));
     let Some(save) = st.save.as_ref() else { return };
     // The player, then who is in the party, then who is recruited, then the rest
     // (2026-10-24, the maintainer: the ones available first); the one picked stays picked.
@@ -804,7 +874,7 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     let classes: Vec<String> =
         creature::classes(&c).iter().map(|(id, lv)| format!("{} {}", cat.class_name(*id), lv)).collect();
     app.set_classes(s(classes.join(" · ")));
-    app.set_can_add_class(creature::classes(&c).len() < 2);
+    app.set_can_add_class(creature::classes(&c).len() < 2 && creature::level(&c) < cat.max_level());
     let xp = creature::experience(&c);
     app.set_xp(xp as i32);
     app.set_xp_changed(xp != creature::experience(&o));
@@ -886,7 +956,8 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
             index: i as i32,
             name: s(cat.class_name(*id)),
             level: *lv as i32,
-            maximum: cat.max_level().max(*lv) as i32,
+            // the game's cap is on the total of all classes
+            maximum: (cat.max_level() - (class_list.iter().map(|(_, l)| *l).sum::<i64>() - *lv)).max(*lv) as i32,
             can_remove: class_list.len() > 1,
         })
         .collect();
@@ -1205,56 +1276,13 @@ struct Chapter {
     played: bool,
 }
 
-/// Which chapters a save has played, by milestone index: those whose journal entries it
-/// has reached, and those whose journal quests a chapter it has played takes out of the
-/// journal (the game removes the Endar Spire's quest on Taris, so a save past Taris no
-/// longer shows it).
-fn chapters_played(game: Game, quests: &[(String, i64)]) -> Vec<bool> {
-    let all = kse_core::questdb::milestones_ref(game);
-    let tags = |m: &serde_json::Value, key: &str| -> Vec<String> {
-        m.get(key)
-            .and_then(|j| j.as_array())
-            .map(|a| a.iter().filter_map(|e| e.as_str().or_else(|| e.get("tag").and_then(|v| v.as_str())).map(|t| t.to_string())).collect())
-            .unwrap_or_default()
-    };
-    let reached = |m: &serde_json::Value, tag: &str| {
-        let stage = m
-            .get("journal")
-            .and_then(|j| j.as_array())
-            .and_then(|j| j.iter().find(|e| e.get("tag").and_then(|v| v.as_str()) == Some(tag)))
-            .and_then(|e| e.get("stage").and_then(|v| v.as_i64()))
-            .unwrap_or(0);
-        quests.iter().any(|(t, v)| t.eq_ignore_ascii_case(tag) && *v >= stage)
-    };
-    let needs: Vec<Vec<String>> = all.iter().map(|(_, m)| tags(m, "journal")).collect();
-    let removes: Vec<Vec<String>> = all.iter().map(|(_, m)| tags(m, "journal_remove")).collect();
-    let mut played: Vec<bool> = all.iter().zip(&needs).map(|((_, m), need)| !need.is_empty() && need.iter().all(|t| reached(m, t))).collect();
-    loop {
-        let mut more = false;
-        for i in 0..all.len() {
-            if played[i] || needs[i].is_empty() {
-                continue;
-            }
-            let gone = |t: &String| (0..all.len()).any(|j| played[j] && removes[j].iter().any(|r| r.eq_ignore_ascii_case(t)));
-            if needs[i].iter().all(|t| reached(&all[i].1, t) || gone(t)) && needs[i].iter().any(|t| gone(t)) {
-                played[i] = true;
-                more = true;
-            }
-        }
-        if !more {
-            break;
-        }
-    }
-    played
-}
-
 /// The game's chapters the editor has mapped (questdb::milestones), in story order, each
 /// with what skipping to its end does and whether this save has played it (its journal
 /// entries reached).
 fn skip_chapters(st: &State) -> Vec<Chapter> {
     let Some(save) = st.save.as_ref() else { return Vec::new() };
     let quests = save.quests();
-    let done = chapters_played(st.game, &quests);
+    let done = kse_core::questdb::chapters_played(st.game, &quests);
     let titles = st.module_titles.get(&st.game);
     let mut out: Vec<Chapter> = kse_core::questdb::milestones_ref(st.game)
         .iter()
@@ -1331,6 +1359,7 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
             c.planet
         );
     }
+    summary.push_str("\n\nWorked out from the game's files. None of this data has been checked by playing it.");
     if path.len() > 1 {
         let names: Vec<String> = path.iter().filter(|k| st.skip_stage.is_none() || **k != i).filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
         summary.push_str(&format!("\n\nEvery chapter before it that this save has not played comes first, in story order: {}.", names.join(", ")));
@@ -1358,15 +1387,17 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
     app.set_skip_train_pick(0);
     app.set_skip_prestige_pick(match base { Some(3) => 0, Some(5) => 1, Some(4) => 2, _ => 3 });
     app.set_overlay(10);
+    request_story_preview(u, st, false);
 }
 
 /// The Go Back confirmation for chapter `i` (a quest's tag and stage in it: the chapter's
-/// start when the tag is empty): what is undone and the items choice.
+/// start when the tag is empty): what is undone, with the story's items and credits.
 fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let chapters = skip_chapters(st);
     let Some(c) = chapters.iter().find(|c| c.index == i) else { return };
     let stage = (!tag.is_empty() && stage > 0).then(|| (tag.to_string(), stage as i64));
     let mut title = format!("Go back to: {}", c.title);
+    let mut stage_text = String::new();
     if let Some((t, sid)) = &stage {
         let q = st.journal().iter().find(|q| q.tag.eq_ignore_ascii_case(t)).cloned();
         let name = q.as_ref().map(|q| q.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or(t.clone());
@@ -1374,11 +1405,14 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
         title = format!("Go back to: {}", name);
         if !text.is_empty() {
             title = format!("{} ({})", title, text.chars().take(80).collect::<String>());
+            stage_text = format!("{}\n\n", text);
         }
     }
-    let later: Vec<String> = chapters.iter().filter(|x| x.order >= c.order && (x.played || chapters.iter().position(|y| !y.played) == chapters.iter().position(|y| y.index == x.index))).map(|x| x.planet.clone()).collect();
+    let plan = kse_core::questdb::return_to(&chapter_states(&chapters), i);
+    let later: Vec<String> = plan.undo.iter().filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
     let summary = format!(
-        "These chapters are taken back out of the save, newest first: {}.\n\nTheir story values return to what the chapters before left, their quests leave the journal, the companions they brought leave and the ones they took away return, their areas are built fresh by the game, and the XP returns to the end of the chapter before, the levels gained since taken off newest first.{}\n\nWhat the save cannot tell: things you did outside the mapped quests, and (unless kept) what you bought, sold or used since.",
+        "{}These chapters are taken back out of the save, newest first: {}.\n\nTheir story values return to what the chapters before left, their quests leave the journal, the companions they brought leave and the ones they took away return, their areas are built fresh by the game, and the XP returns to the end of the chapter before, the levels gained since taken off newest first.{}\n\nWhat the save cannot tell: things you did outside the mapped quests, what you bought, sold or used since.",
+        stage_text,
         later.join(", "),
         if stage.is_some() { " Then the chapter plays up to the picked stage again, as Skip to Here does." } else { "" }
     );
@@ -1386,22 +1420,209 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let app = u.global::<App>();
     app.set_back_title(s(title));
     app.set_back_summary(s(summary));
-    app.set_back_keep(0);
     app.set_overlay(11);
+    request_story_preview(u, st, true);
 }
 
-/// The chapters a skip to chapter `index` applies, in story order: every main chapter
-/// before it this save has not played, then it. The side chapters (the Ebon Hawk, Yavin
-/// Station) come only when picked themselves.
+fn current_story_plan(ui: &AppWindow, st: &State, back: bool) -> Option<StoryPlan> {
+    let chapters = skip_chapters(st);
+    let all = kse_core::questdb::milestones_ref(st.game);
+    let milestone = |i: i32| all.get(i as usize).map(|(_, m)| (*m).clone());
+    if back {
+        let (i, stage) = st.back_to.as_ref()?;
+        let plan = kse_core::questdb::return_to(&chapter_states(&chapters), *i);
+        Some(StoryPlan::Back {
+            alignment: ui.global::<App>().get_back_alignment() as i64,
+            kept: plan.kept.iter().filter_map(|k| milestone(*k)).collect(),
+            undo: plan.undo.iter().filter_map(|k| milestone(*k)).collect(),
+            stage: stage.clone(),
+            unfinished: plan.unfinished.and_then(|k| chapters.iter().find(|c| c.index == k)).map(|c| c.planet.clone()),
+        })
+    } else {
+        let app = ui.global::<App>();
+        let dark = app.get_skip_side() && app.get_skip_dark() == 1;
+        let prestige = app.get_skip_prestige().then(|| app.get_skip_prestige_pick()).filter(|k| (0..3).contains(k)).map(|k| {
+            (if dark { kse_core::questdb::PRESTIGE_DARK } else { kse_core::questdb::PRESTIGE_LIGHT })[k as usize]
+        });
+        Some(StoryPlan::Skip {
+            chapters: skip_path(&chapters, app.get_skip_asked()).into_iter().filter_map(milestone).collect(),
+            stage: st.skip_stage.clone(),
+            class: app.get_skip_jedi().then(|| app.get_skip_class().clamp(0, 2) as usize),
+            dark,
+            prestige,
+            train: app.get_skip_train() && app.get_skip_train_pick() == 0,
+        })
+    }
+}
+
+fn clear_story_preview(ui: &AppWindow, st: &mut State) {
+    // A fresh slot also invalidates a worker still finishing an older selection.
+    st.story_result = Arc::new(Mutex::new(None));
+    st.story_plan = None;
+    st.story_prepared = None;
+    let app = ui.global::<App>();
+    app.set_story_preview_ready(false);
+    app.set_story_preview_status(s("Choose a subchapter to see what will change."));
+    app.set_story_values(model(Vec::new()));
+    app.set_story_items(model(Vec::new()));
+    app.set_story_grants(model(Vec::new()));
+}
+
+fn request_story_preview(ui: &AppWindow, st: &mut State, back: bool) {
+    clear_story_preview(ui, st);
+    let (Some(plan), Some(before), Some(data)) = (current_story_plan(ui, st, back), st.save.as_ref().cloned(), st.data()) else { return };
+    st.story_plan = Some(plan.clone());
+    ui.global::<App>().set_story_preview_status(s("Calculating the changes..."));
+    let result = st.story_result.clone();
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        *result.lock().unwrap() = Some(plan.prepare(&before, &data));
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<App>().invoke_story_preview_finished();
+            }
+        });
+    });
+}
+
+fn number_preview(rows: &mut Vec<StoryValue>, label: &str, before: i64, after: i64, always: bool) {
+    if !always && before == after { return; }
+    let difference = after - before;
+    rows.push(StoryValue {
+        label: s(label), before: s(thousands(before)), after: s(thousands(after)),
+        difference: s(if difference == 0 { String::new() } else { format!("{}{}", if difference > 0 { "+" } else { "" }, thousands(difference)) }),
+        change: difference.signum() as i32, changed: difference != 0,
+    });
+}
+
+fn story_preview_rows(st: &State, after: &Save) -> (Vec<StoryValue>, Vec<Named>) {
+    let Some(before) = st.save.as_ref() else { return (Vec::new(), Vec::new()) };
+    let mut rows = Vec::new();
+    let mut grants = Vec::new();
+    let pc = |s: &Save, f: fn(&Struct) -> i64| s.player().map(f).unwrap_or(0);
+    number_preview(&mut rows, "Experience", pc(before, creature::experience), pc(after, creature::experience), true);
+    number_preview(&mut rows, "Credits", before.party_int("PT_GOLD").unwrap_or(0), after.party_int("PT_GOLD").unwrap_or(0), true);
+    number_preview(&mut rows, "Level", pc(before, creature::level), pc(after, creature::level), true);
+    let recruited = |s: &Save| (0..s.npc_count()).filter(|i| s.recruited(*i)).count() as i64;
+    number_preview(&mut rows, "Companions", recruited(before), recruited(after), true);
+    number_preview(&mut rows, "Alignment", pc(before, creature::alignment), pc(after, creature::alignment), false);
+    for (field, label) in [("PT_ITEM_COMPONEN", "Components"), ("PT_ITEM_CHEMICAL", "Chemicals"), ("PT_XP_POOL", "Party experience")] {
+        number_preview(&mut rows, label, before.party_int(field).unwrap_or(0), after.party_int(field).unwrap_or(0), false);
+    }
+    let (Some(cat), Some(data)) = (st.catalog(), st.data()) else { return (rows, grants) };
+    let npc_name = |save: &Save, i: usize| story_preview::companion_name(save, &data, i, cat.npc_names.get(i).map(String::as_str).unwrap_or(""));
+    let same_npc = |i: usize| {
+        let tag = |save: &Save| save.creature(Who::Npc(i)).and_then(|c| c.string("Tag")).map(|t| t.to_ascii_lowercase());
+        tag(before) == tag(after)
+    };
+    for i in 0..before.npc_count().max(after.npc_count()) {
+        if before.recruited(i) && (!after.recruited(i) || !same_npc(i)) {
+            grants.push(Named { id: -1, name: s(npc_name(before, i)), note: s("Companion"), ..Default::default() });
+        }
+        if after.recruited(i) && (!before.recruited(i) || !same_npc(i)) {
+            grants.push(Named { id: 1, name: s(npc_name(after, i)), note: s("Companion"), ..Default::default() });
+        }
+    }
+    // Class changes and the abilities granted by them matter as much as the level.
+    let whos = std::iter::once(Who::Player).chain(after.npcs().into_iter().filter(|i| before.recruited(*i) && after.recruited(*i) && same_npc(*i)).map(Who::Npc));
+    for who in whos {
+        let (Some(a), Some(b)) = (before.creature(who), after.creature(who)) else { continue };
+        let prefix = match who { Who::Player => String::new(), Who::Npc(i) => format!("{}: ", npc_name(after, i)) };
+        if who != Who::Player {
+            number_preview(&mut rows, &format!("{}experience", prefix), creature::experience(a), creature::experience(b), false);
+            number_preview(&mut rows, &format!("{}level", prefix), creature::level(a), creature::level(b), false);
+            if let Who::Npc(i) = who {
+                if let (Some(old), Some(new)) = (before.influence(i), after.influence(i)) {
+                    if old >= 0 && new >= 0 { number_preview(&mut rows, &format!("{}influence", prefix), old, new, false); }
+                }
+            }
+        }
+        let (health_a, max_health_a) = creature::health(a);
+        let (health_b, max_health_b) = creature::health(b);
+        let (force_a, max_force_a) = creature::force(a, before.game);
+        let (force_b, max_force_b) = creature::force(b, after.game);
+        for (label, old, new) in [("Health", health_a, health_b), ("Max Health", max_health_a, max_health_b), ("Force", force_a, force_b), ("Max Force", max_force_a, max_force_b)] {
+            number_preview(&mut rows, &format!("{}{}", prefix, label), old, new, false);
+        }
+        let class_names = |c: &Struct| creature::classes(c).into_iter().map(|(id, _)| cat.class_name(id)).collect::<Vec<_>>().join(" / ");
+        let (old_class, new_class) = (class_names(a), class_names(b));
+        if old_class != new_class {
+            rows.push(StoryValue { label: s(format!("{}Class", prefix)), before: s(old_class), after: s(new_class), changed: true, ..Default::default() });
+        }
+        for (label, field) in [("Strength", "Str"), ("Dexterity", "Dex"), ("Constitution", "Con"), ("Intelligence", "Int"), ("Wisdom", "Wis"), ("Charisma", "Cha")] {
+            number_preview(&mut rows, &format!("{}{}", prefix, label), creature::attribute(a, field), creature::attribute(b, field), false);
+        }
+        for (i, skill) in cat.skills.iter().enumerate() {
+            number_preview(&mut rows, &format!("{}{}", prefix, skill.name), creature::skill(a, i), creature::skill(b, i), false);
+        }
+        for (old, new, power) in [(creature::feats(a), creature::feats(b), false), (creature::powers(a), creature::powers(b), true)] {
+            for (ids, other, sign) in [(&new, &old, 1), (&old, &new, -1)] {
+                for id in ids.iter().filter(|id| !other.contains(id)) {
+                    let name = if power { cat.power_name(*id) } else { cat.feat_name(*id) };
+                    grants.push(Named { id: sign, name: s(format!("{}{}", prefix, name)), note: s(if power { "Force power" } else { "Feat" }), ..Default::default() });
+                }
+            }
+        }
+    }
+    (rows, grants)
+}
+
+fn finish_story_preview(ui: &AppWindow, st: &mut State) {
+    let result = st.story_result.lock().unwrap().take();
+    if st.story_plan.is_none() || !matches!(ui.global::<App>().get_overlay(), 10 | 11 | 12) { return; }
+    let Some(result) = result else { return };
+    let prepared = match result {
+        Ok(p) => p,
+        Err(error) => {
+            ui.global::<App>().set_story_preview_status(s(format!("This point could not be prepared: {}", error)));
+            return;
+        }
+    };
+    let (values, grants) = story_preview_rows(st, &prepared.save);
+    let old = st.save.as_ref().map(story_preview::accessible_items).unwrap_or_default();
+    let mut changes = story_preview::inventory_changes(&old, &story_preview::accessible_items(&prepared.save));
+    changes.sort_by_cached_key(|r| st.item_name(&r.item).to_lowercase());
+    let items = changes.into_iter().map(|r| {
+        let name = st.item_name(&r.item);
+        let icon = st.item_icon(&r.item);
+        StoryItem { name: s(name), has_icon: icon.is_some(), icon: icon.unwrap_or_default(), gained: r.difference > 0,
+            difference: s(format!("{}{}", if r.difference > 0 { "+" } else { "" }, thousands(r.difference))) }
+    }).collect();
+    let app = ui.global::<App>();
+    app.set_story_values(model(values));
+    app.set_story_grants(model(grants));
+    app.set_story_items(model(items));
+    app.set_story_preview_status(s(""));
+    app.set_story_preview_ready(true);
+    st.story_prepared = Some(prepared);
+}
+
+fn take_story_preview(ui: &AppWindow, st: &mut State, back: bool) -> Option<PreparedStory> {
+    if st.story_plan != current_story_plan(ui, st, back) || !ui.global::<App>().get_story_preview_ready() {
+        request_story_preview(ui, st, back);
+        return None;
+    }
+    let prepared = st.story_prepared.take()?;
+    clear_story_preview(ui, st);
+    Some(prepared)
+}
+
+fn chapter_states(chapters: &[Chapter]) -> Vec<kse_core::questdb::ChapterState> {
+    chapters.iter().map(|c| kse_core::questdb::ChapterState { index: c.index, order: c.order, side: c.side, played: c.played }).collect()
+}
+
 fn skip_path(chapters: &[Chapter], index: i32) -> Vec<i32> {
-    let Some(target) = chapters.iter().find(|c| c.index == index) else { return Vec::new() };
-    let mut out: Vec<i32> = chapters
-        .iter()
-        .filter(|c| c.index != index && !c.played && !c.side && c.order < target.order)
-        .map(|c| c.index)
-        .collect();
-    out.push(index);
-    out
+    kse_core::questdb::skip_path(&chapter_states(chapters), index)
+}
+
+/// What a skip or a return left undone, for the player to know. Reports of what went well are
+/// not shown (2026-10-25, the maintainer: no success screen).
+fn story_problems(ui: &AppWindow, notes: &[String]) {
+    const FAILED: [&str; 7] = ["not found", "not recruited", "could not", "No form taught", "no story switch", "left as they are", "is undone too"];
+    let problems: Vec<&str> = notes.iter().map(String::as_str).filter(|n| FAILED.iter().any(|f| n.contains(f))).collect();
+    if !problems.is_empty() {
+        message(ui, "Done, except for this", &problems.join("\n"));
+    }
 }
 
 /// Another save of the open save's game, for the timeline.
@@ -1437,7 +1658,7 @@ fn main_chapters(game: Game) -> Vec<(usize, String)> {
 /// The furthest main chapter a save has played, as its place in story order, and its name.
 /// The planets in between that can be played in any order may still be open.
 fn furthest_played(game: Game, quests: &[(String, i64)]) -> Option<(usize, String)> {
-    let done = chapters_played(game, quests);
+    let done = kse_core::questdb::chapters_played(game, quests);
     main_chapters(game).into_iter().enumerate().filter(|(_, (i, _))| done.get(*i).copied().unwrap_or(false)).last().map(|(k, (_, p))| (k, p))
 }
 
@@ -1641,15 +1862,17 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             let qopen = st.skip_open.contains(&qkey);
             let name = if q.name.trim().is_empty() { tag.clone() } else { q.name.clone() };
             rows.push(row(1, name, if main_story { "main" } else { "" }, 3, c.index, qkey, &tag, 0, qopen));
-            height += 44.0;
+            height += if main_story { 56.0 } else { 44.0 };
             if !qopen {
                 continue;
             }
             for stg in &q.stages {
                 let text = stg.text.split_whitespace().collect::<Vec<_>>().join(" ");
                 let state = if c.played || now >= stg.id { 0 } else { 2 };
-                rows.push(row(2, if text.is_empty() { format!("Stage {}", stg.id) } else { text }, "", state, c.index, String::new(), &tag, stg.id as i32, false));
-                height += 40.0;
+                let short = text.split(". ").next().unwrap_or(&text);
+                let short = if short.chars().count() > 110 { format!("{}...", short.chars().take(107).collect::<String>()) } else { short.to_string() };
+                rows.push(row(2, if short.is_empty() { format!("Stage {}", stg.id) } else { short }, "", state, c.index, String::new(), &tag, stg.id as i32, false));
+                height += 64.0;
             }
         }
         // Its end: skipped to when ahead; when played, gone back to by taking the chapter
@@ -1685,9 +1908,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
     // the row picked, found again by what it is (opening a quest moves the rows)
     let picked = st.pop_pick.as_ref().and_then(|(d, i, tag, stage)| rows.iter().position(|r| r.depth == *d && r.index == *i && r.tag.as_str() == tag && r.stage == *stage));
     app.set_pop_picked(picked.map_or(-1, |k| k as i32));
-    if picked.is_none() {
-        app.set_pop_action(0);
-    }
+    app.set_pop_action(picked.map_or(0, |i| if rows[i].state == 0 { 2 } else { 1 }));
     app.set_pop_place(s(&title));
     app.set_pop_kicker(s(kicker));
     app.set_pop_title(s(title));
@@ -2731,10 +2952,18 @@ fn slot_items(st: &mut State, slot: u32) -> Vec<Named> {
         (Some(cat), Some(c)) => creature::classes(c).iter().any(|(id, _)| cat.class(*id).map_or(false, |k| k.droid)),
         _ => false,
     };
+    // A weapon for the right hand alone takes both hands, so the left is taken.
+    if let Some(right) = right_hand_of(slot) {
+        if st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::in_slot(c, right)).map_or(false, |w| two_handed(&base, w)) {
+            return Vec::new();
+        }
+    }
     let mut rows = Vec::new();
     for (i, it) in items.iter().enumerate() {
         let b = it.int("BaseItem").unwrap_or(0) as usize;
-        let fits = base.int(b, "equipableslots").map_or(false, |m| (m as u32) & slot != 0);
+        // KotOR 2's second weapon set takes what the first does.
+        let wanted = match slot { 0x40000 => 0x10, 0x80000 => 0x20, other => other };
+        let fits = base.int(b, "equipableslots").map_or(false, |m| (m as u32) & wanted != 0);
         let user = base.int(b, "droidorhuman").unwrap_or(0);
         if !fits || (user == 1 && droid) || (user == 2 && !droid) {
             continue;
@@ -2744,6 +2973,24 @@ fn slot_items(st: &mut State, slot: u32) -> Vec<Named> {
         rows.push(Named { has_icon: icon.is_some(), icon: icon.unwrap_or_default(), ..row(i as i64, st.item_name(it), kind) });
     }
     rows
+}
+
+/// The right hand that goes with left hand `slot`, in either weapon set.
+fn right_hand_of(slot: u32) -> Option<u32> {
+    match slot {
+        0x20 => Some(0x10),
+        0x80000 => Some(0x40000),
+        _ => None,
+    }
+}
+
+/// Measured in both games' baseitems.2da: staves, rifles and heavy weapons (weaponwield 3, 5,
+/// 6) list the right hand alone, weapons that can pair list both. KotOR 1's Gamorrean
+/// Battleaxe also lists the right hand alone but is wielded in one hand (2).
+fn two_handed(base: &kse_core::formats::tables::TwoDa, item: &Struct) -> bool {
+    let row = item.int("BaseItem").unwrap_or(0) as usize;
+    let slots = base.int(row, "equipableslots").unwrap_or(0);
+    slots & 0x10 != 0 && slots & 0x20 == 0 && matches!(base.int(row, "weaponwield"), Some(3 | 5 | 6))
 }
 
 /// The creatures the editor spawned, so the map offers to remove those and only those:
@@ -2764,11 +3011,50 @@ fn was_spawned(game: Game, module: &str, c: &Struct) -> bool {
     std::fs::read_to_string(spawned_path()).map_or(false, |t| t.lines().any(|l| l == key))
 }
 
+/// A spawn that was reverted before it was saved is not in any save, so its line goes: the id
+/// would otherwise offer Remove on a later creature that gets it.
+fn forget_pending_spawns(st: &mut State) {
+    let pending = std::mem::take(&mut st.pending_spawns);
+    if pending.is_empty() {
+        return;
+    }
+    if let Ok(text) = std::fs::read_to_string(spawned_path()) {
+        let left: String = text.lines().filter(|l| !pending.iter().any(|p| p == l)).map(|l| format!("{}\n", l)).collect();
+        let _ = std::fs::write(spawned_path(), left);
+    }
+}
+
 fn record_spawned(game: Game, module: &str, id: u32, tag: &str) {
     use std::io::Write;
     let _ = std::fs::create_dir_all(games::data_dir());
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(spawned_path()) {
         let _ = writeln!(f, "{}", spawned_key(game, module, id, tag));
+    }
+}
+
+/// The Load screen's pictures of the party: savenfo PORTRAIT1 and PORTRAIT2. Left as they
+/// are when a member's picture cannot be told, so a row never shows the wrong companion.
+fn update_party_portraits(st: &mut State) {
+    let Some(save) = st.save.as_ref() else { return };
+    let portraits: Option<Vec<String>> = save
+        .party_members()
+        .iter()
+        .map(|m| {
+            let id = save.creature(Who::Npc(*m))?.int("PortraitId")?;
+            st.data()?.table("portraits").cell(id as usize, "baseresref").map(|r| r.to_string())
+        })
+        .collect();
+    let Some(portraits) = portraits else { return };
+    if let Some(save) = st.save.as_mut() {
+        save.edit_nfo(|n| {
+            for slot in 1..=2 {
+                let label = format!("PORTRAIT{}", slot);
+                match portraits.get(slot - 1) {
+                    Some(r) => n.set(&label, Value::ResRef(r.as_bytes().to_vec())),
+                    None => n.fields.retain(|(l, _)| *l != label),
+                }
+            }
+        });
     }
 }
 
@@ -3111,6 +3397,11 @@ fn edit_who(ui: &AppWindow, st: &mut State, key: &str, f: impl Fn(&mut Struct)) 
 /// creatures). Everything the save holds can still be seen and its numbers changed
 /// (2026-10-24, the maintainer).
 fn needs_game(ui: &AppWindow, st: &State) -> bool {
+    if st.read_only {
+        let why = st.save.as_ref().and_then(|s| read_only_reason(&s.folder)).unwrap_or("It is read only.");
+        message(ui, "This save cannot be changed", why);
+        return true;
+    }
     if st.has_game_files() {
         return false;
     }
@@ -3152,32 +3443,27 @@ fn pick_save(ui: &AppWindow, st: &mut State, folder: &Path) {
     }
 }
 
-/// The folder for a new save beside `folder`: the next number after the highest in its saves
-/// folder, then the save's name ("000913 - Game26 - Copy"; the game reads the number and lets
-/// the rest be any name, as "000900 - KMRPTest" shows). A name with nothing usable in a folder
-/// name falls back to the game's own pattern ("000135 - Game134"). Until 2026-10-24 it was
-/// always the game's pattern, so a copy's folder said nothing of what it was (the maintainer).
-fn next_save_folder(folder: &Path, name: &str) -> Option<PathBuf> {
-    let parent = folder.parent()?;
-    let highest = std::fs::read_dir(parent)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_string_lossy().split(" - ").next().and_then(|n| n.trim().parse::<u32>().ok()))
-        .max()
-        .unwrap_or(0);
-    let n = highest + 1;
-    // what Windows, macOS and Linux all allow in a folder name, no dot or space at the end
-    let clean: String = name.chars().filter(|c| !c.is_control() && !r#"<>:"/\|?*"#.contains(*c)).collect();
-    let clean = clean.trim().trim_end_matches('.').trim().to_string();
-    let target = if clean.is_empty() {
-        parent.join(format!("{:06} - Game{}", n, n.saturating_sub(1)))
-    } else {
-        parent.join(format!("{:06} - {}", n, clean))
-    };
-    (!target.exists()).then_some(target)
+/// A template entry in `slot` made into the whole item, so it can go to the inventory. False,
+/// and says so, when the game's template for it cannot be read.
+fn whole_item_in_slot(ui: &AppWindow, st: &mut State, who: Who, slot: u32) -> bool {
+    let Some(save) = st.save.as_ref() else { return false };
+    let Some(resref) = save.slot_is_template(who, slot) else { return true };
+    let like = save.inventory().first().cloned();
+    let item = st.data().and_then(|d| d.gff(&resref, "uti", kse_core::formats::erf::RES_TYPE_UTI)).map(|g| catalog::item_from_template(&g.root, like.as_ref(), 1));
+    match item {
+        Some(item) => {
+            st.save.as_mut().unwrap().fill_template_slot(who, slot, item);
+            true
+        }
+        None => {
+            message(ui, "That item was left where it is", &format!("The game's template {} could not be read, so the item cannot go to the inventory.", resref));
+            false
+        }
+    }
 }
 
 fn refresh_after_edit(ui: &AppWindow, st: &mut State) {
+    undo_read_only(ui, st);
     match st.tab {
         0 => fill_character(ui, st),
         1 => fill_abilities(ui, st),
@@ -3290,6 +3576,8 @@ fn open_save_picker(ui: &AppWindow, st: &mut State, target: Target, title: &str,
                 && Save::open(&f.path).map_or(false, |sv| sv.creature(Who::Npc(i)).is_some())
         });
     }
+    // A save gone from the disk has no row, and rows and `others` must stay in step.
+    others.retain(|f| save::summary(&f.path).is_some());
     let shots = st.shots.lock().unwrap().clone();
     let rows: Vec<SaveRow> = others
         .iter()
@@ -3316,7 +3604,35 @@ fn open_save_picker(ui: &AppWindow, st: &mut State, target: Target, title: &str,
     app.set_overlay(3);
 }
 
+/// A panic ends the release build at once, so it is told here: to a file beside the settings,
+/// and on Windows, where the program has no console, in a box.
+fn report_panics() {
+    std::panic::set_hook(Box::new(|info| {
+        let path = games::data_dir().join("crash.txt");
+        let _ = std::fs::create_dir_all(games::data_dir());
+        let _ = std::fs::write(&path, format!("{}\n{}\n", save::timestamp(), info));
+        let text = format!(
+            "The editor hit an error it did not expect and has to close. Changes not saved are lost; saves on disk keep what was last saved.\n\n{}\n\nThe details are in {}",
+            info,
+            path.display()
+        );
+        #[cfg(windows)]
+        {
+            #[link(name = "user32")]
+            extern "system" {
+                fn MessageBoxW(window: *mut core::ffi::c_void, text: *const u16, title: *const u16, kind: u32) -> i32;
+            }
+            let wide = |t: &str| t.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+            // 0x10: the error icon. Safe: both strings end in a zero and outlive the call.
+            unsafe { MessageBoxW(std::ptr::null_mut(), wide(&text).as_ptr(), wide("KOTOR Modern Gamesave Editor").as_ptr(), 0x10) };
+        }
+        #[cfg(not(windows))]
+        eprintln!("{}", text);
+    }));
+}
+
 fn main() {
+    report_panics();
     let ui = AppWindow::new().expect("the window could not be made");
     {
         // A mouse press anywhere first takes the focus out of a text box, so a number typed
@@ -3395,8 +3711,12 @@ fn main() {
         pop_pick: None,
         quest_open: false,
         stage_pick: None,
+        pending_spawns: Vec::new(),
         pool_ask: None,
         back_to: None,
+        story_plan: None,
+        story_prepared: None,
+        story_result: Arc::new(Mutex::new(None)),
         status: (String::new(), false),
     }));
     fill_saves(&ui, &mut state.borrow_mut());
@@ -3424,6 +3744,7 @@ fn main() {
 
     // ---- the save list ----
     on!(ui, state, on_switch_game, |u, st, k2: bool| {
+        u.global::<App>().set_renaming_save(false);
         st.game = if k2 { Game::K2 } else { Game::K1 };
         st.settings.k2 = k2;
         st.selected = 0;
@@ -3431,6 +3752,7 @@ fn main() {
         fill_saves(&u, st);
     });
     on!(ui, state, on_select_save, |u, st, i: i32| {
+        u.global::<App>().set_renaming_save(false);
         st.selected = i.max(0) as usize;
         u.global::<App>().set_selected_save(i);
         fill_preview(&u, st);
@@ -3508,8 +3830,7 @@ fn main() {
 
     // ---- the editor ----
     on!(ui, state, on_back, |u, st| {
-        if st.save.as_ref().map_or(false, |s| !s.changes.is_empty()) {
-            message(&u, "There are changes not saved", "Save them or press Revert first, so nothing is lost by accident.");
+        if unsaved(&u, st) {
             return;
         }
         st.save = None;
@@ -3888,6 +4209,17 @@ fn main() {
         st.selected_box = boxes.get(row.max(0) as usize).map(|b| (b.list, b.index));
         fill_area(&u, st);
     });
+    on!(ui, state, on_set_box_stack, |u, st, row: i32, stack: i32| {
+        let Some((list, index)) = st.selected_box else { return };
+        if let Some(save) = st.save.as_mut() {
+            save.edit_area(&format!("box{}{}.{}", list, index, row), |git| {
+                if let Some(item) = area::container_mut(git, list, index).and_then(|c| c.list_mut("ItemList")).and_then(|l| l.get_mut(row.max(0) as usize)) {
+                    item.set_int("StackSize", stack.max(1) as i64, Value::Word(1));
+                }
+            });
+        }
+        refresh_after_edit(&u, st);
+    });
     on!(ui, state, on_remove_box_item, |u, st, row: i32| {
         let Some((list, index)) = st.selected_box else { return };
         if let Some(save) = st.save.as_mut() {
@@ -4238,6 +4570,20 @@ fn main() {
             return;
         }
         let (Some(slot), who) = (st.equip_slot, st.who()) else { return };
+        if !whole_item_in_slot(&u, st, who, slot) {
+            return;
+        }
+        // Two hands on one weapon: what the left hand holds goes to the inventory first.
+        let left = match slot { 0x10 => Some(0x20), 0x40000 => Some(0x80000), _ => None };
+        let both = st.data().map(|d| d.table("baseitems")).zip(st.save.as_ref().and_then(|s| s.inventory().get(index.max(0) as usize).cloned())).map_or(false, |(b, it)| two_handed(&b, &it));
+        if let (Some(left), true) = (left, both) {
+            if !whole_item_in_slot(&u, st, who, left) {
+                return;
+            }
+            if let Some(save) = st.save.as_mut() {
+                save.unequip(who, left);
+            }
+        }
         if let Some(save) = st.save.as_mut() {
             save.equip(who, slot, index.max(0) as usize);
         }
@@ -4245,6 +4591,9 @@ fn main() {
     });
     on!(ui, state, on_unequip_slot, |u, st| {
         let (Some(slot), who) = (st.equip_slot, st.who()) else { return };
+        if !whole_item_in_slot(&u, st, who, slot) {
+            return;
+        }
         if let Some(save) = st.save.as_mut() {
             save.unequip(who, slot);
         }
@@ -4266,23 +4615,7 @@ fn main() {
             message(&u, "The party was not changed", &e);
             return;
         }
-        // The Load screen's pictures of the party: savenfo PORTRAIT1 and PORTRAIT2.
-        let portraits: Vec<String> = members
-            .iter()
-            .filter_map(|m| st.save.as_ref().and_then(|s| s.creature(Who::Npc(*m))).and_then(|c| c.int("PortraitId")))
-            .filter_map(|id| st.data().and_then(|d| d.table("portraits").cell(id as usize, "baseresref").map(|r| r.to_string())))
-            .collect();
-        if let Some(save) = st.save.as_mut() {
-            save.edit_nfo(|n| {
-                for slot in 1..=2 {
-                    let label = format!("PORTRAIT{}", slot);
-                    match portraits.get(slot - 1) {
-                        Some(r) => n.set(&label, Value::ResRef(r.as_bytes().to_vec())),
-                        None => n.fields.retain(|(l, _)| *l != label),
-                    }
-                }
-            });
-        }
+        update_party_portraits(st);
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_remove_creature, |u, st, index: i32| {
@@ -4416,19 +4749,14 @@ fn main() {
         }
         fill_skip(&u, st);
     });
-    on!(ui, state, on_ask_skip_stage, |u, st, i: i32, tag: SharedString, stage: i32| {
-        if needs_game(&u, st) {
-            return;
-        }
-        st.skip_stage = Some((tag.to_string(), stage as i64));
-        ask_skip(&u, st, i);
-    });
     on!(ui, state, on_timeline_ready, |u, st| {
         if st.story == 5 {
             fill_skip(&u, st);
         }
     });
     on!(ui, state, on_open_chapter, |u, st, i: i32| {
+        u.global::<App>().set_back_alignment(50);
+        clear_story_preview(&u, st);
         st.timeline_pick = Some(i);
         st.pop_pick = None;
         fill_skip(&u, st);
@@ -4437,12 +4765,17 @@ fn main() {
     // A row picked in the chapter's pop-up: what skipping or going back there does, with its
     // choices, shown in the same pop-up (the confirmation is no longer a second one).
     on!(ui, state, on_pick_row, |u, st, r: i32| {
+        if needs_game(&u, st) { return; }
         let app = u.global::<App>();
         let Some(row) = app.get_skip_rows().row_data(r.max(0) as usize) else { return };
         if row.state == 3 || !(row.depth == 2 || row.depth == 5 || row.depth == 6) {
             return;
         }
         st.pop_pick = Some((row.depth, row.index, row.tag.to_string(), row.stage));
+        let detail = if row.depth == 2 {
+            st.journal().iter().find(|q| q.tag.eq_ignore_ascii_case(row.tag.as_str())).map(|q| q.name.clone()).unwrap_or_default()
+        } else { row.title.to_string() };
+        app.set_pop_detail(s(detail));
         let stage = if row.depth == 2 { row.stage } else { 0 };
         if row.state == 0 {
             ask_back(&u, st, row.index, &row.tag, stage);
@@ -4454,98 +4787,61 @@ fn main() {
         app.set_pop_picked(r);
         app.set_overlay(12);
     });
+    on!(ui, state, on_refresh_story_preview, |u, st| {
+        let app = u.global::<App>();
+        request_story_preview(&u, st, (app.get_overlay() == 12 && app.get_pop_action() == 2) || app.get_overlay() == 11);
+    });
+    on!(ui, state, on_story_preview_finished, |u, st| {
+        finish_story_preview(&u, st);
+    });
     on!(ui, state, on_open_timeline_save, |u, st, i: i32| {
+        if unsaved(&u, st) {
+            return;
+        }
         if i >= 0 && (i as usize) < st.saves.len() {
             st.selected = i as usize;
             open_selected(&u, st);
         }
     });
-    on!(ui, state, on_ask_back, |u, st, i: i32, tag: SharedString, stage: i32| {
-        if needs_game(&u, st) {
-            return;
-        }
-        ask_back(&u, st, i, &tag, stage);
-    });
     on!(ui, state, on_do_back, |u, st| {
-        if needs_game(&u, st) {
-            return;
+        if needs_game(&u, st) { return; }
+        let Some(prepared) = take_story_preview(&u, st, true) else { return };
+        let party = st.save.as_ref().map(|s| s.party_members());
+        st.save = Some(prepared.save);
+        if st.save.as_ref().map(|s| s.party_members()) != party {
+            update_party_portraits(st);
         }
-        let app = u.global::<App>();
-        let keep = app.get_back_keep() == 0;
-        let Some((i, stage)) = st.back_to.take() else { return };
-        let chapters = skip_chapters(st);
-        let Some(c) = chapters.iter().find(|c| c.index == i) else { return };
-        let current = chapters.iter().position(|y| !y.played).map(|p| chapters[p].index);
-        let all = kse_core::questdb::milestones_ref(st.game); // not copied: only the chapters used are
-        let pick = |x: &Chapter| all.get(x.index as usize).map(|(_, m)| (*m).clone());
-        // undone: this chapter and every later one the save has played or is in
-        let undo: Vec<serde_json::Value> = chapters.iter().filter(|x| x.order >= c.order && (x.played || Some(x.index) == current)).filter_map(pick).collect();
-        let kept: Vec<serde_json::Value> = chapters.iter().filter(|x| x.order < c.order && x.played).filter_map(pick).collect();
-        let Some(data) = st.data() else { return };
-        app.set_overlay(0);
-        let result = match st.save.as_mut() {
-            Some(save) => kse_core::questdb::go_back(save, &data, &kept, &undo, keep, stage),
-            None => return,
-        };
+        st.back_to = None;
+        u.global::<App>().set_overlay(0);
         forget_timeline_saves(st);
+        // the party can have changed, so everything is read again, not only the tab on screen
+        st.map = None;
+        st.map_pick = None;
+        let keep = (st.tab, st.story, st.who);
+        fill_editor(&u, st);
+        (st.tab, st.story, st.who) = keep;
         refresh_after_edit(&u, st);
-        match result {
-            Ok(notes) => {
-                let mut body = String::from("Save Changes, then load this save in the game: the story goes on from there.");
-                if !notes.is_empty() {
-                    body.push_str("\n\nWhat changed:\n");
-                    body.push_str(&notes.join("\n"));
-                }
-                message(&u, "Gone back", &body);
-            }
-            Err(e) => message(&u, "Could not go back", &e),
-        }
-    });
-    on!(ui, state, on_ask_skip, |u, st, i: i32| {
-        if needs_game(&u, st) {
-            return;
-        }
-        st.skip_stage = None;
-        ask_skip(&u, st, i);
+        story_problems(&u, &prepared.notes);
     });
     on!(ui, state, on_do_skip, |u, st| {
-        if needs_game(&u, st) {
-            return;
+        if needs_game(&u, st) { return; }
+        let Some(prepared) = take_story_preview(&u, st, false) else { return };
+        let party = st.save.as_ref().map(|s| s.party_members());
+        st.save = Some(prepared.save);
+        if st.save.as_ref().map(|s| s.party_members()) != party {
+            update_party_portraits(st);
         }
-        let app = u.global::<App>();
-        let i = app.get_skip_asked();
-        let class = app.get_skip_jedi().then(|| app.get_skip_class().clamp(0, 2) as usize);
-        let dark = app.get_skip_side() && app.get_skip_dark() == 1;
-        let train = app.get_skip_train() && app.get_skip_train_pick() == 0;
-        let prestige = app.get_skip_prestige().then(|| app.get_skip_prestige_pick()).filter(|k| (0..3).contains(k)).map(|k| {
-            let row = if dark { kse_core::questdb::PRESTIGE_DARK } else { kse_core::questdb::PRESTIGE_LIGHT };
-            row[k as usize]
-        });
-        let chapters = skip_chapters(st);
-        let path = skip_path(&chapters, i);
-        let all = kse_core::questdb::milestones_ref(st.game); // not copied: only the chapters used are
-        let milestones: Vec<serde_json::Value> = path.iter().filter_map(|k| all.get(*k as usize).map(|(_, m)| (*m).clone())).collect();
-        let title = chapters.iter().find(|c| c.index == i).map(|c| c.title.clone()).unwrap_or_default();
-        let Some(data) = st.data() else { return };
-        app.set_overlay(0);
-        let stage = st.skip_stage.take();
-        let result = match (st.save.as_mut(), stage) {
-            (Some(save), Some((tag, stage))) => kse_core::questdb::skip_to_stage(save, &data, &milestones, &tag, stage, class, dark, prestige, train),
-            (Some(save), None) => kse_core::questdb::skip_through_with(save, &data, &milestones, class, dark, prestige, train),
-            (None, _) => return,
-        };
+        st.skip_stage = None;
+        u.global::<App>().set_overlay(0);
+        forget_timeline_saves(st);
+        // the party can have changed, so everything is read again, not only the tab on screen
+        st.map = None;
+        st.map_pick = None;
+        let keep = (st.tab, st.story, st.who);
+        fill_editor(&u, st);
+        (st.tab, st.story, st.who) = keep;
         refresh_after_edit(&u, st);
-        match result {
-            Ok(notes) => {
-                let mut body = String::from("Save Changes, then load this save in the game: it plays the way on from there.");
-                if !notes.is_empty() {
-                    body.push_str("\n\nWorth knowing:\n");
-                    body.push_str(&notes.join("\n"));
-                }
-                message(&u, &format!("Skipped to: {}", title), &body);
-            }
-            Err(e) => message(&u, "Could not skip ahead", &e),
-        }
+        story_problems(&u, &prepared.notes);
     });
     on!(ui, state, on_travel, |u, st, i: i32| {
         if needs_game(&u, st) {
@@ -4553,16 +4849,11 @@ fn main() {
         }
         let Some((tag, _)) = st.travel_ways.get(i.max(0) as usize).cloned() else { return };
         let Some(area) = st.map.as_ref() else { return };
-        let (module, name) = (area.module.clone(), area.name.clone());
+        let module = area.module.clone();
         let Some(save) = st.save.as_mut() else { return };
         match save.queue_transition(&module, &tag, &[]) {
             Ok(()) => {
                 refresh_after_edit(&u, st);
-                message(
-                    &u,
-                    &format!("Travel to {}", name),
-                    "Save Changes, then load this save in the game: the first thing it does is take you there, as if you had walked in. The area's arrival scripts run and your party comes with you.",
-                );
             }
             Err(e) => message(&u, "The trip could not be set up", &e),
         }
@@ -4570,8 +4861,9 @@ fn main() {
     on!(ui, state, on_unlock_pick, |u, st| {
         let Some(MapPick::Object(i)) = st.map_pick.clone() else { return };
         let Some(o) = st.map.as_ref().map(|a| a.objects[i].clone()) else { return };
+        let module = st.map.as_ref().map(|a| a.module.clone()).unwrap_or_default();
         if let Some(save) = st.save.as_mut() {
-            save.edit_area(&format!("unlock{}{}", o.list, o.index), |git| {
+            save.edit_module_git(&module, &format!("unlock{}{}", o.list, o.index), |git| {
                 if let Some(x) = git.list_mut(o.list).and_then(|l| l.get_mut(o.index)) {
                     x.set_int("Locked", 0, Value::Byte(0));
                     x.set_int("KeyRequired", 0, Value::Byte(0));
@@ -4590,8 +4882,11 @@ fn main() {
         fill_map(&u, st);
     });
     on!(ui, state, on_open_all_doors, |u, st| {
+        // The area on the map, which need not be the one the save is in.
+        let module = st.map.as_ref().map(|a| a.module.clone());
         if let Some(save) = st.save.as_mut() {
-            save.edit_area("alldoors", |git| {
+            let module = module.unwrap_or_else(|| save.module_name().to_string());
+            let opened = save.edit_module_git(&module, "alldoors", |git| {
                 if let Some(l) = git.list_mut(area::DOORS) {
                     for d in l.iter_mut() {
                         d.set_int("Locked", 0, Value::Byte(0));
@@ -4600,6 +4895,9 @@ fn main() {
                     }
                 }
             });
+            if !opened {
+                message(&u, "No doors were opened", "This save has not been to that area, so the game builds it fresh when the player arrives.");
+            }
         }
         st.map = None;
         refresh_after_edit(&u, st);
@@ -4609,7 +4907,8 @@ fn main() {
     on!(ui, state, on_save_changes, |u, st| {
         let Some(game) = st.save.as_ref().map(|s| s.game) else { return };
         if st.read_only {
-            message(&u, "This save cannot be changed", "It is an original Xbox save; the Xbox would call it damaged.");
+            let why = st.save.as_ref().and_then(|s| read_only_reason(&s.folder)).unwrap_or("It is read only.");
+            message(&u, "This save cannot be changed", why);
             return;
         }
         if game_running(game) {
@@ -4630,8 +4929,10 @@ fn main() {
                     st.save = Some(fresh);
                 }
                 st.shots.lock().unwrap().remove(&folder);
+                st.pending_spawns.clear();
                 st.status = (format!("Saved! Backup of the unedited save is in {}", backup.display()), false);
             }
+            Err(e) if e.starts_with(save::HALF_WRITTEN) => st.status = (e, true),
             Err(e) => st.status = (format!("Nothing was changed: {}", e), true),
         }
         fill_editor(&u, st);
@@ -4663,11 +4964,16 @@ fn main() {
         }
         u.global::<App>().set_overlay(0);
         let Some((game, folder)) = copy_source(&u, st) else { return };
+        // A copy changes savenfo.res, which the signature in the .xbx files covers.
+        if is_xbox_save(&folder) {
+            message(&u, "Nothing was copied", "It is an original Xbox save; the Xbox would call a copy with a new name damaged.");
+            return;
+        }
         if game_running(game) {
             message(&u, &format!("{} is running", game.title()), "Close the game first: it can overwrite a save folder it did not expect.");
             return;
         }
-        let Some(target) = next_save_folder(&folder, &name) else {
+        let Some(target) = save::next_save_folder(&folder) else {
             message(&u, "Nothing was copied", "No free save slot was found beside this save.");
             return;
         };
@@ -4675,6 +4981,7 @@ fn main() {
         if u.global::<App>().get_page() == 0 {
             match Save::copy_save(&folder, &target, &name) {
                 Ok(()) => {
+                    add_beside(st, &folder, &target);
                     fill_saves(&u, st);
                     pick_save(&u, st, &target);
                 }
@@ -4684,6 +4991,7 @@ fn main() {
         }
         match Save::copy_save(&folder, &target, &name) {
             Ok(()) => {
+                add_beside(st, &folder, &target);
                 let keep = (st.tab, st.story, st.who);
                 fill_saves(&u, st);
                 if let Some(i) = st.saves.iter().position(|(f, _)| f.path == folder) {
@@ -4707,15 +5015,17 @@ fn main() {
         if name.is_empty() || name == now.trim() {
             return;
         }
-        if is_xbox_save(&folder) {
-            message(&u, "This save cannot be changed", "It is an original Xbox save; the Xbox would call it damaged.");
+        if let Some(why) = read_only_reason(&folder) {
+            message(&u, "This save cannot be changed", why);
             return;
         }
         if game_running(st.game) {
             message(&u, &format!("{} is running", st.game.title()), "Close the game first: it can overwrite a save it did not expect.");
             return;
         }
-        let backups = backups_of(st);
+        // The saves page has no save open, so the folder decides, as it does for Save Changes.
+        let root = st.installs.iter().find(|i| i.game == st.game).map(|i| i.path.clone());
+        let backups = save::backup_root(&folder, root.as_deref());
         let result = Save::open(&folder).and_then(|mut s| {
             s.rename(&name);
             s.write(&backups).map(|_| ())
@@ -4736,18 +5046,20 @@ fn main() {
         let Some(game) = st.save.as_ref().map(|s| s.game) else { return };
         u.global::<App>().set_overlay(0);
         if st.read_only {
-            message(&u, "This save cannot be changed", "It is an original Xbox save; the Xbox would call it damaged.");
+            let why = st.save.as_ref().and_then(|s| read_only_reason(&s.folder)).unwrap_or("It is read only.");
+            message(&u, "This save cannot be changed", why);
             return;
         }
         if game_running(game) {
             message(&u, &format!("{} is running", game.title()), "Close the game first: it can overwrite a save folder it did not expect.");
             return;
         }
-        let Some(target) = st.save.as_ref().and_then(|s| next_save_folder(&s.folder, &name)) else {
+        let Some(target) = st.save.as_ref().and_then(|s| save::next_save_folder(&s.folder)) else {
             st.status = ("Nothing was changed: no free save slot was found beside this save".to_string(), true);
             fill_bar(&u, st);
             return;
         };
+        let source = st.save.as_ref().unwrap().folder.clone();
         let result = st.save.as_mut().unwrap().write_as(&target, &name);
         match result {
             Ok(()) => {
@@ -4755,6 +5067,8 @@ fn main() {
                 if let Ok(fresh) = Save::open(&target) {
                     st.save = Some(fresh);
                 }
+                st.pending_spawns.clear();
+                add_beside(st, &source, &target);
                 // the saves list gains the new one, which is the one open now
                 let keep = (st.tab, st.story, st.who);
                 fill_saves(&u, st);
@@ -4775,6 +5089,9 @@ fn main() {
             st.save = Save::open(&folder).ok();
             st.original = Save::open(&folder).ok();
             st.status = (String::new(), false);
+            st.map = None;
+            st.map_pick = None;
+            forget_pending_spawns(st);
             fill_editor(&u, st);
         }
     });
@@ -4786,6 +5103,7 @@ fn main() {
 
     // ---- pop-ups ----
     on!(ui, state, on_close_overlay, |u, st| {
+        clear_story_preview(&u, st);
         st.target = Target::None;
         u.global::<App>().set_overlay(0);
     });
@@ -4821,6 +5139,7 @@ fn main() {
                 if let Some(save) = st.save.as_mut() {
                     let id = save.spawn_creature(c);
                     record_spawned(game, save.module_name(), id, &tag);
+                    st.pending_spawns.push(spawned_key(game, save.module_name(), id, &tag));
                 }
                 st.target = Target::None;
                 u.global::<App>().set_overlay(0);
@@ -4870,8 +5189,9 @@ fn main() {
                     .and_then(|l| l.first().cloned());
                 let Some(mut item) = new_item(st, id.max(0) as usize, like.as_ref()) else { return };
                 if let Some(save) = st.save.as_mut() {
+                    // From the module's counter, as for every other new object.
+                    let next = save.new_object_id();
                     save.edit_area(&format!("box{}{}", list, index), |git| {
-                        let next = area::next_object_id(git);
                         if let Some(c) = area::container_mut(git, list, index) {
                             if c.list("ItemList").is_none() {
                                 c.set("ItemList", Value::List(Vec::new()));
@@ -4948,6 +5268,9 @@ fn main() {
                     if let Some(Err(e)) = result {
                         message(&u, "They could not be brought over", &e);
                     }
+                    if st.save.as_ref().map_or(false, |s| s.in_party(n)) {
+                        update_party_portraits(st);
+                    }
                     let tab = st.tab;
                     fill_editor(&u, st);
                     st.tab = tab;
@@ -4959,6 +5282,22 @@ fn main() {
     });
 
     let _ = with(&ui, &state, |_, _| {});
+    // Closing with changes not saved asks once; closing again with the same changes leaves.
+    {
+        let weak = ui.as_weak();
+        let state = state.clone();
+        let warned = std::cell::Cell::new(None::<usize>);
+        ui.window().on_close_requested(move || {
+            let (Some(u), Ok(st)) = (weak.upgrade(), state.try_borrow()) else { return slint::CloseRequestResponse::HideWindow };
+            let changes = st.save.as_ref().map_or(0, |s| s.changes.len());
+            if changes == 0 || warned.get() == Some(changes) {
+                return slint::CloseRequestResponse::HideWindow;
+            }
+            warned.set(Some(changes));
+            message(&u, "There are changes not saved", "Save them or press Revert first. Close the window again to leave without saving them.");
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+    }
     ui.run().expect("the window closed with an error");
     let mut st = state.borrow_mut();
     st.settings.light = !ui.global::<Theme>().get_dark();

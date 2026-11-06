@@ -122,6 +122,10 @@ impl Floor {
     /// The floor's height at (x, y), when (x, y) is on walkable floor. Where floors
     /// overlap (stairs, balconies), the one nearest `near_z`.
     pub fn height(&self, x: f32, y: f32, near_z: f32) -> Option<f32> {
+        // An all-zero calibration gives NaN, which would pass every test below.
+        if !x.is_finite() || !y.is_finite() {
+            return None;
+        }
         let mut best: Option<f32> = None;
         for t in &self.tris {
             let (x1, y1, x2, y2, x3, y3) = (t[0][0], t[0][1], t[1][0], t[1][1], t[2][0], t[2][1]);
@@ -257,6 +261,10 @@ pub struct ModuleFiles {
 
 impl ModuleFiles {
     pub fn open(root: &Path, module: &str) -> ModuleFiles {
+        // A module is a name: LASTMODULE comes from the save, and must not lead out of the game.
+        if module.contains(['/', '\\']) || module.contains("..") {
+            return ModuleFiles { rims: Vec::new(), erf: None };
+        }
         let erf = find_case_insensitive(root, &format!("modules/{}.mod", module))
             .and_then(|p| std::fs::read(p).ok())
             .and_then(|d| crate::formats::erf::Erf::read(&d).ok());
@@ -474,7 +482,8 @@ impl Area {
         }
         if let Some(l) = git.list("WaypointList") {
             for (i, w) in l.iter().enumerate() {
-                if w.int("MapNote") != Some(1) {
+                // MapNote is the text; these two say whether it shows.
+                if w.int("HasMapNote") != Some(1) || w.int("MapNoteEnabled") != Some(1) {
                     continue;
                 }
                 let pos = pos3(w, "XPosition", "YPosition", "ZPosition");

@@ -48,6 +48,8 @@ export global Theme {
     out property <color> hover-edge: dark ? #f4d03f : #9a7400;
     out property <color> changed: dark ? #ff9a3c : #c75f00;
     out property <color> good: dark ? #7ee0ab : #1e8a52;
+    // Small signed gains in a story preview need the stronger green on a light panel.
+    out property <color> gain: dark ? #7ee0ab : #176d40;
     // Another save on the timeline: green on KotOR's cyan, blue on KotOR II's
     // teal (where green would read as the accent).
     out property <color> save-mark: k2 ? (dark ? #60b2ff : #2a6fb8) : good;

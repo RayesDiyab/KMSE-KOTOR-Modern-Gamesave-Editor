@@ -92,7 +92,9 @@ pub const ITEM_CATEGORIES: [&str; 8] =
 /// Creature-only items (claws, hides) return None: no player uses them.
 pub fn item_category(base: &crate::formats::tables::TwoDa, row: usize) -> Option<usize> {
     let slots = base.int(row, "equipableslots").unwrap_or(0);
-    if slots & 0x3C000 != 0 {
+    // Claws and bites (0x1C000, some with the hand slots too), and a hide (0x20000) unless it
+    // is also a belt: Stealth Field Generators are base item 88, 0x20400.
+    if slots & 0x1C000 != 0 || (slots & 0x20000 != 0 && slots & 0x400 == 0) {
         return None;
     }
     let class = base.cell(row, "itemclass").unwrap_or("").to_ascii_lowercase();
