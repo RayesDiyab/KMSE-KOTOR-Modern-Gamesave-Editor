@@ -210,6 +210,15 @@ export component AppWindow inherits Window {
     background: Theme.window;
     default-font-family: Theme.body-font;
 
+    // After an edit the whole window is drawn again. Slint's software renderer draws only what
+    // it finds changed, and it missed a change: on KotOR II's Abilities tab, adding a feat and
+    // a power and removing both left "FORCE POWERS · 9" on screen with 8 in the save until the
+    // window was resized (2026-11-06; reproduced every time with those four clicks). This
+    // covers the window and its colour changes with every edit, so all of it counts as
+    // changed. It is black at 1/255 at most, under everything, and takes no clicks. (Only
+    // hiding and showing it, with no colour, was not enough: the count stayed wrong.)
+    Rectangle { width: 100%; height: 100%; background: App.repaint ? #00000001 : #00000000; }
+
     // Where the focus goes when the mouse is pressed anywhere (main.rs): a text box being
     // typed in then takes what was typed, as if Enter were pressed.
     sink := FocusScope {

@@ -6,6 +6,22 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **KotOR II's feats and powers can be added and removed again** (2026-11-06, the
+  maintainer: "abilities in kotor 2 dont work to add or remove"). A long name in the lists
+  (in German, "Geschwindigkeitsschub") made every row wider than the list, so the + and x
+  column was off its right edge; the list now keeps its own width and a long name wraps.
+  Measured in the program on a KotOR II save: a feat and a power added and removed, the
+  counts 25, 26, 25 and 8, 9, 8. A count could stay on screen after it changed (adding a
+  feat and a power and removing both left "FORCE POWERS 9" with 8 in the save until the
+  window was resized; Slint's software renderer did not redraw it), so the whole window is
+  drawn again after every edit.
+- **KotOR II's Equipped is KotOR's 3 by 3 grid** (2026-11-06, the maintainer). The second
+  weapon set takes the weapons' places when "Weapons 2" is picked under the grid, as the
+  game's swap button does; it was a fourth row that made every slot small. Credits,
+  components and chemicals sit side by side to give the slots room. In both games the worn
+  items fill their frames and the grid is centred in its space; KotOR II's empty-slot
+  pictures stay inside their frames. Looked at in the program in both games at 1600 by 900
+  and 1280 by 780.
 - **The Endar Spire, the Leviathan and the Ravager are drawn as themselves** on the
   Timeline (2026-11-06, the maintainer's pictures): each in place of the outline of a ship, a
   little larger than its ring; the Leviathan made greyer than its picture. In

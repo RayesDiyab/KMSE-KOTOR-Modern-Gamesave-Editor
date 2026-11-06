@@ -99,6 +99,10 @@ component AbilityList inherits Rectangle {
         height: parent.height - 84px;
         content-height: list.preferred-height;
         list := VerticalLayout {
+            // the list's own width, whatever its names: a long name (KotOR II's German ones)
+            // widened every row, and the add and remove column went off the right edge
+            // (2026-11-06, the maintainer: "abilities in kotor 2 dont work to add or remove")
+            width: root.width - 12px;
             // each row as tall as its name needs: a name on three lines was cut at 50 px
             for r in rows: Rectangle {
                 height: r.header ? 50px : max(50px, nm.preferred-height + 14px);
@@ -130,7 +134,11 @@ component AbilityList inherits Rectangle {
                     // repeated the group (2026-10-24, the maintainer)
                     VerticalLayout {
                         alignment: center;
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        // it wraps in the room left, and never asks for more
                         nm := Text {
+                            min-width: 0px;
                             text: r.name;
                             font-family: Theme.list-font;
                             font-size: 16px * Theme.ts;
@@ -511,6 +519,28 @@ component Money inherits Line {
     }
 }
 
+// A party amount as a name over its box, for KotOR II's three side by side (as three rows
+// they took the height the Equipped slots need, 2026-11-06).
+component MoneyBox inherits VerticalLayout {
+    in property <string> label;
+    in property <int> value;
+    in property <bool> changed;
+    callback set(int);
+    spacing: 6px;
+    // smaller in a narrow box, so "Components" is not cut
+    Text { text: label; font-family: Theme.list-font; font-size: min(14px * Theme.ts, root.width / 8.8); color: Theme.text; overflow: elide; }
+    Field {
+        height: 40px;
+        // smaller in a narrow box, so seven digits still fit
+        font-size: min(16px * Theme.ts, root.width / 8);
+        property <int> epoch: App.pool-epoch;
+        changed epoch => { self.text = root.value; }
+        text: root.value;
+        changed: root.changed;
+        accepted(t) => { if t.is-float() { root.set(t.to-float()); } else { self.text = root.value; } }
+    }
+}
+
 // The kinds of item as a row of tabs; on two rows when the row would not fit.
 component KindTab inherits Rectangle {
     in property <string> text;
@@ -574,9 +604,13 @@ component EquipSlot inherits Rectangle {
     callback clicked;
     // An empty slot's picture is the whole tile, as in the game (drawn in the same 64-unit
     // square as the frame); the frame goes over it.
+    // KotOR's pictures leave the frame's margin round them; KotOR II's fill their texture,
+    // so they go inside the frame (they spilled over the next slot, 2026-11-06)
     if slot.empty && slot.has-art: Image {
-        width: parent.width;
-        height: parent.height;
+        x: Theme.k2 ? parent.width * 0.15 : 0;
+        y: Theme.k2 ? parent.height * 0.13 : 0;
+        width: parent.width * (Theme.k2 ? 0.7 : 1);
+        height: parent.height * (Theme.k2 ? 0.75 : 1);
         source: slot.art;
     }
     Path {
@@ -595,12 +629,16 @@ component EquipSlot inherits Rectangle {
             ? "M 27.5 35.5 L 58 35.5 L 76 17.5 L 112 17.5 L 130 35.5 L 160.5 35.5 L 160.5 170.5 L 133.5 170.5 L 118.5 155.5 L 69.5 155.5 L 54.5 170.5 L 27.5 170.5 Z"
             : "M 27.5 35.5 L 58 35.5 L 76 17.5 L 112 17.5 L 130 35.5 L 160.5 35.5 L 160.5 152 Q 94 186 27.5 152 Z";
     }
+    // the worn item as large as the frame's inside (it was half the slot, 2026-11-06, the
+    // maintainer: "make the items in the equipped slots bigger so they fill the equipment
+    // slots")
     if slot.has-icon: Image {
-        x: parent.width * 0.22;
-        y: parent.height * 0.25;
-        width: parent.width * 0.54;
-        height: parent.height * 0.54;
+        x: parent.width * 0.18;
+        y: parent.height * 0.2;
+        width: parent.width * 0.62;
+        height: parent.height * 0.62;
         source: slot.icon;
+        image-fit: contain;
     }
     // Without the game's picture, the slot's name.
     if slot.empty && !slot.has-art: Text {
@@ -625,30 +663,51 @@ component EquipSlot inherits Rectangle {
 component InventoryTab inherits Rectangle {
     // The left side is as wide as the slots, which are as large as the height under the
     // money allows (and never so wide that the list loses its room).
-    property <length> equip-y: (App.has-crafting ? 250px : 138px);
+    // KotOR II's three amounts sit side by side, so its slots get nearly KotOR's room
+    property <length> equip-y: App.has-crafting ? 32px + 40px + 14px * Theme.ts * 1.3 + 6px + 12px + 36px : 138px;
     property <int> rows: Math.ceil(App.slots.length / 3);
-    property <length> cell: min(170px, (self.width * 0.55) / (2 * 50 / 64 + 1), (self.height - equip-y - 40px) / ((rows - 1) * 50 / 64 + 1));
+    // KotOR II's weapon set switch under the grid, and the gap above it
+    property <length> sets-h: App.has-weapon-sets ? 34px * Theme.ts + 10px : 0px;
+    property <length> cell: min(170px, (self.width * 0.55) / (2 * 50 / 64 + 1), (self.height - equip-y - 40px - sets-h) / ((rows - 1) * 50 / 64 + 1));
     property <length> step: cell * 50 / 64;
-    property <length> side: max(300px * Theme.ts, 2 * step + cell);
+    // wider with KotOR II's three amounts side by side, where the window has the room (at
+    // 1280 by 780 the inventory's buttons ran out of theirs)
+    property <length> side: max((App.has-crafting && self.width >= 1100px ? 360px : 300px) * Theme.ts, 2 * step + cell);
+    // The grid (and KotOR II's weapon switch under it) centred in the room under its label,
+    // across and down (2026-11-06, the maintainer: "center the grid correctly in the space it
+    // occupies in both kotor 1 and 2 screens"; it sat against the left)
+    property <length> grid-w: 2 * step + cell;
+    property <length> grid-h: (rows - 1) * step + cell;
+    property <length> grid-x: (side - grid-w) / 2;
+    property <length> grid-y: equip-y + 34px + max(0px, (self.height - equip-y - 34px - grid-h - sets-h) / 2);
     Rectangle {
         x: 0;
         width: side;
         Label { x: 0; y: 0; width: parent.width; text: "SHARED BY THE PARTY"; }
-        VerticalLayout {
+        if !App.has-crafting: VerticalLayout {
             x: 0; y: 32px;
             height: self.preferred-height;
             Money { label: "Credits"; value: App.credits; changed: App.credits-changed; set(v) => { App.set-credits(v); } }
-            if App.has-crafting: Money { label: "Components"; note: "For the workbench"; value: App.components; changed: App.components-changed; set(v) => { App.set-components(v); } }
-            if App.has-crafting: Money { label: "Chemicals"; note: "For the lab station"; value: App.chemicals; changed: App.chemicals-changed; set(v) => { App.set-chemicals(v); } }
         }
-        Note { x: 0; y: App.has-crafting ? 214px : 102px; width: parent.width; text: "Type a number and press Enter."; }
+        // KotOR II: credits, components (for the workbench) and chemicals (for the lab
+        // station) side by side
+        if App.has-crafting: HorizontalLayout {
+            x: 0; y: 32px;
+            width: parent.width;
+            height: self.preferred-height;
+            spacing: 12px;
+            MoneyBox { width: (parent.width - 24px) * 0.36; label: "Credits"; value: App.credits; changed: App.credits-changed; set(v) => { App.set-credits(v); } }
+            MoneyBox { width: (parent.width - 24px) * 0.32; label: "Components"; value: App.components; changed: App.components-changed; set(v) => { App.set-components(v); } }
+            MoneyBox { width: (parent.width - 24px) * 0.32; label: "Chemicals"; value: App.chemicals; changed: App.chemicals-changed; set(v) => { App.set-chemicals(v); } }
+        }
+        Note { x: 0; y: equip-y - 36px; width: parent.width; text: "Type a number and press Enter."; }
         Label { x: 0; y: equip-y; width: parent.width; text: "EQUIPPED BY " + (App.members.length > App.who ? App.members[App.who].name : App.name); }
         // The slots, under the label.
         Rectangle {
-            x: 0;
-            y: equip-y + 34px;
-            width: 2 * step + cell;
-            height: (rows - 1) * step + cell;
+            x: grid-x;
+            y: grid-y;
+            width: grid-w;
+            height: grid-h;
             for r[i] in App.slots: EquipSlot {
                 x: Math.mod(i, 3) * step;
                 y: Math.floor(i / 3) * step;
@@ -660,6 +719,18 @@ component InventoryTab inherits Rectangle {
                 picked: r.slot != 0 && r.slot == App.equip-slot;
                 clicked => { App.open-slot(r.slot); }
             }
+        }
+        // KotOR II: which weapon set the bottom corners show, as the game's swap button
+        if App.has-weapon-sets: Choice {
+            // at least as wide as its words (at 1280 by 780 the grid is narrower)
+            width: min(side, max(grid-w, 250px * Theme.ts));
+            x: (side - self.width) / 2;
+            y: grid-y + grid-h + 10px;
+            height: 34px * Theme.ts;
+            font-size: 13px * Theme.ts;
+            options: ["Weapons 1", "Weapons 2"];
+            current: App.weapon-set;
+            picked(k) => { App.pick-weapon-set(k); }
         }
     }
     Rectangle {

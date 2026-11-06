@@ -293,6 +293,8 @@ struct State {
     spawn_at: Option<([f32; 3], f32)>,
     /// The slot picked on the equip grid, whose fitting items the inventory list shows.
     equip_slot: Option<u32>,
+    // KotOR II's weapon set the Equipped grid shows: 0 the first, 1 the second
+    weapon_set: usize,
     /// Where each module can be arrived at (map::arrivals), read on first use, by game; and
     /// the ways into the area on the map, as Travel Here lists them.
     arrivals: HashMap<Game, Arc<HashMap<String, Vec<(String, String)>>>>,
@@ -1209,14 +1211,15 @@ fn fill_inventory(ui: &AppWindow, st: &mut State) {
     let worn_before = st.original.as_ref().and_then(|s| s.creature(who)).cloned();
     let k2 = st.game == Game::K2;
     let mut slot_rows = Vec::new();
-    // In the order of the game's equip screen (equip.gui, equip_p.gui): three across, KotOR
-    // II's second weapon set as a fourth row; 0 is the gap in that row.
-    let grid: &[u32] = if k2 {
-        &[0x200, 0x1, 0x8, 0x80, 0x2, 0x100, 0x20, 0x400, 0x10, 0x80000, 0, 0x40000]
-    } else {
-        &[0x200, 0x1, 0x8, 0x80, 0x2, 0x100, 0x20, 0x400, 0x10]
-    };
-    for &slot in grid {
+    // In the order of the game's equip screen (equip.gui, equip_p.gui): three across, three
+    // down, in both games. KotOR II's second weapon set takes the weapons' places when it is
+    // picked under the grid, as the game swaps them (2026-11-06, the maintainer: "make it same
+    // layout as kotor 1"; it was a fourth row, which made every slot smaller).
+    let set2 = k2 && st.weapon_set == 1;
+    let grid: [u32; 9] = [0x200, 0x1, 0x8, 0x80, 0x2, 0x100, if set2 { 0x80000 } else { 0x20 }, 0x400, if set2 { 0x40000 } else { 0x10 }];
+    app.set_has_weapon_sets(k2);
+    app.set_weapon_set(if k2 { st.weapon_set as i32 } else { 0 });
+    for slot in grid {
         if slot == 0 {
             slot_rows.push(SlotRow::default());
             continue;
@@ -3797,6 +3800,9 @@ fn whole_item_in_slot(ui: &AppWindow, st: &mut State, who: Who, slot: u32) -> bo
 
 fn refresh_after_edit(ui: &AppWindow, st: &mut State) {
     undo_read_only(ui, st);
+    // the whole window drawn again after the edit (app.slint says why)
+    let app = ui.global::<App>();
+    app.set_repaint(!app.get_repaint());
     match st.tab {
         0 => fill_character(ui, st),
         1 => fill_abilities(ui, st),
@@ -4035,6 +4041,7 @@ fn main() {
         spawnable: Vec::new(),
         spawn_at: None,
         equip_slot: None,
+        weapon_set: 0,
         arrivals: HashMap::new(),
         travel_ways: Vec::new(),
         module_titles: HashMap::new(),
@@ -4958,6 +4965,15 @@ fn main() {
         u.global::<App>().set_overlay(6);
     });
     // A slot picked on the equip grid; picked again, the list shows everything.
+    // KotOR II's weapon set shown in the Equipped grid; a weapon slot of the other set that
+    // was picked is let go.
+    on!(ui, state, on_pick_weapon_set, |u, st, set: i32| {
+        st.weapon_set = set.clamp(0, 1) as usize;
+        if matches!(st.equip_slot, Some(0x10 | 0x20 | 0x40000 | 0x80000)) {
+            st.equip_slot = None;
+        }
+        fill_inventory(&u, st);
+    });
     on!(ui, state, on_open_slot, |u, st, slot: i32| {
         let slot = slot as u32;
         st.equip_slot = if st.equip_slot == Some(slot) || slot == 0 { None } else { Some(slot) };

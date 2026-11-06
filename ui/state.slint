@@ -233,6 +233,10 @@ export global App {
     callback open-add-item();
     in property <[SlotRow]> slots;
     callback open-slot(int);
+    // KotOR II: two weapon sets, one shown in the Equipped grid at a time
+    in property <bool> has-weapon-sets;
+    in property <int> weapon-set;
+    callback pick-weapon-set(int);
     // The picked slot (0 none), what it holds, and the party's items that fit it.
     in property <int> equip-slot;
     in property <string> equip-slot-name;
@@ -293,6 +297,8 @@ export global App {
     callback filter-globals(string, bool);
     // counts the times main.rs clears the feat and power searches, so their boxes clear too
     in property <int> ability-reset;
+    // flipped after every edit: the whole window is drawn again (see app.slint)
+    in property <bool> repaint;
     // the filter the story values list shows: its search text and Only what I changed
     in property <string> globals-query;
     in property <bool> globals-changed-only;

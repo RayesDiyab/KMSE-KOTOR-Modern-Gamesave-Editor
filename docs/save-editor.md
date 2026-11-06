@@ -129,7 +129,7 @@ modded game shows its mods.
 | Character | Position (player) | `XPosition`, `YPosition`, `ZPosition` | numbers only |
 | Character | Heal Everyone Fully | `CurrentHitPoints` and `CurrentForce` such that the game loads both at their maxima, for every creature (the player: equal to `HitPoints` and `ForcePoints`; a party member: above them by the bonuses the load leaves out) | |
 | Abilities | Skills | `SkillList[i].Rank` | 0 to 99 |
-| Abilities | (how they are shown) | every feat and Force power the game has is listed, each with its icon (feat.2da `icon`, spells.2da `iconresref`), in groups: feats by `toolscategories` (Jedi, Combat, Weapons and armour, Class abilities, Skills and general, Droid and other), powers by `goodevil` (Universal, Light side, Dark side), a chain's links together in order; what the creature has is lit | names, icons and groups come from the game and Override, so modded feats and powers appear with their own icons |
+| Abilities | (how they are shown) | every feat and Force power the game has is listed, each with its icon (feat.2da `icon`, spells.2da `iconresref`), in groups: feats by `toolscategories` (Jedi, Combat, Weapons and armour, Class abilities, Skills and general, Droid and other), powers by `goodevil` (Universal, Light side, Dark side), a chain's links together in order; what the creature has is lit. A row is as tall as its name, and the list keeps its own width whatever the names: a long name (KotOR II's German "Geschwindigkeitsschub") widened every row until 2026-11-06, which pushed the add and remove column off the right edge, so in KotOR II nothing could be added or removed | names, icons and groups come from the game and Override, so modded feats and powers appear with their own icons |
 | Abilities | Feats | `FeatList`: add one entry, or remove one and the same feat from every `LvlStatList[].FeatList` | a new entry is a copy of an entry already there |
 | Abilities | Force powers | `ClassList[j].KnownList0` of the class that has powers (else the first Force class): add one, or remove one and the same power from every `LvlStatList[].KnownList0` | only a creature with a Force class; powers are `spells.2da` rows with `usertype` 1 |
 | Inventory | Credits | `PT_GOLD` | at least 0 |
@@ -530,11 +530,18 @@ colour with a dark edge (the system crosshair is drawn inverted, so it looked se
 
 **Equipped** (Inventory tab, 2026-10-22): the game's equip screen, its slots three across in
 the order of equip.gui (Implant, Head, Hands; Left arm, Body, Right arm; Left weapon, Belt,
-Right weapon; KotOR II's second weapon set as a fourth row, equip_p.gui), each drawn as the
+Right weapon), each drawn as the
 shape of the game's slot frames (lbl_top, lbl_mid, lbl_bot) so the rows interlock as in the
 game. An empty slot shows the game's own picture of what goes there (`iimplant`, `ihead`,
 `ihands`, `iforearm_l`, `iarmor`, `iforearm_r`, `iweap_l`, `ibelt`, `iweap_r` from the GUI
-texture pack) on a faint accent fill; a worn item sits on the plain frame. Clicking a slot turns the list beside it into the party's items that fit (baseitems.2da
+texture pack) on a faint accent fill (KotOR II's pictures fill their texture, KotOR's leave
+the frame's margin, so KotOR II's are drawn inside the frame); a worn item sits on the plain
+frame, as large as the frame's inside (since 2026-11-06; it was half the slot). The grid is
+centred in the room under its label. **KotOR II** has the same 3 by 3 grid; its second weapon
+set (equip_p.gui) takes the weapons' places when "Weapons 2" is picked under the grid, as the
+game's swap button does. Until 2026-11-06 the second set was a fourth row, which made every
+slot smaller (the maintainer: "make it same layout as kotor 1"); KotOR II's credits,
+components and chemicals sit side by side above it for the same room. Clicking a slot turns the list beside it into the party's items that fit (baseitems.2da
 `equipableslots` and `droidorhuman`), each with Equip, and shows what is worn there with Take
 It Off. In the editor, Revert and Save Changes sit at the top
 right beside the settings button, with a line under them saying what is changed or what the
