@@ -3148,7 +3148,11 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
         }
         Some(MapPick::Floor(_)) => {
             app.set_pick_title(s("A spot on the floor"));
-            app.set_pick_note(s("Checked: walkable floor with room around it."));
+            app.set_pick_note(s(if here {
+                "Checked: walkable floor with room around it."
+            } else {
+                "Checked: walkable floor with room around it. Moving straight there takes the player alone; Travel Here makes the trip the game's way, with the party."
+            }));
             // Straight to a spot needs the area's saved copy; elsewhere Travel Here goes.
             app.set_pick_can_move(here || been);
             app.set_pick_move_label(s(if here { "Move Here" } else { "Move to This Area, Here" }));
@@ -3175,6 +3179,8 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
             }
             if o.spots.is_empty() {
                 note.push_str(". No free floor next to it to stand on.");
+            } else if !here && been {
+                note.push_str(". Moving straight there takes the player alone; Travel Here makes the trip the game's way, with the party.");
             }
             app.set_pick_note(s(note));
             let door = matches!(o.kind, Door | Exit) && o.spots.len() == 2;

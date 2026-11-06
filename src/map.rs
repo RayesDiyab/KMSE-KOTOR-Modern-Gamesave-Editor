@@ -163,14 +163,24 @@ impl Floor {
 
     /// The standable spot nearest (x, y), searched outwards to `radius`.
     pub fn nearest(&self, x: f32, y: f32, near_z: f32, radius: f32) -> Option<[f32; 3]> {
-        if let Some(z) = self.standable(x, y, near_z) {
-            return Some([x, y, z]);
+        self.nearest_where(x, y, near_z, radius, &|_, _| true)
+    }
+
+    /// As nearest, among the spots `ok` accepts.
+    pub fn nearest_where(&self, x: f32, y: f32, near_z: f32, radius: f32, ok: &dyn Fn(f32, f32) -> bool) -> Option<[f32; 3]> {
+        if ok(x, y) {
+            if let Some(z) = self.standable(x, y, near_z) {
+                return Some([x, y, z]);
+            }
         }
         let mut r = 0.25;
         while r <= radius {
             for k in 0..16 {
                 let a = k as f32 * std::f32::consts::TAU / 16.0;
                 let (px, py) = (x + r * a.cos(), y + r * a.sin());
+                if !ok(px, py) {
+                    continue;
+                }
                 if let Some(z) = self.standable(px, py, near_z) {
                     return Some([px, py, z]);
                 }
@@ -416,7 +426,14 @@ impl Area {
                     let n = pts.len() as f32;
                     [pos[0] + pts.iter().map(|p| p.0).sum::<f32>() / n, pos[1] + pts.iter().map(|p| p.1).sum::<f32>() / n, pos[2]]
                 };
-                let spot = floor.nearest(mid[0], mid[1], mid[2], 4.0);
+                // Next to the way out, not in it: a player saved inside the trigger could be
+                // carried off as the save loads. The nearest floor outside its shape, with a
+                // margin (2026-11-06 audit; before, the floor at its middle).
+                let shape: Vec<(f32, f32)> = pts.iter().map(|p| (pos[0] + p.0, pos[1] + p.1)).collect();
+                let clear = |x: f32, y: f32| {
+                    shape.len() < 3 || ![(0.0, 0.0), (0.75, 0.0), (-0.75, 0.0), (0.0, 0.75), (0.0, -0.75)].iter().any(|(dx, dy)| inside(&shape, x + dx, y + dy))
+                };
+                let spot = floor.nearest_where(mid[0], mid[1], mid[2], 8.0, &clear);
                 objects.push(Object {
                     kind: Kind::Exit,
                     list: "TriggerList",
@@ -591,4 +608,19 @@ pub fn arrivals(data: &GameData) -> std::collections::HashMap<String, Vec<(Strin
 pub fn any_waypoint(data: &GameData, module: &str) -> Option<String> {
     let git = shipped_git(&ModuleFiles::open(&data.root, module))?;
     git.root.list("WaypointList")?.iter().find_map(|w| w.string("Tag").filter(|t| !t.is_empty()))
+}
+
+/// Whether (x, y) lies inside the polygon (even-odd rule).
+fn inside(poly: &[(f32, f32)], x: f32, y: f32) -> bool {
+    let mut on = false;
+    let mut j = poly.len().wrapping_sub(1);
+    for i in 0..poly.len() {
+        let (xi, yi) = poly[i];
+        let (xj, yj) = poly[j];
+        if (yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
+            on = !on;
+        }
+        j = i;
+    }
+    on
 }
