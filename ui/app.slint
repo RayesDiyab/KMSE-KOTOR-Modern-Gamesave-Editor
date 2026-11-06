@@ -217,7 +217,9 @@ export component AppWindow inherits Window {
     }
     Rectangle { y: 140px; height: 80px; background: @linear-gradient(180deg, transparent 0%, Theme.window 100%); }
 
-    Brand { x: App.page == 1 ? 140px : 60px; y: 44px; height: 110px; short: App.page == 1; }
+    // The name gives way below the width where it would run under the buttons on the right
+    // (measured 2026-11-06 at 1280 by 780: the editor's Revert covered "Editor").
+    Brand { x: App.page == 1 ? 140px : 60px; y: 44px; height: 110px; short: App.page == 1; named: App.page == 1 ? root.width >= 1400px : root.width >= 1460px; }
 
     if App.page == 0: SavesPage { }
     if App.page == 1: EditorPage { }

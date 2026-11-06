@@ -712,11 +712,11 @@ fn fill_preview(ui: &AppWindow, st: &mut State) {
     let outside = save::player_outside_archive(&folder.path);
     app.set_preview_read_only(xbox || outside);
     app.set_preview_warning(s(if xbox {
-        "An original Xbox save. The Xbox checks a signature on every save, so this one can be looked at but not changed."
+        "An original Xbox save: it can be looked at but not changed, as the Xbox checks a signature on every save."
     } else if outside {
-        save::PLAYER_OUTSIDE_ARCHIVE
+        "Its player is kept in pifo.ifo, outside the save's archive, which the editor does not write: it can be looked at but not changed. Save again in a normal slot in the game."
     } else if folder.kind == SaveKind::Cloud {
-        "A Steam Cloud save. Close the game and let Steam finish syncing before changing it; Steam sends the changed save to the cloud the next time the game starts."
+        "A Steam Cloud save: close the game and let Steam finish syncing before changing it. Steam sends the changed save to the cloud the next time the game starts."
     } else {
         ""
     }));

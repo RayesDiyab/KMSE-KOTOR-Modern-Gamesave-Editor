@@ -399,6 +399,8 @@ export component Choice inherits Rectangle {
 // program's name (2026-10-24, the maintainer); with a save open, only "Gamesave Editor".
 export component Brand inherits HorizontalLayout {
     in property <bool> short;
+    // the name beside the crest, left out where the buttons on the right need its room
+    in property <bool> named: true;
     spacing: 30px;
     alignment: start;
     Image {
@@ -407,7 +409,7 @@ export component Brand inherits HorizontalLayout {
         width: 142px;
         image-fit: contain;
     }
-    Text {
+    if root.named: Text {
         text: root.short ? "Gamesave Editor" : "KOTOR Modern Gamesave Editor";
         font-family: Theme.title-font;
         font-size: 40px;

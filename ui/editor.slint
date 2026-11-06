@@ -75,8 +75,9 @@ component AbilityList inherits Rectangle {
         x: 0;
         y: 0;
         height: 24px;
-        Label { text: title; }
-        Note { text: hint; horizontal-alignment: right; vertical-alignment: center; }
+        spacing: 10px;
+        Label { text: title; min-width: self.preferred-width; }
+        Note { text: hint; horizontal-alignment: right; vertical-alignment: center; wrap: no-wrap; overflow: elide; }
     }
     Field {
         x: 0;
@@ -150,6 +151,10 @@ component AbilityList inherits Rectangle {
 
 component CharacterTab inherits Rectangle {
     property <length> colw: (self.width - 2 * 34px) / 3;
+    // the labels of the Who column, narrower where the column is (the fields need the room)
+    property <length> labelw: min(130px * Theme.ts, colw * 0.42);
+    // their size: smaller where the column is narrow
+    property <length> labelf: (labelw < 130px * Theme.ts ? 16px : 19px) * Theme.ts;
     // Who
     Rectangle {
         x: 0;
@@ -162,11 +167,12 @@ component CharacterTab inherits Rectangle {
             Line {
                 HorizontalLayout {
                     spacing: 12px;
-                    Text { width: 130px * Theme.ts; text: "Name"; vertical-alignment: center; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
+                    Text { width: root.labelw; text: "Name"; vertical-alignment: center; font-family: Theme.list-font; font-size: root.labelf; color: Theme.text; overflow: elide; }
                     VerticalLayout {
                         alignment: center;
                         Field {
                             property <int> epoch: App.pool-epoch; changed epoch => { self.text = App.name; } text: App.name;
+                            font-size: (root.colw < 380px * Theme.ts ? 15px : 18px) * Theme.ts;
                             changed: App.name-changed;
                             accepted(t) => { App.set-name(t); }
                             edited(t) => { App.set-name(t); }
@@ -177,15 +183,27 @@ component CharacterTab inherits Rectangle {
             Line {
                 HorizontalLayout {
                     spacing: 12px;
-                    Text { width: 130px * Theme.ts; text: "Classes"; vertical-alignment: center; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
-                    VerticalLayout { alignment: center; Field { text: App.classes; read-only: true; font: Theme.body-font; font-size: 14px * Theme.ts; } }
+                    Text { width: root.labelw; text: "Classes"; vertical-alignment: center; font-family: Theme.list-font; font-size: root.labelf; color: Theme.text; overflow: elide; }
+                    // the classes as text in a box: cut with "..." where it is narrow (a read-only
+                    // field cut the text through a letter)
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            height: 40px;
+                            border-radius: 5px;
+                            border-width: 1px;
+                            border-color: Theme.edge;
+                            background: Theme.field;
+                            Text { x: 10px; width: parent.width - 20px; text: App.classes; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.text; overflow: elide; }
+                        }
+                    }
                     VerticalLayout { alignment: center; Button { kind: 3; text: "Edit"; clicked => { App.open-classes(); } } }
                 }
             }
             Line {
                 HorizontalLayout {
                     spacing: 12px;
-                    Text { width: 130px * Theme.ts; text: "Experience"; vertical-alignment: center; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
+                    Text { width: root.labelw; text: "Experience"; vertical-alignment: center; font-family: Theme.list-font; font-size: root.labelf; color: Theme.text; overflow: elide; }
                     VerticalLayout {
                         alignment: center;
                         Field {
@@ -197,14 +215,20 @@ component CharacterTab inherits Rectangle {
                 }
             }
         }
-        Note { x: 0; y: 210px; width: parent.width; text: App.level-note; }
-        HorizontalLayout {
-            x: 0; y: 266px;
-            height: 38px;
-            spacing: 10px;
-            alignment: start;
-            Button { kind: 3; text: "To Next Level"; clicked => { App.xp-to-next(); } }
-            Button { kind: 3; text: "To Level " + App.max-level; clicked => { App.xp-to-max(); } }
+        // the note, then the level buttons under it however many lines it takes
+        VerticalLayout {
+            x: 0; y: 210px;
+            width: parent.width;
+            height: self.preferred-height;
+            spacing: 8px;
+            Note { text: App.level-note; }
+            HorizontalLayout {
+                height: 38px;
+                spacing: 10px;
+                alignment: start;
+                Button { kind: 3; text: "Next Level"; clicked => { App.xp-to-next(); } }
+                Button { kind: 3; text: "Level " + App.max-level; clicked => { App.xp-to-max(); } }
+            }
         }
         Label { x: 0; y: 370px; text: "ALIGNMENT"; }
         Rectangle {
@@ -252,7 +276,7 @@ component CharacterTab inherits Rectangle {
         VerticalLayout {
             x: 0; y: 32px;
             height: self.preferred-height;
-            for s[i] in App.attributes: StatLine { stat: s; set(v) => { App.set-attribute(i, v); } }
+            for s[i] in App.attributes: StatLine { stat: s; label-size: root.colw < 380px * Theme.ts ? 16px : 19px; set(v) => { App.set-attribute(i, v); } }
         }
         Note {
             x: 0; y: 32px + 6 * 60px + 10px;
@@ -300,17 +324,29 @@ component CharacterTab inherits Rectangle {
                 }
             }
         }
+        // Heal Everyone, and the switch on the same line where the column has room for both,
+        // under it where not (2026-11-06: at 1600 by 900 "Cannot die" ran off the panel)
+        property <bool> heal-wide: root.colw >= 420px * Theme.ts;
         HorizontalLayout {
             x: 0; y: 152px;
             height: 38px;
             spacing: 14px;
             alignment: start;
             Button { kind: 3; text: "Heal Everyone"; clicked => { App.heal-all(); } }
+            if heal-wide: VerticalLayout { alignment: center; Switch { on: App.min1hp; changed: App.min1hp-changed; toggled(v) => { App.set-min1hp(v); } } }
+            if heal-wide: Text { text: "Cannot die"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
+        }
+        if !heal-wide: HorizontalLayout {
+            x: 0; y: 198px;
+            height: 30px;
+            spacing: 12px;
+            alignment: start;
             VerticalLayout { alignment: center; Switch { on: App.min1hp; changed: App.min1hp-changed; toggled(v) => { App.set-min1hp(v); } } }
             Text { text: "Cannot die"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
         }
+        property <length> shift: heal-wide ? 0px : 40px;
         if App.records-warning != "": Text {
-            x: 0; y: 194px;
+            x: 0; y: 194px + shift;
             width: parent.width;
             text: App.records-warning;
             font-family: Theme.body-font;
@@ -318,9 +354,9 @@ component CharacterTab inherits Rectangle {
             color: Theme.changed;
             overflow: elide;
         }
-        Label { x: 0; y: 214px; text: "LOOK AND VOICE"; }
+        Label { x: 0; y: 214px + shift; text: "LOOK AND VOICE"; }
         Rectangle {
-            x: 0; y: 246px;
+            x: 0; y: 246px + shift;
             width: 84px;
             height: 84px;
             border-radius: 5px;
@@ -332,7 +368,7 @@ component CharacterTab inherits Rectangle {
             TouchArea { mouse-cursor: pointer; clicked => { App.open-look(); } }
         }
         VerticalLayout {
-            x: 98px; y: 240px;
+            x: 98px; y: 240px + shift;
             width: parent.width - 98px;
             height: self.preferred-height;
             for f in [
@@ -374,7 +410,7 @@ component AbilitiesTab inherits Rectangle {
             height: self.preferred-height;
             for s[i] in App.skills: StatLine { stat: s; label-size: 15px; height: 50px; set(v) => { App.set-skill(i, v); } }
         }
-        Note { x: 0; y: 32px + App.skills.length * 50px + 10px; width: parent.width; text: "Ranks the character has bought. Items and attributes add on top in the game."; }
+        Note { x: 0; y: 32px + App.skills.length * 50px + 10px; width: parent.width; visible: self.y + self.preferred-height <= root.height; text: "Ranks the character has bought. Items and attributes add on top in the game."; }
     }
     AbilityList {
         x: colw * 0.92 + 34px;
@@ -733,15 +769,16 @@ component InventoryTab inherits Rectangle {
 }
 
 component PartyTab inherits Rectangle {
-    HorizontalLayout {
+    party-head := VerticalLayout {
         x: 0; y: 0;
-        height: 24px;
+        height: self.preferred-height;
+        spacing: 4px;
         Label { text: "PARTY MEMBERS"; }
-        Note { text: "With you: in the active party (two at most).  Recruited: in the party screen.  Can be picked: not held back by the story."; horizontal-alignment: right; vertical-alignment: center; }
+        Note { text: "With you: in the active party (two at most).  Recruited: in the party screen.  Can be picked: not held back by the story."; font-size: 12.5px * Theme.ts; }
     }
     Scroller {
-        x: 0; y: 36px;
-        height: parent.height - 36px - 70px;
+        x: 0; y: party-head.height + 8px;
+        height: parent.height - self.y - 70px;
         content-height: App.npcs.length * 76px;
         VerticalLayout {
             for n in App.npcs: Rectangle {
@@ -1472,7 +1509,7 @@ component GalaxySection inherits Rectangle {
                 font-size: 13.5px * Theme.ts;
                 text: App.gm-stops.length == 0
                     ? "The editor has no chapters of this game mapped yet."
-                    : "The bands of light join the planets in the order you played them; the faint lanes are the way ahead. Click a planet to see its quests and to skip ahead or go back to any point in it."
+                    : "Bands of light join the planets in the order you played them. Click a planet to see its quests, and to skip ahead or go back."
                     + (App.tl-saves.length > 0 ? " The " + (Theme.k2 ? "blue" : "green") + " tags are your other saves." : "");
             }
             if App.gm-here-text != "": Rectangle {
@@ -1498,7 +1535,7 @@ component GalaxySection inherits Rectangle {
         }
         map := Rectangle {
             vertical-stretch: 1;
-            min-height: 300px;
+            min-height: 220px;
             visible: App.gm-stops.length > 0;
             clip: true;
             border-radius: 10px;
@@ -1949,7 +1986,7 @@ component GalaxySection inherits Rectangle {
         if App.gm-free-note != "": HorizontalLayout {
             spacing: 8px;
             height: 40px * Theme.ts;
-            Label { text: "PLANET ORDER"; font-size: 12px * Theme.ts; vertical-alignment: center; }
+            Label { text: "PLANET ORDER"; font-size: 12px * Theme.ts; vertical-alignment: center; min-width: self.preferred-width; }
             Rectangle { width: 6px; }
             for p[i] in App.gm-stops: HorizontalLayout {
                 visible: p.free;
@@ -2013,7 +2050,7 @@ component GalaxySection inherits Rectangle {
                 rt := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
             }
         }
-        if App.gm-free-note != "": Note { text: App.gm-free-note; font-size: 12.5px * Theme.ts; }
+        if App.gm-free-note != "" && root.height >= 470px: Note { text: App.gm-free-note; font-size: 12.5px * Theme.ts; }
     }
 }
 
@@ -2294,21 +2331,22 @@ component MapTab inherits Rectangle {
         }
         // The key, with the same round game icons.
         // larger and centred under the map (2026-10-24, the maintainer)
-        HorizontalLayout {
-            x: frame.x + (frame.width - self.width) / 2;
+        key := HorizontalLayout {
+            property <bool> tight: frame.width < 900px * Theme.ts;
+            x: max(0px, frame.x + (frame.width - self.width) / 2);
             y: frame.y + frame.height + 10px;
             width: self.preferred-width;
             height: 32px;
-            spacing: 26px;
+            spacing: self.tight ? 12px : 26px;
             HorizontalLayout {
-                spacing: 8px;
-                Image { width: 28px; height: 28px; source: App.map-arrow; image-fit: contain; }
-                Text { text: "You"; vertical-alignment: center; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: Theme.muted; }
+                spacing: key.tight ? 5px : 8px;
+                Image { width: key.tight ? 22px : 28px; height: self.width; source: App.map-arrow; image-fit: contain; }
+                Text { text: "You"; vertical-alignment: center; font-family: Theme.list-font; font-size: (key.tight ? 13px : 16px) * Theme.ts; color: Theme.muted; }
             }
             for k[i] in ["Door", "Way out", "Container", "To use", "Person", "Map note"]: HorizontalLayout {
-                spacing: 8px;
-                Image { width: 28px; height: 28px; source: App.map-icons[i]; }
-                Text { text: k; vertical-alignment: center; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: Theme.muted; }
+                spacing: key.tight ? 5px : 8px;
+                Image { width: key.tight ? 22px : 28px; height: self.width; source: App.map-icons[i]; }
+                Text { text: k; vertical-alignment: center; font-family: Theme.list-font; font-size: (key.tight ? 13px : 16px) * Theme.ts; color: Theme.muted; }
             }
         }
     }
@@ -2409,6 +2447,10 @@ component MapTab inherits Rectangle {
 export component EditorPage inherits Rectangle {
     // Save Changes' menu, open under its arrow
     property <bool> save-menu;
+    // Below 1500 px the party list shows portraits only and the tabs sit closer, so the tab's
+    // columns keep their room (2026-11-06: at 1280 by 780 the Name box showed three letters
+    // and "Advanced" ran off the window).
+    property <bool> slim: self.width < 1500px;
     // Back to the saves, top left before the crest.
     BackArrow {
         x: 50px;
@@ -2425,8 +2467,8 @@ export component EditorPage inherits Rectangle {
         HorizontalLayout {
             alignment: start;
             for t[i] in ["Character", "Abilities", "Inventory", "Party", "Story", "Map", "Advanced"]: Rectangle {
-                width: tt.preferred-width + 60px;
-                tt := Text { y: 10px; text: t; font-family: Theme.list-font; font-size: 20px * Theme.ts; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
+                width: tt.preferred-width + (root.slim ? 34px : 60px);
+                tt := Text { y: 10px; text: t; font-family: Theme.list-font; font-size: (root.slim ? 18px : 20px) * Theme.ts; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
                 if App.tab-changed[i]: Rectangle {
                     x: tt.x + tt.width + 6px;
                     y: 12px;
@@ -2456,7 +2498,7 @@ export component EditorPage inherits Rectangle {
     if App.tab < 4: Scroller {
         x: 60px;
         y: 240px;
-        width: 262px;
+        width: root.slim ? 84px : 262px;
         height: parent.height - 240px - 36px;
         content-height: App.members.length * 72px;
         VerticalLayout {
@@ -2478,8 +2520,10 @@ export component EditorPage inherits Rectangle {
                         background: Theme.field;
                         clip: true;
                         if m.has-portrait: Image { source: m.portrait; width: parent.width; height: parent.height; }
+                        // without the name, its orange mark for changes
+                        if root.slim && m.changed: Rectangle { x: parent.width - 13px; y: 3px; width: 10px; height: 10px; border-radius: 5px; background: Theme.changed; }
                     }
-                    VerticalLayout {
+                    if !root.slim: VerticalLayout {
                         alignment: center;
                         Text { text: m.name; font-family: Theme.list-font; font-size: 18px * Theme.ts; color: m.changed ? Theme.changed : i == App.who ? Theme.gold : Theme.muted; overflow: elide; }
                         Text { text: m.sub; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.faint; overflow: elide; }
@@ -2491,7 +2535,7 @@ export component EditorPage inherits Rectangle {
     }
     // The tab
     Rectangle {
-        x: App.tab >= 4 ? 60px : 342px;
+        x: App.tab >= 4 ? 60px : root.slim ? 164px : 342px;
         y: 240px;
         width: parent.width - self.x - 60px;
         height: parent.height - 240px - 36px;

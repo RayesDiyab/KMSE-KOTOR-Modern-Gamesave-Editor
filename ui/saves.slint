@@ -161,6 +161,22 @@ export component SavesPage inherits Rectangle {
             background: Theme.field;
             clip: true;
             if App.preview-has-shot: Image { source: App.preview-shot; width: parent.width; height: parent.height; image-fit: fill; }
+            // What to know before changing this save, across the foot of its picture, where it
+            // has the panel's width (2026-11-06: beside the party it ran under the buttons)
+            if App.preview-warning != "": Rectangle {
+                y: parent.height - self.height;
+                height: warn.preferred-height + 18px;
+                background: #05101ce0;
+                warn := Text {
+                    x: 14px;
+                    width: parent.width - 28px;
+                    text: App.preview-warning;
+                    wrap: word-wrap;
+                    font-family: Theme.body-font;
+                    font-size: 14px * Theme.ts;
+                    color: #ffb067;
+                }
+            }
         }
         // The name with its pen, the place under it, and Copy on the right (2026-10-24, the
         // maintainer).
@@ -287,22 +303,18 @@ export component SavesPage inherits Rectangle {
                 Image { source: p; width: parent.width; height: parent.height; }
             }
         }
-        if App.preview-warning != "": Note {
-            x: 22px + App.preview-party.length * 74px + 12px;
-            y: shot.y + shot.height + 100px;
-            width: inner - App.preview-party.length * 74px - 12px - 320px;
-            text: App.preview-warning;
-            color: Theme.changed;
-        }
         HorizontalLayout {
             x: 22px;
             y: parent.height - 22px - 56px;
             width: inner;
             height: 56px;
             spacing: 12px;
-            Button { text: "Show in Folder"; kind: 1; horizontal-stretch: 1; clicked => { App.show-folder(); } }
+            // a smaller font where the panel is narrow, so both fit (at 1280 by 780 Open This
+            // Save ran past the panel)
+            Button { text: "Show in Folder"; kind: 1; horizontal-stretch: 1; font-size: (inner < 640px ? 16px : 20px) * Theme.ts; clicked => { App.show-folder(); } }
             Button {
                 text: App.preview-read-only ? "Open to Look" : "Open This Save";
+                font-size: (inner < 640px ? 16px : 20px) * Theme.ts;
                 kind: 0;
                 horizontal-stretch: 2;
                 clicked => { App.open-save(); }
