@@ -63,4 +63,11 @@ fn a_queued_trip_decides_where_the_save_is() {
     for p in ["Leviathan", "Unknown World", "Star Forge"] {
         assert!(!played[at(p)], "{} does not come before Kashyyyk", p);
     }
+    // a trip to a later area (Travel Here can queue one) says nothing about what was played:
+    // the earlier of the two places counts
+    s.queue_transition("sta_m45aa", "sta_m45aa_start", &[]).unwrap();
+    let played = questdb::chapters_played_in(&s);
+    for p in ["Leviathan", "Unknown World", "Tatooine", "Korriban"] {
+        assert!(!played[at(p)], "{} does not read played from a trip to the Star Forge", p);
+    }
 }

@@ -1228,10 +1228,18 @@ pub fn chapters_played_in(save: &Save) -> Vec<bool> {
             }
         }
     }
-    // where the save will be: after Skip Ahead or Go Back the game makes the queued trip as
-    // the save loads, so the area it stood in says nothing (a return from the Unknown World
-    // would read every planet played again)
-    if let Some(here) = chapter_of_module(save.game, &save.place()) {
+    // The earlier of where the save stands and where a queued trip takes it: after Go Back the
+    // save still stands in the area gone back from until the game makes the trip (a return from
+    // the Unknown World read every planet played again from there), and Travel Here can queue
+    // a trip to a later planet's area, which says nothing about what was played.
+    let order_of = |i: usize| milestones_ref(save.game).get(i).and_then(|(_, m)| m.get("order").and_then(|v| v.as_i64())).unwrap_or(99);
+    let stands = chapter_of_module(save.game, save.module_name());
+    let goes = save.queued_trip().and_then(|t| chapter_of_module(save.game, &t));
+    let here = match (stands, goes) {
+        (Some(a), Some(b)) => Some(if order_of(b) < order_of(a) { b } else { a }),
+        (a, b) => a.or(b),
+    };
+    if let Some(here) = here {
         line_before(save.game, &mut played, here);
     }
     played
