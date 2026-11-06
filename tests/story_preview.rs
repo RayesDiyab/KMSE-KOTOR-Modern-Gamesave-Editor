@@ -154,7 +154,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
             same_result(&partial.save, &expected);
             let plan = Plan::Back {
                 alignment: 50,
-                unfinished: None,
+                unfinished: Vec::new(),
                 kept: vec![get("Endar Spire")],
                 undo: vec![get("Taris")],
                 stage: Some(stage.clone()),
@@ -178,7 +178,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
         // Back uses the story's inventory policy, never the old keep-items choice.
         let back = Plan::Back {
             alignment: 50,
-            unfinished: None,
+            unfinished: Vec::new(),
             kept: Vec::new(),
             undo: chapters.clone(),
             stage: None,
@@ -190,7 +190,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
         assert_eq!(rewound.notes, notes);
         assert!(Plan::Back {
             alignment: 50,
-            unfinished: None,
+            unfinished: Vec::new(),
             kept: Vec::new(),
             undo: Vec::new(),
             stage: None

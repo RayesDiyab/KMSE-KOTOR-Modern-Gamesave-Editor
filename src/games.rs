@@ -245,7 +245,11 @@ fn child_ci(dir: &Path, name: &str) -> Option<PathBuf> {
 pub fn is_save_folder(path: &Path) -> bool {
     path.is_dir()
         && fs::read_dir(path).map_or(false, |d| {
-            d.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("savenfo.res"))
+            d.filter_map(|e| e.ok()).any(|e| {
+                let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+                // savenfo.kmrp-old: a write cut off part way, which Save::open explains
+                n == "savenfo.res" || n == "savenfo.kmrp-old"
+            })
         })
 }
 

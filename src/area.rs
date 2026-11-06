@@ -132,6 +132,10 @@ pub fn position(c: &Struct) -> [f32; 3] {
 }
 
 pub fn set_position(c: &mut Struct, p: [f32; 3]) {
+    // a place that is not a number is never written, whoever asks
+    if p.iter().any(|v| !v.is_finite()) {
+        return;
+    }
     c.set_float("XPosition", p[0]);
     c.set_float("YPosition", p[1]);
     c.set_float("ZPosition", p[2]);

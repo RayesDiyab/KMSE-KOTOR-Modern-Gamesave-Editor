@@ -35,7 +35,7 @@ fn rewind_alignment_is_neutral_by_default_and_honors_the_chosen_target() {
                 undo: vec![first.clone()],
                 stage: None,
                 alignment: target,
-                unfinished: None,
+                unfinished: Vec::new(),
             };
             let prepared = plan.prepare(&save, &data).unwrap();
             assert_eq!(

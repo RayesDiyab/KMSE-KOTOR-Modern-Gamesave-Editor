@@ -283,8 +283,8 @@ component CharacterTab inherits Rectangle {
                         Text { text: "Health"; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
                         Text { text: App.health-note; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.faint; overflow: elide; }
                     }
-                    VerticalLayout { alignment: center; hn := Field { width: 72px; text: App.hp-current; changed: App.hp-changed; accepted(t) => { App.set-hp(hn.text.to-float(), hm.text.to-float()); } } }
-                    VerticalLayout { alignment: center; hm := Field { width: 72px; text: App.hp-max; changed: App.hp-changed; accepted(t) => { App.set-hp(hn.text.to-float(), hm.text.to-float()); } } }
+                    VerticalLayout { alignment: center; hn := Field { width: 72px; text: App.hp-current; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
+                    VerticalLayout { alignment: center; hm := Field { width: 72px; text: App.hp-max; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
                 }
             }
             Line {
@@ -295,8 +295,8 @@ component CharacterTab inherits Rectangle {
                         Text { text: "Force"; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
                         Text { text: App.force-note; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.faint; overflow: elide; }
                     }
-                    VerticalLayout { alignment: center; fn := Field { width: 72px; text: App.fp-current; changed: App.fp-changed; accepted(t) => { App.set-fp(fn.text.to-float(), fm.text.to-float()); } } }
-                    VerticalLayout { alignment: center; fm := Field { width: 72px; text: App.fp-max; changed: App.fp-changed; accepted(t) => { App.set-fp(fn.text.to-float(), fm.text.to-float()); } } }
+                    VerticalLayout { alignment: center; fn := Field { width: 72px; text: App.fp-current; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
+                    VerticalLayout { alignment: center; fm := Field { width: 72px; text: App.fp-max; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
                 }
             }
         }

@@ -25,8 +25,8 @@ pub enum Plan {
         undo: Vec<serde_json::Value>,
         stage: Option<(String, i64)>,
         alignment: i64,
-        /// The chapter of `undo` the player is in, by its planet.
-        unfinished: Option<String>,
+        /// The chapters of `undo` begun and never finished, by their planets.
+        unfinished: Vec<String>,
     },
 }
 
@@ -73,7 +73,7 @@ impl Plan {
                 false,
                 stage.clone(),
                 *alignment,
-                unfinished.as_deref(),
+                unfinished,
             )?,
         };
         Ok(Prepared { save, notes })

@@ -75,9 +75,9 @@ fn the_order_picked_is_the_order_played() {
 }
 
 #[test]
-fn done_comes_before_begun_and_begun_before_not_visited() {
+fn done_comes_first_and_the_rest_go_as_picked() {
     // Korriban done (its star map flag), Manaan begun (the save has been to its first area);
-    // a plan that puts the unvisited Tatooine first cannot move it before either
+    // a plan that puts the unvisited Tatooine first moves it before Manaan, not before Korriban
     let mut quests = journal_of(Game::K1, &["Endar Spire", "Taris", "Dantooine"]);
     // a Tatooine quest in the journal is not a visit
     let tatooine_own = questdb::chapter_quests(Game::K1, "Tatooine").into_iter().map(|(t, _)| t).find(|t| t.starts_with("tat")).unwrap();
@@ -85,10 +85,16 @@ fn done_comes_before_begun_and_begun_before_not_visited() {
     let globals = vec![flag("K_STAR_MAP_KORRIBAN")];
     let visited = vec!["manm26aa".to_string()];
     let plan: Vec<String> = ["Tatooine", "Manaan", "Korriban", "Kashyyyk"].iter().map(|s| s.to_string()).collect();
-    let route = questdb::story_route(Game::K1, &quests, &questdb::chapters_played(Game::K1, &quests), &globals, &visited, &plan);
+    // played as chapters_played_in reads a KotOR 1 save: the found star map counts
+    let mut played = questdb::chapters_played(Game::K1, &quests);
+    played[index(Game::K1, "Korriban")] = true;
+    let route = questdb::story_route(Game::K1, &quests, &played, &globals, &visited, &plan);
     let order = names(Game::K1, &route.order);
-    assert_eq!(&order[3..6], ["Korriban", "Manaan", "Tatooine"]);
-    assert_eq!(route.kinds, [0, 1, 2, 2]);
+    assert_eq!(&order[3..6], ["Korriban", "Tatooine", "Manaan"]);
+    assert_eq!(route.kinds, [0, 2, 1, 2]);
+    // without a plan, begun before not visited
+    let route = questdb::story_route(Game::K1, &quests, &played, &globals, &visited, &[]);
+    assert_eq!(&names(Game::K1, &route.order)[3..5], ["Korriban", "Manaan"]);
 }
 
 #[test]
@@ -129,7 +135,7 @@ fn skip_ahead_follows_the_route() {
         .order
         .iter()
         .enumerate()
-        .map(|(k, i)| ChapterState { index: *i as i32, order: k as i64 + 1, side: false, played: played[*i] })
+        .map(|(k, i)| ChapterState { index: *i as i32, order: k as i64 + 1, side: false, played: played[*i], begun: false })
         .collect();
     let to = |p: &str| names(Game::K1, &questdb::skip_path(&states, index(Game::K1, p) as i32).iter().map(|i| *i as usize).collect::<Vec<_>>());
     assert_eq!(to("Korriban"), ["Korriban"]);

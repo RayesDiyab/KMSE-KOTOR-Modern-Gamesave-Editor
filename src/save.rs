@@ -136,9 +136,27 @@ pub struct Save {
     pub changes: BTreeSet<String>,
     /// The save's files as they were when read, to see that the game has not written since.
     on_disk: Vec<(String, u64, Option<std::time::SystemTime>)>,
+    // the next object id new_object_id hands out where the module has no counter
+    handed_out: u32,
 }
 
 /// Every file of the save folder: name, size and time, in name order.
+/// Why a save is refused when a write into it was cut off (interrupted_write).
+pub const INTERRUPTED: &str = "The editor was stopped while it wrote this save, so its files may be part old and part new. Nothing was changed by opening it. Copy the files of its latest backup (Save Editor Backup, in the game's folder) over this save folder, then open it again. Files left from the write:";
+
+/// The files a write leaves only while it runs (`*.kmrp-new`, the new file not yet in place;
+/// `*.kmrp-old`, the old one waiting to be removed): any of them in a folder means a write was
+/// cut off part way (the program ended, the power failed). Named, or None.
+pub fn interrupted_write(folder: &Path) -> Option<String> {
+    let left: Vec<String> = fs::read_dir(folder)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".kmrp-new") || n.ends_with(".kmrp-old"))
+        .collect();
+    (!left.is_empty()).then(|| left.join(", "))
+}
+
 fn files_on_disk(folder: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
     let mut files: Vec<_> = fs::read_dir(folder)
         .map(|d| {
@@ -161,6 +179,9 @@ pub const CHANGED_ON_DISK: &str = "This save changed on disk after it was opened
 
 impl Save {
     pub fn open(folder: &Path) -> Result<Save> {
+        if let Some(left) = interrupted_write(folder) {
+            return Err(format!("{} {}", INTERRUPTED, left));
+        }
         // Before the read: a write that lands during it then counts as a change.
         let on_disk = files_on_disk(folder);
         let (nfo_path, nfo) = read_gff(folder, "savenfo.res")?;
@@ -191,6 +212,7 @@ impl Save {
             archive_dirty: false,
             changes: BTreeSet::new(),
             on_disk,
+            handed_out: 0,
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -692,7 +714,11 @@ impl Save {
                 return next as u32;
             }
         }
-        self.git.as_ref().map(|(_, g)| crate::area::next_object_id(&g.root)).unwrap_or(0x10000)
+        // no counter: the next above every id in the area, and above every id handed out
+        // before (nothing is in the area yet when several are asked for at once)
+        let next = self.git.as_ref().map(|(_, g)| crate::area::next_object_id(&g.root)).unwrap_or(0x10000).max(self.handed_out);
+        self.handed_out = next + 1;
+        next
     }
 
     /// Whether `slot` holds a template entry (only `EquippedRes`, as a creature made from its
@@ -1168,7 +1194,14 @@ impl Save {
         let mut staged = Vec::new();
         for (path, bytes) in &files {
             let tmp = path.with_extension("kmrp-new");
-            if let Err(e) = fs::write(&tmp, bytes) {
+            // flushed to the disk before any old file is replaced: after a power failure the
+            // renames alone could survive with the new file's data lost
+            let written = fs::File::create(&tmp).and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(bytes)?;
+                f.sync_all()
+            });
+            if let Err(e) = written {
                 let _ = fs::remove_file(&tmp);
                 staged.iter().for_each(|(t, _): &(PathBuf, PathBuf)| drop(fs::remove_file(t)));
                 return Err(format!("{}: {}", path.display(), e));
@@ -1186,20 +1219,23 @@ impl Save {
 }
 
 /// Puts each new file in place of its old one. Each old file waits under a second name until
-/// all are done, so a failure part way can put every old file back.
+/// all are done, so a failure part way can put every old file back. A file whose old version
+/// cannot be put back is named in the error, with HALF_WRITTEN, never "nothing was changed".
 fn replace_all(staged: &[(PathBuf, PathBuf)]) -> Result<()> {
     let old_of = |path: &PathBuf| path.with_extension("kmrp-old");
     let mut failed = None;
+    let mut stuck: Vec<String> = Vec::new();
     let mut done = 0;
     for (tmp, path) in staged {
-        let swapped = fs::rename(path, old_of(path)).and_then(|()| {
-            fs::rename(tmp, path).map_err(|e| {
-                // this one's old file goes straight back
-                let _ = fs::rename(old_of(path), path);
-                e
-            })
-        });
-        if let Err(e) = swapped {
+        if let Err(e) = fs::rename(path, old_of(path)) {
+            failed = Some(format!("{}: {}", path.display(), e));
+            break;
+        }
+        if let Err(e) = fs::rename(tmp, path) {
+            // this one's old file goes straight back
+            if let Err(back) = fs::rename(old_of(path), path) {
+                stuck.push(format!("{}: {}", path.display(), back));
+            }
             failed = Some(format!("{}: {}", path.display(), e));
             break;
         }
@@ -1211,19 +1247,19 @@ fn replace_all(staged: &[(PathBuf, PathBuf)]) -> Result<()> {
         }
         return Ok(());
     };
-    let mut stuck = None;
+    // the old files of those already swapped go back over the new ones (a rename replaces)
     for (_, path) in staged[..done].iter().rev() {
-        let back = fs::remove_file(path).and_then(|()| fs::rename(old_of(path), path));
-        if let Err(e) = back {
-            stuck = Some(format!("{}: {}", path.display(), e));
+        if let Err(e) = fs::rename(old_of(path), path) {
+            stuck.push(format!("{}: {}", path.display(), e));
         }
     }
     for (tmp, _) in staged {
         let _ = fs::remove_file(tmp);
     }
-    match stuck {
-        None => Err(error),
-        Some(s) => Err(format!("{}. Restore it from the backup. {}; {}", HALF_WRITTEN, error, s)),
+    if stuck.is_empty() {
+        Err(error)
+    } else {
+        Err(format!("{}. Restore it from the backup. {}; {}", HALF_WRITTEN, error, stuck.join("; ")))
     }
 }
 
@@ -1275,11 +1311,31 @@ fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
 /// `cloudsaves`, so a backup inside either used up the quota and moved between PCs. A save
 /// outside the game (a port, VirtualStore, one added by hand) keeps its backups beside it.
 pub fn backup_root(folder: &Path, game_root: Option<&Path>) -> PathBuf {
-    let plain = |p: &Path| p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase();
-    match game_root {
-        Some(root) if folder.ancestors().any(|a| plain(a) == plain(root)) => root.join("Save Editor Backup"),
-        _ => folder.parent().unwrap_or(folder).join("Save Editor Backup"),
+    let plain = |p: &Path| {
+        let p = fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase()
+    };
+    if let Some(root) = game_root {
+        if folder.ancestors().any(|a| plain(a) == plain(root)) {
+            return root.join("Save Editor Backup");
+        }
     }
+    // Not inside the game found (none found, or a folder added by hand): never inside a
+    // `saves` or `cloudsaves` folder, which Steam Cloud syncs, but beside it.
+    let parent = folder.parent().unwrap_or(folder);
+    let synced = |p: &Path| p.file_name().map_or(false, |n| {
+        let n = n.to_string_lossy().to_ascii_lowercase();
+        n == "saves" || n == "cloudsaves"
+    });
+    let mut at = parent;
+    // KotOR II's cloud saves sit one level deeper: cloudsaves/<account>/<save>
+    for a in parent.ancestors().take(3) {
+        if synced(a) {
+            at = a.parent().unwrap_or(a);
+            break;
+        }
+    }
+    at.join("Save Editor Backup")
 }
 
 /// "2026-10-22 14-05-09", in UTC (no time zone database needed).

@@ -54,6 +54,11 @@ fn flag(save: &Save, name: &str) -> bool {
 }
 
 /// A KotOR 1 save that has found no map, with its game.
+fn set_number(save: &mut Save, data: &GameData, name: &str, value: i64) {
+    let step = questdb::Step { module: String::new(), via: None, needs: Vec::new(), does: vec![serde_json::json!({ "set_global_number": [name, value] })], branch: None, found: Default::default() };
+    questdb::apply(save, data, &step, "test.number");
+}
+
 fn fresh() -> Option<(Save, GameData)> {
     let installs = find_installs(&[]);
     let install = installs.iter().find(|i| i.game == Game::K1)?;
@@ -207,7 +212,7 @@ fn a_damaged_archive_count_is_an_error() {
 // ---- the story ----
 
 fn state(index: i32, order: i64, side: bool, played: bool) -> ChapterState {
-    ChapterState { index, order, side, played }
+    ChapterState { index, order, side, played, begun: false }
 }
 
 /// 14: from Taris, a skip to a side chapter plays that chapter alone.
@@ -221,15 +226,16 @@ fn a_side_chapter_stands_alone() {
 /// 15, 16: side chapters stay; the chapter the player is in is named as not finished.
 #[test]
 fn a_return_keeps_side_chapters_and_names_the_chapter_in_play() {
-    let chapters = [state(0, 1, false, true), state(1, 2, false, true), state(2, 3, false, false), state(9, 11, true, true)];
+    let mut chapters = [state(0, 1, false, true), state(1, 2, false, true), state(2, 3, false, false), state(9, 11, true, true)];
+    chapters[2].begun = true;
     let r = questdb::return_to(&chapters, 1);
     assert_eq!(r.kept, [0, 9]);
     assert_eq!(r.undo, [1, 2]);
-    assert_eq!(r.unfinished, Some(2));
+    assert_eq!(r.unfinished, [2]);
     let r = questdb::return_to(&chapters, 9);
     assert_eq!(r.undo, [9]);
     assert_eq!(r.kept, [0, 1]);
-    assert_eq!(r.unfinished, None);
+    assert!(r.unfinished.is_empty());
 }
 
 /// 13: the measured stages give one way's reward, and no stage of either game gives two
@@ -336,6 +342,29 @@ fn a_return_to_the_leviathan_leaves_the_capture_to_play() {
     assert!(notes.iter().any(|n| n.contains("is undone too")), "{:?}", notes);
 }
 
+/// 2026-11-06 audit: a return that takes no star map back leaves Bastila's value as it is, and
+/// a return to the Star Forge keeps the Unknown World's K_KOTOR_MASTER.
+#[test]
+fn a_return_keeps_what_the_count_does_not_take_back() {
+    let Some((mut s, data)) = fresh() else { return };
+    questdb::skip_through(&mut s, &data, &upto("Kashyyyk"), Some(0), false).unwrap();
+    set_number(&mut s, &data, "K_SWG_BASTILA", 4);
+    let (kept, undo): (Vec<_>, Vec<_>) = upto("Kashyyyk").into_iter().partition(|m| m["order"].as_i64() < Some(5));
+    questdb::go_back(&mut s, &data, &kept, &undo, false, None).unwrap();
+    assert_eq!(number(&s, "K_SWG_BASTILA"), 4, "a value the player moved on is not reset");
+    let Some((mut s, data)) = fresh() else { return };
+    let mut path = upto("Korriban");
+    path.push(chapter("Leviathan"));
+    path.push(chapter("Unknown World"));
+    path.push(chapter("Star Forge"));
+    questdb::skip_through(&mut s, &data, &path, Some(0), false).unwrap();
+    let before = number(&s, "K_KOTOR_MASTER");
+    let kept: Vec<_> = path[..path.len() - 1].to_vec();
+    questdb::go_back(&mut s, &data, &kept, &[chapter("Star Forge")], false, None).unwrap();
+    assert!(number(&s, "K_KOTOR_MASTER") >= 50 || number(&s, "K_KOTOR_MASTER") == before, "the Unknown World's value stays: {}", number(&s, "K_KOTOR_MASTER"));
+    assert_eq!(number(&s, "K_STAR_MAP"), 50);
+}
+
 /// 27: the same notes reach the program as the skip made.
 #[test]
 fn a_plan_keeps_its_notes() {
@@ -403,10 +432,16 @@ fn backups_stay_out_of_what_steam_syncs() {
     let backups = game.join("Save Editor Backup");
     assert_eq!(kse_core::save::backup_root(&game.join("Saves/000001 - Game0"), Some(game)), backups);
     assert_eq!(kse_core::save::backup_root(&game.join("cloudsaves/123/000001 - Game0"), Some(game)), backups);
-    // A save outside the game keeps its backups beside it.
+    // A save outside the game keeps its backups near it, never inside a `saves` or `cloudsaves`
+    // folder, which Steam syncs (2026-11-06; before, beside the save, so inside `saves`).
     let other = std::path::Path::new("D:/Elsewhere/saves");
-    assert_eq!(kse_core::save::backup_root(&other.join("000001 - Game0"), Some(game)), other.join("Save Editor Backup"));
-    assert_eq!(kse_core::save::backup_root(&other.join("000001 - Game0"), None), other.join("Save Editor Backup"));
+    let beside = std::path::Path::new("D:/Elsewhere").join("Save Editor Backup");
+    assert_eq!(kse_core::save::backup_root(&other.join("000001 - Game0"), Some(game)), beside);
+    assert_eq!(kse_core::save::backup_root(&other.join("000001 - Game0"), None), beside);
+    let cloud = std::path::Path::new("D:/Elsewhere/cloudsaves/123/000001 - Game0");
+    assert_eq!(kse_core::save::backup_root(cloud, None), beside);
+    let plain = std::path::Path::new("D:/Phone/KotOR");
+    assert_eq!(kse_core::save::backup_root(&plain.join("000001 - Game0"), None), plain.join("Save Editor Backup"));
 }
 
 /// A copy of KotOR 2's save on Peragus, with its game, and the ten chapters of the main path.
@@ -436,7 +471,7 @@ fn a_k2_chapter_in_progress_keeps_its_count() {
     let kept: Vec<serde_json::Value> = path[..nar].to_vec();
     questdb::skip_through(&mut save, &data, &path[..=onderon], None, false).unwrap();
     assert_eq!(number(&save, "000_Jedi_Found"), 2);
-    questdb::go_back_part_played(&mut save, &data, &kept, &undo, true, None, 50, Some("Onderon")).unwrap();
+    questdb::go_back_part_played(&mut save, &data, &kept, &undo, true, None, 50, &["Onderon".to_string()]).unwrap();
     assert_eq!(number(&save, "000_Jedi_Found"), 1);
 }
 

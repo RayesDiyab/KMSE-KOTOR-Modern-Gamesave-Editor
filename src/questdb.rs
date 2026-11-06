@@ -1191,11 +1191,29 @@ fn line_before(game: Game, played: &mut [bool], i: usize) {
     }
 }
 
-/// Which chapters a save has played: chapters_played by its journal, and every chapter before
-/// the one it stands in on the story's line (a KotOR II save on Telos has finished Peragus,
-/// though the journal may not reach Peragus's end).
+/// Which chapters a save has played: chapters_played by its journal, KotOR 1's free planets
+/// whose star map is found, and every chapter before the one it stands in on the story's line
+/// (a KotOR II save on Telos has finished Peragus, though the journal may not reach Peragus's
+/// end).
 pub fn chapters_played_in(save: &Save) -> Vec<bool> {
     let mut played = chapters_played(save.game, &save.quests());
+    // KotOR 1: a planet whose star map is found has had its story played, though side quests
+    // there may be open; Skip Ahead must not play it again (its loot and credits twice)
+    if save.game == Game::K1 {
+        let globals = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
+        let all = milestones_ref(save.game);
+        for (g, planets, flag) in FREE {
+            if *g != Game::K1 || !globals.iter().any(|v| v.name.eq_ignore_ascii_case(flag) && v.value == crate::globals::GlobalValue::Bool(true)) {
+                continue;
+            }
+            for p in planets.iter() {
+                if let Some(i) = all.iter().position(|(x, _)| x.eq_ignore_ascii_case(p)) {
+                    played[i] = true;
+                    line_before(save.game, &mut played, i);
+                }
+            }
+        }
+    }
     if let Some(here) = chapter_of_module(save.game, save.module_name()) {
         line_before(save.game, &mut played, here);
     }
@@ -1227,6 +1245,9 @@ pub struct ChapterState {
     pub order: i64,
     pub side: bool,
     pub played: bool,
+    /// not played, but the save has been there (the chapter it is in, or a free planet left
+    /// part way)
+    pub begun: bool,
 }
 
 /// The chapters a skip to chapter `index` applies, in story order: every main chapter before
@@ -1243,29 +1264,36 @@ pub fn skip_path(chapters: &[ChapterState], index: i32) -> Vec<i32> {
     out
 }
 
-/// What a return to chapter `index` keeps and undoes, in story order, and the chapter the
-/// player is in, which is undone but was never finished.
+/// What a return to chapter `index` keeps and undoes, in route order, and the chapters among
+/// those undone that were begun and never finished.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Return {
     pub kept: Vec<i32>,
     pub undo: Vec<i32>,
-    pub unfinished: Option<i32>,
+    pub unfinished: Vec<i32>,
 }
 
 /// Side chapters stay played when a return goes to a main chapter, and a return to a side
-/// chapter undoes that chapter alone: neither lies on the line of the main story.
+/// chapter undoes that chapter alone: neither lies on the line of the main story. A return to
+/// a main chapter undoes it and every chapter after it on the route that is played or begun.
+///
+/// Correction, 2026-11-06 (audit): until then the chapter the player was in was taken to be the
+/// first unplayed one on the route. With two free planets begun, a return to the second undid
+/// nothing ("nothing to go back over"), and a return to the first left the second as it was.
 pub fn return_to(chapters: &[ChapterState], index: i32) -> Return {
     let Some(target) = chapters.iter().find(|c| c.index == index) else { return Return::default() };
-    let played_others = |side: bool| chapters.iter().filter(move |c| c.played && c.side == side && c.index != index).map(|c| c.index);
     if target.side {
         let kept = chapters.iter().filter(|c| c.played && c.index != index).map(|c| c.index).collect();
-        return Return { kept, undo: vec![index], unfinished: None };
+        return Return { kept, undo: vec![index], unfinished: Vec::new() };
     }
-    let current = chapters.iter().find(|c| !c.played && !c.side).map(|c| c.index);
-    let mut kept: Vec<i32> = played_others(false).filter(|i| chapters.iter().any(|c| c.index == *i && c.order < target.order)).collect();
-    kept.extend(played_others(true));
-    let undo = chapters.iter().filter(|c| !c.side && c.order >= target.order && (c.played || Some(c.index) == current)).map(|c| c.index).collect::<Vec<_>>();
-    let unfinished = current.filter(|c| undo.contains(c));
+    let mut kept: Vec<i32> = chapters.iter().filter(|c| c.played && !c.side && c.order < target.order).map(|c| c.index).collect();
+    kept.extend(chapters.iter().filter(|c| c.played && c.side).map(|c| c.index));
+    let undo: Vec<i32> = chapters
+        .iter()
+        .filter(|c| !c.side && c.order >= target.order && (c.played || c.begun || c.index == index))
+        .map(|c| c.index)
+        .collect();
+    let unfinished = chapters.iter().filter(|c| undo.contains(&c.index) && !c.played).map(|c| c.index).collect();
     Return { kept, undo, unfinished }
 }
 
@@ -1306,9 +1334,10 @@ pub struct Route {
     pub order: Vec<usize>,
     /// The free planets as groups (milestone indices), in the route's order.
     pub groups: Vec<Vec<usize>>,
-    /// Per group: 0 done, 1 begun, 2 not yet visited. The player's choice moves a group only
-    /// among those of its own kind: what is done stays before what is begun, and what is begun
-    /// before what is not visited.
+    /// Per group: 0 done, 1 begun, 2 not yet visited. What is done stays before the rest, and
+    /// the player's choice moves a done group among the done and any other among the others
+    /// (a planet just landed on can wait while another is skipped to). Without a choice, what
+    /// is begun comes before what is not visited.
     pub kinds: Vec<u8>,
 }
 
@@ -1361,8 +1390,11 @@ pub fn story_route(game: Game, quests: &[(String, i64)], played: &[bool], global
             let t = t.to_ascii_lowercase();
             members.iter().any(|i| owns[*i].contains(&t)) && owns.iter().filter(|o| o.contains(&t)).count() == 1
         });
-        let done = flag_on || members.iter().all(|i| played.get(*i).copied().unwrap_or(false));
-        let kind = if done { 0 } else if members.iter().any(|i| played.get(*i).copied().unwrap_or(false) || been_to(game, *i, visited)) { 1 } else { 2 };
+        // done is what Skip Ahead counts as played (chapters_played_in, where KotOR 1's star map
+        // flag already counts); KotOR 2's marker can be set before its planet's end, so there
+        // it says begun
+        let done = members.iter().all(|i| played.get(*i).copied().unwrap_or(false));
+        let kind = if done { 0 } else if flag_on || members.iter().any(|i| played.get(*i).copied().unwrap_or(false) || been_to(game, *i, visited)) { 1 } else { 2 };
         let base = members.iter().map(|i| order_of(all[*i].1)).min().unwrap_or(99);
         groups.push((kind, at.unwrap_or(usize::MAX), 0, base, members, planets[0].to_string()));
     }
@@ -1371,7 +1403,14 @@ pub fn story_route(game: Game, quests: &[(String, i64)], played: &[bool], global
     }
     // the plan first where it names the group; else the journal's order (done and begun) or
     // the timeline's (not yet visited)
-    groups.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)).then(if a.0 < 2 { a.1.cmp(&b.1) } else { std::cmp::Ordering::Equal }).then(a.3.cmp(&b.3)));
+    groups.sort_by(|a, b| {
+        let done = |g: &(u8, usize, usize, i64, Vec<usize>, String)| g.0 != 0;
+        done(a).cmp(&done(b))
+            .then(a.2.cmp(&b.2))
+            .then(a.0.cmp(&b.0))
+            .then(if a.0 < 2 { a.1.cmp(&b.1) } else { std::cmp::Ordering::Equal })
+            .then(a.3.cmp(&b.3))
+    });
     let flat: Vec<usize> = groups.iter().flat_map(|g| g.4.clone()).collect();
     // the free planets take the places the timeline gives them, in the route's order
     let mut slots = mains.iter().enumerate().filter(|(_, (_, i))| flat.contains(i)).map(|(k, _)| k);
@@ -1713,6 +1752,19 @@ fn count_star_maps(save: &mut Save, data: &GameData, m: &serde_json::Value) -> V
 
 /// One chapter's end state: the journal (and the quests the game itself removes), the story
 /// values, the star map count, the items, the loot, the party, the Jedi class.
+/// Whether the companions a KotOR II Ebon Hawk scene needs have joined: the scenes on the ship
+/// with slot 3 (`003EBO_G0T0_*`, `CUT_*G0T0*`, named in the Dxun, Onderon, Dantooine and Korriban
+/// milestones: "needs slots 3 and 1 available") and, for those with Bao-Dur, slot 1 too. Any
+/// other story value is not a scene and counts as present.
+fn scene_party_present(save: &Save, name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    let scene = (n.starts_with("003ebo_") || n.starts_with("cut_")) && n.contains("g0t0");
+    if !scene {
+        return true;
+    }
+    save.recruited(3) && (!n.contains("bao") || save.recruited(1))
+}
+
 fn apply_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_class: Option<usize>, before: &Before, met: bool) -> Vec<String> {
     let mut does = Vec::new();
     for j in m.get("journal").and_then(|j| j.as_array()).cloned().unwrap_or_default() {
@@ -1725,6 +1777,12 @@ fn apply_chapter(save: &mut Save, data: &GameData, m: &serde_json::Value, jedi_c
         let Some(name) = g.get("name").and_then(|n| n.as_str()) else { continue };
         let value = g.get("value").cloned().unwrap_or(serde_json::Value::Null);
         if value.is_null() {
+            continue;
+        }
+        // KotOR II's Ebon Hawk scenes with slot 3 (and slot 1): the chapters after Nar Shaddaa,
+        // where slot 3 joins, set them as seen. Played before Nar Shaddaa, which the galaxy
+        // map's order allows since 2026-11-06, they wait for the game to play them.
+        if save.game == Game::K2 && !scene_party_present(save, name) {
             continue;
         }
         if g.get("certain").and_then(|c| c.as_bool()) == Some(false) {
@@ -2158,7 +2216,7 @@ pub fn go_back(save: &mut Save, data: &GameData, kept: &[serde_json::Value], und
 
 /// Alignment is a chosen target, not an estimate of the player's past choices.
 pub fn go_back_with_alignment(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>, alignment: i64) -> Result<Vec<String>, String> {
-    go_back_part_played(save, data, kept, undo, keep_items, stage, alignment, None)
+    go_back_part_played(save, data, kept, undo, keep_items, stage, alignment, &[])
 }
 
 /// The side a chapter was played on, by the journal where the sides end differently, and by
@@ -2180,10 +2238,12 @@ fn played_dark(m: &serde_json::Value, quests: &[(String, i64)], leans_dark: bool
     leans_dark
 }
 
-/// As go_back_with_alignment. `unfinished` names the chapter of `undo` the player is in: its
-/// values and journal go back, but what only a finished chapter gave is not taken away.
+/// As go_back_with_alignment. `unfinished` names the chapters of `undo` begun and never
+/// finished: their values and journal go back, but what only a finished chapter gave is not
+/// taken away.
 #[allow(clippy::too_many_arguments)]
-pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>, alignment: i64, unfinished: Option<&str>) -> Result<Vec<String>, String> {
+pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value], keep_items: bool, stage: Option<(String, i64)>, alignment: i64, unfinished: &[String]) -> Result<Vec<String>, String> {
+    let is_unfinished = |p: &str| unfinished.iter().any(|u| u.eq_ignore_ascii_case(p));
     if !(0..=100).contains(&alignment) { return Err("Alignment must be between 0 and 100.".into()); }
     let first = undo.first().cloned().ok_or("nothing to go back over")?;
     let asked = undo;
@@ -2202,7 +2262,7 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
     let mut target = (1..=60).take_while(|l| table.int((l - 1) as usize, "xp").map_or(false, |need| xp >= need)).last().unwrap_or(1);
     // A story-granted class from an undone chapter cannot remain merely because the
     // player had unspent XP before taking it. Stop before its first recorded level.
-    let lost_classes: Vec<i64> = undo.iter().filter(|m| m.get("planet").and_then(|p| p.as_str()).map_or(true, |p| Some(p) != unfinished)).flat_map(|m| m.get("jedi_class").and_then(|j| j.get("choices")).and_then(|c| c.as_array()).cloned().unwrap_or_default())
+    let lost_classes: Vec<i64> = undo.iter().filter(|m| m.get("planet").and_then(|p| p.as_str()).map_or(true, |p| !is_unfinished(p))).flat_map(|m| m.get("jedi_class").and_then(|j| j.get("choices")).and_then(|c| c.as_array()).cloned().unwrap_or_default())
         .filter_map(|c| c.get("class").and_then(|id| id.as_i64())).collect();
     if let Some(stop) = save.player().and_then(|p| p.list("LvlStatList")).and_then(|r| r.iter().position(|r| r.int("LvlStatClass").map_or(false, |id| lost_classes.contains(&id)))).filter(|i| *i > 0) {
         target = target.min(stop as i64);
@@ -2214,7 +2274,7 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
         let on_dark = played_dark(m, &quests, dark);
         let side = if on_dark { "dark" } else { "light" };
         let m = for_side(m, on_dark);
-        let part = m.get("planet").and_then(|p| p.as_str()).map_or(false, |p| Some(p) == unfinished);
+        let part = m.get("planet").and_then(|p| p.as_str()).map_or(false, is_unfinished);
         notes.extend(undo_chapter(save, data, &m, &kept_side, keep_items, side, &before, part));
     }
     restore_star_maps(save, data, &kept_side, &undo);
@@ -2295,16 +2355,24 @@ fn fourth_planet_with_the_leviathan(save: &Save, kept: &[serde_json::Value], und
     (kept, undo)
 }
 
-/// The star maps after a return: the planets undone lose their flags, the counter is counted
-/// from those left, what the counter set goes back to what the kept chapters leave, and the
-/// count then sets again what it calls for. Without this, a kept chapter that lists a value
-/// with no known end stopped the reset, and the capture could no longer come (measured
-/// 2026-11-02).
+/// The star maps after a return: the planets undone lose their flags and the counter is
+/// counted from those left. Each value the count sets (K_SWG_BASTILA, K_CAPTURED_LEV,
+/// K_KOTOR_MASTER) is worked out on its own: it starts from what the kept chapters leave (0
+/// where they leave nothing) when an undone chapter wrote it, or when it stands at or past
+/// what a count no longer reached sets; otherwise it keeps the value it has. Then each count
+/// still reached sets its value the game's way: only below `only_if_below`, and never lower
+/// than it is.
+///
+/// Corrections, 2026-11-06 (audit): until then every KotOR 1 return reset these values to the
+/// kept chapters' (0 where none gives one) and ran the count's effects again. Any return wrote
+/// `K_SWG_BASTILA` 0, or 99 with two maps kept, over a save that had it at 4; and a return to the
+/// Star Forge, with all four maps kept, ran the count of 50 again, which wrote `K_KOTOR_MASTER`
+/// 30 (the Unknown World opened) over the 50 the Unknown World leaves.
 fn restore_star_maps(save: &mut Save, data: &GameData, kept: &[serde_json::Value], undo: &[serde_json::Value]) {
     let all = milestones_ref(save.game);
     let Some(carrier) = all.iter().map(|(_, m)| *m).find(|m| m.get("star_map").map_or(false, |s| !s.is_null())) else { return };
     let sm = carrier.get("star_map").cloned().unwrap_or_default();
-    let kept_value = |name: &str| kept.iter().filter_map(|k| k.get("globals").and_then(|g| g.as_array()).and_then(|g| {
+    let value_in = |list: &[serde_json::Value], name: &str| list.iter().filter_map(|k| k.get("globals").and_then(|g| g.as_array()).and_then(|g| {
         g.iter().find(|x| x.get("name").and_then(|n| n.as_str()).map_or(false, |n| n.eq_ignore_ascii_case(name))).and_then(|x| x.get("value").cloned()).filter(|v| !v.is_null())
     })).last();
     for m in undo {
@@ -2312,21 +2380,47 @@ fn restore_star_maps(save: &mut Save, data: &GameData, kept: &[serde_json::Value
             set_value(save, data, flag, serde_json::json!(false), "goback.starmap.flag");
         }
     }
+    let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
+    let now = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default();
+    let found = now.iter().filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true)).count() as i64;
+    let counter = sm.get("counter").and_then(|v| v.as_str()).unwrap_or_default();
+    let count = if found > 0 { sm.get("base").and_then(|v| v.as_i64()).unwrap_or(10) + sm.get("per_planet").and_then(|v| v.as_i64()).unwrap_or(10) * found } else { 0 };
+    if !counter.is_empty() {
+        let value = if found > 0 { serde_json::json!(count) } else { value_in(kept, counter).unwrap_or(serde_json::json!(0)) };
+        set_value(save, data, counter, value, "goback.starmap");
+    }
+    let number = |name: &str| now.iter().find(|g| g.name.eq_ignore_ascii_case(name)).and_then(|g| match g.value {
+        crate::globals::GlobalValue::Number(n) => Some(n),
+        _ => None,
+    });
+    // every value the count sets, with each count's (count, value, only_if_below)
+    let mut entries: Vec<(String, i64, i64, Option<i64>)> = Vec::new();
     for on in sm.get("on_count").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+        let Some(at) = on.get("count").and_then(|v| v.as_i64()) else { continue };
         for st in on.get("set").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-            if let Some(name) = st.get("name").and_then(|n| n.as_str()) {
-                set_value(save, data, name, kept_value(name).unwrap_or(serde_json::json!(0)), "goback.starmap.set");
-            }
+            let (Some(name), Some(value)) = (st.get("name").and_then(|n| n.as_str()), st.get("value").and_then(|v| v.as_i64())) else { continue };
+            entries.push((name.to_string(), at, value, st.get("only_if_below").and_then(|v| v.as_i64())));
         }
     }
-    let flags: Vec<String> = sm.get("planet_flags").and_then(|f| serde_json::from_value(f.clone()).ok()).unwrap_or_default();
-    let found = save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default().iter()
-        .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true)).count();
-    let counter = sm.get("counter").and_then(|v| v.as_str()).unwrap_or_default();
-    if found > 0 {
-        count_star_maps(save, data, carrier);
-    } else {
-        set_value(save, data, counter, kept_value(counter).unwrap_or(serde_json::json!(0)), "goback.starmap");
+    entries.sort_by_key(|e| e.1);
+    let mut names: Vec<String> = entries.iter().map(|e| e.0.clone()).collect();
+    names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    for name in names {
+        let Some(cur) = number(&name) else { continue };
+        let mine: Vec<&(String, i64, i64, Option<i64>)> = entries.iter().filter(|e| e.0.eq_ignore_ascii_case(&name)).collect();
+        let undone_wrote = value_in(undo, &name).is_some();
+        let past_unreached = mine.iter().any(|e| e.1 > count && cur >= e.2);
+        let mut value = if undone_wrote || past_unreached { value_in(kept, &name).and_then(|v| v.as_i64()).unwrap_or(0) } else { cur };
+        for e in mine.iter().filter(|e| e.1 <= count) {
+            value = match e.3 {
+                Some(below) if value < below => e.2,
+                Some(_) => value,
+                None => value.max(e.2),
+            };
+        }
+        if value != cur {
+            set_value(save, data, &name, serde_json::json!(value), "goback.starmap.set");
+        }
     }
 }
 

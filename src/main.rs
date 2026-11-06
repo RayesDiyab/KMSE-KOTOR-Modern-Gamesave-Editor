@@ -1277,6 +1277,8 @@ struct Chapter {
     title: String,
     summary: String,
     played: bool,
+    // not played, but the save has been there (begun_chapters)
+    begun: bool,
 }
 
 /// The game's chapters the editor has mapped (questdb::milestones), in story order, each
@@ -1284,7 +1286,6 @@ struct Chapter {
 /// entries reached).
 fn skip_chapters(st: &State) -> Vec<Chapter> {
     let Some(save) = st.save.as_ref() else { return Vec::new() };
-    let quests = save.quests();
     let done = kse_core::questdb::chapters_played_in(save);
     let titles = st.module_titles.get(&st.game);
     let mut out: Vec<Chapter> = kse_core::questdb::milestones_ref(st.game)
@@ -1330,12 +1331,16 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
                 place
             );
             let side = m.get("side_chapter").and_then(|v| v.as_bool()).unwrap_or(false);
-            Chapter { index: i as i32, order, side, planet: planet.to_string(), title, summary, played }
+            Chapter { index: i as i32, order, side, planet: planet.to_string(), title, summary, played, begun: false }
         })
         .collect();
     // the main chapters in the order this save plays them: the free planets as the save went
     // to them, then as picked on the galaxy map (side chapters keep their places after them)
     let route = story_route(st);
+    let begun = begun_chapters(st);
+    for c in out.iter_mut() {
+        c.begun = begun.contains(&c.index);
+    }
     for c in out.iter_mut().filter(|c| !c.side) {
         if let Some(k) = route.order.iter().position(|i| *i as i32 == c.index) {
             c.order = k as i64 + 1;
@@ -1475,7 +1480,7 @@ fn current_story_plan(ui: &AppWindow, st: &State, back: bool) -> Option<StoryPla
             kept: plan.kept.iter().filter_map(|k| milestone(*k)).collect(),
             undo: plan.undo.iter().filter_map(|k| milestone(*k)).collect(),
             stage: stage.clone(),
-            unfinished: plan.unfinished.and_then(|k| chapters.iter().find(|c| c.index == k)).map(|c| c.planet.clone()),
+            unfinished: plan.unfinished.iter().filter_map(|k| chapters.iter().find(|c| c.index == *k)).map(|c| c.planet.clone()).collect(),
         })
     } else {
         let app = ui.global::<App>();
@@ -1647,7 +1652,7 @@ fn take_story_preview(ui: &AppWindow, st: &mut State, back: bool) -> Option<Prep
 }
 
 fn chapter_states(chapters: &[Chapter]) -> Vec<kse_core::questdb::ChapterState> {
-    chapters.iter().map(|c| kse_core::questdb::ChapterState { index: c.index, order: c.order, side: c.side, played: c.played }).collect()
+    chapters.iter().map(|c| kse_core::questdb::ChapterState { index: c.index, order: c.order, side: c.side, played: c.played, begun: c.begun }).collect()
 }
 
 fn skip_path(chapters: &[Chapter], index: i32) -> Vec<i32> {
@@ -1856,8 +1861,8 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         // a free planet moves among the free planets of its own kind (done, begun, not visited)
         let g = route.groups.iter().position(|g| g.first() == Some(&(c.index as usize)));
         let kind = g.map_or(-1, |g| route.kinds[g] as i32);
-        let earlier = g.map_or(false, |g| g > 0 && route.kinds[g - 1] as i32 == kind);
-        let later = g.map_or(false, |g| g + 1 < route.groups.len() && route.kinds[g + 1] as i32 == kind);
+        let earlier = g.map_or(false, |g| g > 0 && (route.kinds[g - 1] == 0) == (kind == 0));
+        let later = g.map_or(false, |g| g + 1 < route.groups.len() && (route.kinds[g + 1] == 0) == (kind == 0));
         stops.push(GalaxyStop {
             index: c.index,
             stop: s((k + 1).to_string()),
@@ -2023,7 +2028,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         let end = if !c.played {
             Some((2, c.index))
         } else {
-            k.and_then(|k| main.get(k + 1).filter(|f| f.played || Some(k + 1) == next)).map(|f| (0, f.index))
+            k.and_then(|k| main.get(k + 1).filter(|f| f.played || f.begun)).map(|f| (0, f.index))
         };
         if let Some((state, index)) = end {
             rows.push(row(6, "The whole chapter, to its end".into(), "", state, index, String::new(), "", 0, false));
@@ -4157,13 +4162,19 @@ fn main() {
         app.set_overlay(5);
     });
     on!(ui, state, on_set_position, |u, st, x: SharedString, y: SharedString, z: SharedString| {
-        let (Ok(x), Ok(y), Ok(z)) = (x.trim().parse::<f32>(), y.trim().parse::<f32>(), z.trim().parse::<f32>()) else {
+        // "nan", "inf" and "1e30" parse as numbers too, and would be written as the player's
+        // place (2026-11-06 audit); no area of either game reaches 100,000 units
+        let number = |t: &SharedString| t.trim().parse::<f32>().ok().filter(|v| v.is_finite() && v.abs() < 100_000.0);
+        let (Some(x), Some(y), Some(z)) = (number(&x), number(&y), number(&z)) else {
             message(&u, "That is not a position", "Type three numbers, for example 12.5, -3 and 0.");
+            fill_editor(&u, st);
             return;
         };
-        if st.who() == Who::Player {
-            edit_who(&u, st, "position", |c| area::set_position(c, [x, y, z]));
+        if st.who() != Who::Player {
+            message(&u, "Only the player can be moved here", "This moves the player. A companion's place is where the game puts the party when the save loads.");
+            return;
         }
+        edit_who(&u, st, "position", |c| area::set_position(c, [x, y, z]));
     });
 
     // Abilities
@@ -4935,15 +4946,15 @@ fn main() {
             fill_skip(&u, st);
         }
     });
-    // A free planet moved one place earlier (-1) or later (1) on the galaxy map's route, among
-    // the free planets of its kind (done, begun, not visited). Nothing in the save changes: the
+    // A free planet moved one place earlier (-1) or later (1) on the galaxy map's route: a done
+    // one among the done, any other among the rest. Nothing in the save changes: the
     // order is what Skip Ahead and Go Back then follow.
     on!(ui, state, on_route_move, |u, st, index: i32, dir: i32| {
         let route = story_route(st);
         let all = kse_core::questdb::milestones_ref(st.game);
         let Some(g) = route.groups.iter().position(|g| g.first() == Some(&(index.max(0) as usize))) else { return };
         let to = g as i32 + dir.signum();
-        if to < 0 || to as usize >= route.groups.len() || route.kinds[to as usize] != route.kinds[g] {
+        if to < 0 || to as usize >= route.groups.len() || (route.kinds[to as usize] == 0) != (route.kinds[g] == 0) {
             return;
         }
         let mut names: Vec<String> = route.groups.iter().map(|g| all[g[0]].0.to_string()).collect();
@@ -5483,24 +5494,30 @@ fn main() {
     });
 
     let _ = with(&ui, &state, |_, _| {});
-    // Closing with changes not saved asks once; closing again with the same changes leaves.
+    // Closing with changes not saved asks once; closing again with the very same changes
+    // leaves. Until 2026-11-06 it compared only their number, so after a warning, then Save or
+    // Revert, the same number of other changes closed without asking.
     {
         let weak = ui.as_weak();
         let state = state.clone();
-        let warned = std::cell::Cell::new(None::<usize>);
+        let warned = std::cell::RefCell::new(None::<std::collections::BTreeSet<String>>);
         ui.window().on_close_requested(move || {
-            let (Some(u), Ok(st)) = (weak.upgrade(), state.try_borrow()) else { return slint::CloseRequestResponse::HideWindow };
-            let changes = st.save.as_ref().map_or(0, |s| s.changes.len());
-            if changes == 0 || warned.get() == Some(changes) {
+            let Some(u) = weak.upgrade() else { return slint::CloseRequestResponse::HideWindow };
+            // busy (a handler still running): stay open rather than drop changes unasked
+            let Ok(st) = state.try_borrow() else { return slint::CloseRequestResponse::KeepWindowShown };
+            let changes = st.save.as_ref().map(|s| s.changes.clone()).unwrap_or_default();
+            if changes.is_empty() || warned.borrow().as_ref() == Some(&changes) {
                 return slint::CloseRequestResponse::HideWindow;
             }
-            warned.set(Some(changes));
+            *warned.borrow_mut() = Some(changes);
             message(&u, "There are changes not saved", "Save them or press Revert first. Close the window again to leave without saving them.");
             slint::CloseRequestResponse::KeepWindowShown
         });
     }
     ui.run().expect("the window closed with an error");
     let mut st = state.borrow_mut();
+    // spawns left unsaved at closing are in no save: their spawned.txt lines go
+    forget_pending_spawns(&mut st);
     st.settings.light = !ui.global::<Theme>().get_dark();
     st.settings.store();
 }
