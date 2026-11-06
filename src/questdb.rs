@@ -2190,12 +2190,14 @@ fn write_cleared(save: &mut Save, data: &GameData, m: &serde_json::Value, trip: 
 /// story (the milestone's journal) first, then the rest as the quest file lists them. (tag,
 /// main story)
 pub fn chapter_quests(game: Game, planet: &str) -> Vec<(String, bool)> {
-    let main: Vec<String> = milestones(game)
+    // borrowed, not `milestones`: that copies every chapter's file (12 ms a call, and the
+    // galaxy map's route asks for each chapter's quests)
+    let main: Vec<String> = milestones_ref(game)
         .into_iter()
         .find(|(p, _)| p.eq_ignore_ascii_case(planet))
-        .and_then(|(_, m)| m.get("journal").and_then(|j| j.as_array()).cloned())
-        .unwrap_or_default()
-        .iter()
+        .and_then(|(_, m)| m.get("journal").and_then(|j| j.as_array()))
+        .into_iter()
+        .flatten()
         .filter_map(|e| e.get("tag").and_then(|t| t.as_str()).map(|t| t.to_string()))
         .collect();
     let mut out: Vec<(String, bool)> = Vec::new();

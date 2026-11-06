@@ -254,8 +254,11 @@ export component SavesPage inherits Rectangle {
                         }
                         if renaming: IconButton {
                             width: 44px;
+                            icon-size: 28px;
                             lit: true;
-                            icon: "M 5 4 L 16 4 L 19 7 L 19 20 L 5 20 Z M 8 4 L 8 9 L 15 9 L 15 4 M 8 20 L 8 14 L 16 14 L 16 20";
+                            // a disk drawn like Copy's sheets: rounded, filling the 24 grid (the
+                            // first one was 14 units wide and blurred at 22 px)
+                            icon: "M 5.5 3 L 16 3 L 21 8 L 21 18.5 A 2.5 2.5 0 0 1 18.5 21 L 5.5 21 A 2.5 2.5 0 0 1 3 18.5 L 3 5.5 A 2.5 2.5 0 0 1 5.5 3 Z M 7.5 3 L 7.5 7.5 A 1 1 0 0 0 8.5 8.5 L 14.5 8.5 A 1 1 0 0 0 15.5 7.5 L 15.5 3 M 6.5 21 L 6.5 14.5 A 1.5 1.5 0 0 1 8 13 L 16 13 A 1.5 1.5 0 0 1 17.5 14.5 L 17.5 21";
                             clicked => {
                                 renaming = false;
                                 App.rename-save(new-name);

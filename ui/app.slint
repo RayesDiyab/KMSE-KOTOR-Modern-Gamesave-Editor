@@ -486,6 +486,23 @@ export component AppWindow inherits Window {
         }
     }
 
+    // A save clicked on the timeline: which one opens, and that this one closes, with Cancel.
+    if App.overlay == 15: Overlay {
+        panel-width: 640px;
+        panel-height: 340px;
+        VerticalLayout {
+            spacing: 14px;
+            Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: end;
+                Button { width: 170px; text: "Cancel"; clicked => { App.close-overlay(); } }
+                Button { width: 290px; kind: 0; text: "Open This Save"; clicked => { App.confirm-open-save(); } }
+            }
+        }
+    }
+
     // Skip Ahead: what will change, then confirm.
     if App.overlay == 10: Overlay {
         panel-width: 760px;

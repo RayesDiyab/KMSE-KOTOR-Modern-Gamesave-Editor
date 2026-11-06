@@ -1,6 +1,6 @@
 # Timeline art
 
-The pictures the KOTOR Modern Gamesave Editor's galaxy map draws (Story, Galaxy Map; until
+The pictures the KOTOR Modern Gamesave Editor's galaxy map draws (the Timeline tab; until
 2026-11-06 the timeline, which the galaxy map replaced, hence the folder's name).
 
 | File | What | Source |

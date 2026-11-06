@@ -331,6 +331,8 @@ struct State {
     quest_xp: HashMap<String, i64>,
     // the order picked on the galaxy map for the free planets (planet names), for this save
     route_plan: Vec<String>,
+    // a save clicked on the timeline, waiting for Open in its warning (an index into saves)
+    open_ask: Option<usize>,
     pop_pick: Option<(i32, i32, String, i32)>,
     // a most Health or Force typed out of reach at the creature's level (overlay 13)
     pool_ask: Option<PoolAsk>,
@@ -752,8 +754,8 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.stage_pick = None;
             st.equip_slot = None;
             forget_pending_spawns(st);
-            // Story opens on the timeline (2026-10-24, the maintainer)
-            st.story = 5;
+            // Story opens on its quests; the timeline has its own tab (2026-11-06)
+            st.story = 3;
             st.compare = None;
             st.selected_box = None;
             st.status = (String::new(), false);
@@ -766,6 +768,9 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             preload_art(st);
             ui.global::<App>().set_page(1);
             fill_editor(ui, st);
+            // the Timeline filled now, and the other saves read for it in the background, so
+            // its tab opens at once (2026-11-06, the maintainer: "preload it")
+            fill_skip(ui, st);
         }
         (Err(e), _) | (_, Err(e)) => message(ui, "This save could not be opened", &e),
     }
@@ -880,7 +885,8 @@ fn tab_of(change: &str) -> usize {
 
 fn fill_bar(ui: &AppWindow, st: &State) {
     let app = ui.global::<App>();
-    let mut tabs = vec![false; 7];
+    // Timeline is tab 7 (it shows no changes of its own: a skip's are Story's)
+    let mut tabs = vec![false; 8];
     if let Some(sv) = st.save.as_ref() {
         for c in &sv.changes {
             tabs[tab_of(c)] = true;
@@ -1876,7 +1882,7 @@ fn glow_image() -> Image {
     Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&px, N as u32, N as u32))
 }
 
-/// The Story tab's galaxy map: the main chapters as stops on the map in the order this save
+/// The Timeline tab's galaxy map: the main chapters as stops on the map in the order this save
 /// plays them, lit lanes along the part of the route behind the save and faint ones ahead, the
 /// open save's place (the chapter whose areas it is in, or the last one played when it is on
 /// the Ebon Hawk), the game's other saves at the furthest stop each has played, and the rows
@@ -1884,8 +1890,8 @@ fn glow_image() -> Image {
 /// marker: a point for one save, a larger point with their number for more, which opens into
 /// a ring of them, grouped by character and in the order of their time played.
 fn fill_skip(ui: &AppWindow, st: &mut State) {
-    // the other saves only while the galaxy map shows
-    let others = if st.story == 5 { timeline_saves(ui, st) } else { Vec::new() };
+    // the other saves: read away from the window once per save opened (empty until ready)
+    let others = timeline_saves(ui, st);
     let chapters = skip_chapters(st);
     let main: Vec<&Chapter> = chapters.iter().filter(|c| !c.side).collect();
     let route = story_route(st);
@@ -2323,7 +2329,7 @@ const GLOBES: &[(Game, &str, &str, f32, f32)] = &[
     (Game::K2, "M4_78", "Gui_M4-78", 0.90, 0.82),
 ];
 
-/// The story's chapters on the Story tab's galaxy map: where each stands (a share of the map's
+/// The story's chapters on the Timeline tab's galaxy map: where each stands (a share of the map's
 /// width and height; the planets where GLOBES puts them, as the game's own map spreads them),
 /// the game's planet texture for its globe ("" for none), and what is drawn without one: 0 a
 /// planet, 1 a ship, 2 a station. The ships and stations are placed near the planet the story
@@ -4041,6 +4047,7 @@ fn main() {
         timeline_pick: None,
         quest_xp: HashMap::new(),
         route_plan: Vec::new(),
+        open_ask: None,
         pop_pick: None,
         quest_open: false,
         stage_pick: None,
@@ -4182,9 +4189,12 @@ fn main() {
     });
     on!(ui, state, on_select_tab, |u, st, i: i32| {
         st.tab = i;
-        // Story holds sections 3 to 5, Advanced 0 to 2: each opens on its first
-        if i == 4 && st.story < 3 {
+        // Timeline is section 5 alone, Story holds 3 and 4, Advanced 0 to 2: each opens on
+        // its first
+        if i == 7 {
             st.story = 5;
+        } else if i == 4 && st.story != 3 && st.story != 4 {
+            st.story = 3;
         } else if i == 6 && st.story >= 3 {
             st.story = 0;
         }
@@ -5137,9 +5147,7 @@ fn main() {
         fill_skip(&u, st);
     });
     on!(ui, state, on_timeline_ready, |u, st| {
-        if st.story == 5 {
-            fill_skip(&u, st);
-        }
+        fill_skip(&u, st);
     });
     // A free planet moved one place earlier (-1) or later (1) on the galaxy map's route: a done
     // one among the done, any other among the rest. Nothing in the save changes: the
@@ -5201,14 +5209,40 @@ fn main() {
     on!(ui, state, on_story_preview_finished, |u, st| {
         finish_story_preview(&u, st);
     });
+    // A save clicked on the timeline: first a warning that says which save opens and that this
+    // one closes, with Cancel (2026-11-06, the maintainer). Open in it opens the save.
     on!(ui, state, on_open_timeline_save, |u, st, i: i32| {
         if unsaved(&u, st) {
             return;
         }
-        if i >= 0 && (i as usize) < st.saves.len() {
-            st.selected = i as usize;
-            open_selected(&u, st);
+        let Some((_, sm)) = (i >= 0).then(|| st.saves.get(i as usize)).flatten() else { return };
+        let other = st.timeline_saves.as_ref().and_then(|t| t.iter().find(|o| o.index == i as usize).cloned());
+        let here = st.save.as_ref().and_then(|s| save::summary(&s.folder)).map(|x| x.name).unwrap_or_default();
+        let mut body = String::new();
+        if let Some(o) = &other {
+            body.push_str(&format!("{}\n{}\n{} · {}\n\n", o.level, o.story, o.area, played(o.seconds)));
+        } else {
+            body.push_str(&format!("{} · {}\n\n", sm.area, played(sm.seconds)));
         }
+        body.push_str(&format!(
+            "{} closes and this save opens in its place. Nothing is written to either save.",
+            if here.is_empty() { "The save open now".to_string() } else { format!("\u{201c}{}\u{201d}", here) }
+        ));
+        st.open_ask = Some(i as usize);
+        let app = u.global::<App>();
+        app.set_message_title(s(format!("Open \u{201c}{}\u{201d}?", sm.name)));
+        app.set_message_body(s(body));
+        app.set_overlay(15);
+    });
+    on!(ui, state, on_confirm_open_save, |u, st| {
+        let Some(i) = st.open_ask.take() else { return };
+        u.global::<App>().set_overlay(0);
+        // the list can have changed under the warning (Refresh): the index must still be there
+        if unsaved(&u, st) || i >= st.saves.len() {
+            return;
+        }
+        st.selected = i;
+        open_selected(&u, st);
     });
     on!(ui, state, on_do_back, |u, st| {
         if needs_game(&u, st) { return; }

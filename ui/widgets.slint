@@ -321,6 +321,8 @@ export component IconButton inherits Rectangle {
     in property <string> icon;
     in property <string> text;
     in property <bool> lit;
+    // the icon's size: larger where the button has no words beside it
+    in property <length> icon-size: 22px;
     callback clicked;
     height: 44px;
     // as wide as the icon and words need, whatever the layout around it has to spare
@@ -337,8 +339,8 @@ export component IconButton inherits Rectangle {
         VerticalLayout {
             alignment: center;
             Path {
-                width: 22px;
-                height: 22px;
+                width: root.icon-size;
+                height: root.icon-size;
                 viewbox-width: 24;
                 viewbox-height: 24;
                 stroke: touch.has-hover || lit ? Theme.accent : Theme.soft;

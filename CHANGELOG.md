@@ -6,6 +6,19 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Timeline is its own tab** (2026-11-06, the maintainer's review). The galaxy map moved out
+  of Story into a Timeline tab beside it, with no section tabs above it, so the map is about a
+  fifth taller (380 px to 453 px at 1600 by 900). Story now holds Quests and Planets, Pazaak, and opens on Quests. The
+  Timeline opens at once: it is filled when the save opens and the other saves are read for
+  it in the background then, and its route is worked out in 0.08 ms instead of 145 ms
+  (`questdb::chapter_quests` copied every chapter's file on each call); the tab's fill fell
+  from about 600 ms to 26 ms, measured in the program on a KotOR save. A save clicked on the
+  map no longer opens straight away: a warning names it, its character, level and story, says
+  the save open now closes, and offers Cancel. Feat and power rows are as tall as their names
+  (a name on three lines was cut). The rename button's disk icon is redrawn larger. Health and
+  Force boxes hold four digits at Large text (944 and 1056 were cut). The quest filter fits at
+  1280 px. Looked at in the program at 1600 by 900 and 1280 by 780 with Large text; in the
+  game, **untested** (nothing here changes what is written).
 - **The audit of 2026-11-06** (two rounds, each finding checked in the code, measured where a
   test reaches it: `tests/audit_round2.rs`, `tests/exits.rs`, `tests/galaxy_route.rs`,
   `tests/level_grants.rs`, `tests/source_text.rs`, `tests/audit_fixes.rs`). Writing: new files reach

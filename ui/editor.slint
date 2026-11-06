@@ -97,15 +97,17 @@ component AbilityList inherits Rectangle {
         x: 0;
         y: 84px;
         height: parent.height - 84px;
-        content-height: rows.length * 50px;
-        VerticalLayout {
+        content-height: list.preferred-height;
+        list := VerticalLayout {
+            // each row as tall as its name needs: a name on three lines was cut at 50 px
             for r in rows: Rectangle {
-                height: 50px;
+                height: r.header ? 50px : max(50px, nm.preferred-height + 14px);
                 background: r.owned ? Theme.selected : transparent;
                 border-radius: 5px;
                 if r.header: Label { x: 4px; y: 22px; text: r.name; font-size: 13px * Theme.ts; color: Theme.soft; }
                 if !r.header: Rectangle { x: 0; y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                if !r.header: HorizontalLayout {
+                // not an `if`: the row's height reads the name's
+                Rectangle { visible: !r.header; HorizontalLayout {
                     padding-left: 6px;
                     spacing: 10px;
                     Rectangle {
@@ -128,7 +130,7 @@ component AbilityList inherits Rectangle {
                     // repeated the group (2026-10-24, the maintainer)
                     VerticalLayout {
                         alignment: center;
-                        Text {
+                        nm := Text {
                             text: r.name;
                             font-family: Theme.list-font;
                             font-size: 16px * Theme.ts;
@@ -141,12 +143,12 @@ component AbilityList inherits Rectangle {
                         if !r.owned && root.enabled: Sign { plus: true; colour: act.has-hover ? Theme.text : Theme.accent; }
                         if r.owned: Cross { colour: act.has-hover ? Theme.danger : Theme.faint; }
                         act := TouchArea {
-                            enabled: root.enabled || r.owned;
+                            enabled: (root.enabled || r.owned) && !r.header;
                             mouse-cursor: pointer;
                             clicked => { if (r.owned) { root.remove(r.id); } else { root.add(r.id); } }
                         }
                     }
-                }
+                } }
             }
         }
     }
@@ -299,6 +301,8 @@ component CharacterTab inherits Rectangle {
             fn.text = App.fp-current;
             fm.text = App.fp-max;
         }
+        // the boxes hold four digits at every text size (2026-11-06: 944 and 1052 were cut
+        // at Large text in 72 px)
         VerticalLayout {
             x: 0; y: 32px;
             height: self.preferred-height;
@@ -310,8 +314,8 @@ component CharacterTab inherits Rectangle {
                         Text { text: "Health"; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
                         Text { text: App.health-note; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.faint; overflow: elide; }
                     }
-                    VerticalLayout { alignment: center; hn := Field { width: 72px; text: App.hp-current; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
-                    VerticalLayout { alignment: center; hm := Field { width: 72px; text: App.hp-max; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
+                    VerticalLayout { alignment: center; hn := Field { width: 60px + 26px * Theme.ts; font-size: 16px * Theme.ts; text: App.hp-current; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
+                    VerticalLayout { alignment: center; hm := Field { width: 60px + 26px * Theme.ts; font-size: 16px * Theme.ts; text: App.hp-max; changed: App.hp-changed; accepted(t) => { if hn.text.is-float() && hm.text.is-float() { App.set-hp(hn.text.to-float(), hm.text.to-float()); } else { hn.text = App.hp-current; hm.text = App.hp-max; } } } }
                 }
             }
             Line {
@@ -322,8 +326,8 @@ component CharacterTab inherits Rectangle {
                         Text { text: "Force"; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: Theme.text; }
                         Text { text: App.force-note; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.faint; overflow: elide; }
                     }
-                    VerticalLayout { alignment: center; fn := Field { width: 72px; text: App.fp-current; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
-                    VerticalLayout { alignment: center; fm := Field { width: 72px; text: App.fp-max; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
+                    VerticalLayout { alignment: center; fn := Field { width: 60px + 26px * Theme.ts; font-size: 16px * Theme.ts; text: App.fp-current; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
+                    VerticalLayout { alignment: center; fm := Field { width: 60px + 26px * Theme.ts; font-size: 16px * Theme.ts; text: App.fp-max; changed: App.fp-changed; accepted(t) => { if fn.text.is-float() && fm.text.is-float() { App.set-fp(fn.text.to-float(), fm.text.to-float()); } else { fn.text = App.fp-current; fm.text = App.fp-max; } } } }
                 }
             }
         }
@@ -1195,7 +1199,8 @@ component JournalSection inherits Rectangle {
         x: 0; y: 0;
         width: list-w;
         height: 38px;
-        font-size: 13px * Theme.ts;
+        // smaller where the list is narrow: at 1280 px "Not Started · 86" was cut
+        font-size: min(13px * Theme.ts, list-w / 37);
         options: [
             "Active · " + (App.quest-counts.length > 0 ? App.quest-counts[0] : 0),
             "Completed · " + (App.quest-counts.length > 1 ? App.quest-counts[1] : 0),
@@ -2102,7 +2107,6 @@ component StoryTab inherits Rectangle {
             if App.story-section == 2: CreaturesSection { }
             if App.story-section == 3: JournalSection { }
             if App.story-section == 4: MoreSection { }
-            if App.story-section == 5: GalaxySection { }
         }
     }
 }
@@ -2478,9 +2482,16 @@ export component EditorPage inherits Rectangle {
         Rectangle { x: 0; y: parent.height - 1px; height: 1px; background: Theme.edge; }
         HorizontalLayout {
             alignment: start;
-            for t[i] in ["Character", "Abilities", "Inventory", "Party", "Story", "Map", "Advanced"]: Rectangle {
-                width: tt.preferred-width + (root.slim ? 34px : 60px);
-                tt := Text { y: 10px; text: t; font-family: Theme.list-font; font-size: (root.slim ? 18px : 20px) * Theme.ts; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
+            // Timeline (the galaxy map) is its own tab beside Story (2026-11-06, the maintainer);
+            // it keeps the number 7 so the other tabs keep theirs
+            for t in [
+                { name: "Character", i: 0 }, { name: "Abilities", i: 1 }, { name: "Inventory", i: 2 },
+                { name: "Party", i: 3 }, { name: "Timeline", i: 7 }, { name: "Story", i: 4 },
+                { name: "Map", i: 5 }, { name: "Advanced", i: 6 },
+            ]: Rectangle {
+                property <int> i: t.i;
+                width: tt.preferred-width + (root.slim ? 30px : 52px);
+                tt := Text { y: 10px; text: t.name; font-family: Theme.list-font; font-size: (root.slim ? 18px : 20px) * Theme.ts; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
                 if App.tab-changed[i]: Rectangle {
                     x: tt.x + tt.width + 6px;
                     y: 12px;
@@ -2555,6 +2566,17 @@ export component EditorPage inherits Rectangle {
         border-width: 1px;
         border-color: Theme.panel-edge;
         border-radius: 10px;
+        // The Timeline: the galaxy map with nothing above it, closer to the panel's edge so the
+        // map has the most room. Made once with the page and only hidden on the other tabs, so
+        // opening the tab does not build it again (2026-11-06, the maintainer: "make the tab
+        // less slow ... preload it").
+        GalaxySection {
+            x: 18px;
+            y: 16px;
+            width: parent.width - 36px;
+            height: parent.height - 32px;
+            visible: App.tab == 7;
+        }
         Rectangle {
             x: 26px;
             y: 22px;
@@ -2566,8 +2588,6 @@ export component EditorPage inherits Rectangle {
             if App.tab == 3: PartyTab { }
             if App.tab == 4: StoryTab {
                 items: [
-                    { name: "Galaxy Map", section: 5 },
-                    { name: "", section: -1 },
                     { name: "Quests", section: 3 },
                     { name: "", section: -1 },
                     { name: "Planets, Pazaak", section: 4 },

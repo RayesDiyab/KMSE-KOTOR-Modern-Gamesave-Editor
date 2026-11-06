@@ -449,6 +449,8 @@ export global App {
     in-out property <int> back-alignment: 50;
     // another save of the game, opened from the timeline
     callback open-timeline-save(int);
+    // Open in the warning that open-timeline-save shows (overlay 15)
+    callback confirm-open-save();
     in property <length> skip-height;
     callback do-skip();
     callback spawn-here();

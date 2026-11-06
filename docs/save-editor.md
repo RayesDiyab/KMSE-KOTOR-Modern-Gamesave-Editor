@@ -295,11 +295,14 @@ picked in the confirmation (`a_pc_jedi`: the class added, `000_Prestige` 2); and
 player picks it, the companions trained as Jedi without their conversations (the class
 `a_makejedi` gives and the values their conversation chains end with).
 
-**The galaxy map** (Story, Galaxy Map; 2026-11-06, asked for by the maintainer: "the timeline
+**The galaxy map** (the Timeline tab; 2026-11-06, asked for by the maintainer: "the timeline
 needs to be changed into a galaxymap with blue bands of light connecting the planets visited in
 order a player visited them ... aesthetically pleasing in the style of kotor but also
-intuitive"). It replaced the timeline (below). Story's sections are tabs under the main tab bar
-(Galaxy Map, Quests, then Planets and Pazaak, then the modder sections). The map is a dark
+intuitive"). It replaced the timeline (below). It was first a section of Story, beside Quests
+and Planets, Pazaak; the same day the maintainer asked for it as a tab of its own beside Story
+("Make Timeline a seperate tab next to story and make the actual galaxy map bigger"). With no
+section tabs above it the map is 453 px tall at 1600 by 900, where it was 380 px. Story keeps Quests and Planets, Pazaak and opens on
+Quests. The map is a dark
 display in light mode too, on the generated starfield (`ui/editor.slint`, `GalaxySection`;
 `fill_skip` in `src/main.rs`):
 
@@ -313,7 +316,8 @@ display in light mode too, on the generated starfield (`ui/editor.slint`, `Galax
 | States | played (blue number, blue ring), the one the save is in (gold), begun and not finished (blue outlined number), the next stop (brighter), ahead (dim). Pointing at a stop shows a card with its number, state and chapter title |
 | Planet order | under the map, the free planets in route order, each with arrows to move it one place earlier or later among those of its kind (done, begun, not visited); Undo order changes goes back to the save's own order. The order changes nothing in the save; Skip Ahead and Go Back follow it. It is kept until another save opens |
 | Played | a chapter's journal entries reached, or its journal quests taken out of the journal by a chapter the save has played (`chapters_played`); since 2026-11-06 also every chapter before a played one on the story's line, and all the free planets before a chapter after them (KotOR's Leviathan excepted, which follows the third). A KotOR save on the Ebon Hawk after the Leviathan had no Dantooine entry left and read Dantooine as never played, so the map put the save in Dantooine |
-| Other saves | every other save of the game, any character's, as a tag with their number high on the right of the furthest stop each has played on its own route; green (blue in KotOR II); pointing at a tag of several opens a ring of them, pointing at one shows its picture, name, character, level and XP, how far its story is and where it loads, a click opens it |
+| Other saves | every other save of the game, any character's, as a tag with their number high on the right of the furthest stop each has played on its own route; green (blue in KotOR II); pointing at a tag of several opens a ring of them, pointing at one shows its picture, name, character, level and XP, how far its story is and where it loads. A click asks first (since 2026-11-06, the maintainer: "there needs to be a warning where you can cancel"): a warning names the save, its character, level and story, says the save open now closes and that nothing is written, and offers Cancel (or Escape) and Open This Save. Changes not saved still stop it, as before |
+| Loading | filled when a save opens (`open_selected` calls `fill_skip`), and the other saves are read for it then, away from the window, so the tab opens without a wait. The page is made once with the editor and hidden on the other tabs. Measured on 2026-11-06 on a KotOR save: the tab's fill took about 600 ms, nearly all in `questdb::story_route` (145 ms a call, four calls), because `chapter_quests` copied every chapter's milestone file on each call; borrowed instead, the route takes 0.08 ms and the fill 26 ms |
 | The pop-up | a click on a stop opens it, as the timeline's did: the chapter's beginning, expandable quests and stages, and its end on the left; the selected point's description, choices and measured changes on the right. The beginning of a stop ahead is skipped to by playing the stop before it on the route, and is not offered when that stop is played (the save is at its beginning already). A begun stop is treated as the one the save is in: its beginning and the stages reached are gone back to |
 | Side chapters | the Ebon Hawk's own quests (the ship beside the save's stop) and Yavin Station (KotOR, at Yavin, the station from the game's movie where the build made it); off the route, a click opens their pop-ups |
 
@@ -484,7 +488,7 @@ Endar Spire (Taris has had a milestone for some time; this line said otherwise u
 2026-11-02); KotOR 2.
 
 **The quest tracker** (Story, Quests; 2026-10-22, the maintainer: "what a person wants when
-he enters the story mode ... is a quest tracker"): Story opened on Quests then (it opens on the timeline since 2026-10-24), listed first before
+he enters the story mode ... is a quest tracker"): Story opened on Quests then (it opened on the timeline from 2026-10-24, and on Quests again since 2026-11-06, when the map became the Timeline tab), listed first before
 the modder sections, and the party list steps aside. Left: the quests in three tabs, Active,
 Completed (the journal entry is one of the quest's endings) and Not Started, each with where it
 stands. Right: the picked quest, its current journal entry in full, and every stage as a
