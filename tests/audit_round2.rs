@@ -30,11 +30,12 @@ fn a_finished_write_is_not_taken_for_one_cut_off() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// After Skip Ahead or Go Back the save stands where it was until the game makes the queued
-/// trip, so where it will be is the trip's area. Before, a return from the Unknown World read
-/// every planet before it played again, from the area the save still stood in.
+/// While a trip waits in the queue (Skip Ahead, Go Back and Travel Here set one), neither the
+/// area the save stands in nor the trip's says what was played: Go Back leaves the save in the
+/// area gone back from and sends it to the Ebon Hawk or a cutscene area, Travel Here can send it
+/// to a later planet. The journal alone decides then.
 #[test]
-fn a_queued_trip_decides_where_the_save_is() {
+fn a_queued_trip_leaves_the_journal_to_decide() {
     let installs = find_installs(&[]);
     let Some(folder) = find_saves(&installs, Game::K1, &[])
         .into_iter()
@@ -49,25 +50,17 @@ fn a_queued_trip_decides_where_the_save_is() {
     else {
         return eprintln!("no KotOR save here: nothing checked");
     };
-    let mut s = Save::open(&folder.path).unwrap();
-    // a trip to Kashyyyk's first area, as a return to Kashyyyk queues one
-    s.queue_transition("kas_m22aa", "kas_m22aa_from_ebo", &[]).unwrap();
-    assert_eq!(s.queued_trip().as_deref(), Some("kas_m22aa"));
-    assert_eq!(s.place(), "kas_m22aa");
-    let played = questdb::chapters_played_in(&s);
     let all = questdb::milestones_ref(Game::K1);
     let at = |p: &str| all.iter().position(|(x, _)| x.eq_ignore_ascii_case(p)).unwrap();
-    for p in ["Endar Spire", "Taris", "Dantooine"] {
-        assert!(played[at(p)], "{} lies before Kashyyyk on the line", p);
-    }
-    for p in ["Leviathan", "Unknown World", "Star Forge"] {
-        assert!(!played[at(p)], "{} does not come before Kashyyyk", p);
-    }
-    // a trip to a later area (Travel Here can queue one) says nothing about what was played:
-    // the earlier of the two places counts
-    s.queue_transition("sta_m45aa", "sta_m45aa_start", &[]).unwrap();
-    let played = questdb::chapters_played_in(&s);
-    for p in ["Leviathan", "Unknown World", "Tatooine", "Korriban"] {
-        assert!(!played[at(p)], "{} does not read played from a trip to the Star Forge", p);
+    let mut s = Save::open(&folder.path).unwrap();
+    // the Ebon Hawk (where most returns send the save), a later planet, a cutscene area
+    for trip in ["ebo_m12aa", "sta_m45aa", "stunt_06", "unk_m41aa"] {
+        s.queue_transition(trip, "wp", &[]).unwrap();
+        assert_eq!(s.queued_trip().as_deref(), Some(trip));
+        assert_eq!(s.place(), trip);
+        let played = questdb::chapters_played_in(&s);
+        for p in ["Leviathan", "Unknown World", "Star Forge"] {
+            assert!(!played[at(p)], "{} read played with a trip to {} waiting", p, trip);
+        }
     }
 }

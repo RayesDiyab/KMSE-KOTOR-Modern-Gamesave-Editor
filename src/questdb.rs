@@ -1228,17 +1228,13 @@ pub fn chapters_played_in(save: &Save) -> Vec<bool> {
             }
         }
     }
-    // The earlier of where the save stands and where a queued trip takes it: after Go Back the
-    // save still stands in the area gone back from until the game makes the trip (a return from
-    // the Unknown World read every planet played again from there), and Travel Here can queue
-    // a trip to a later planet's area, which says nothing about what was played.
-    let order_of = |i: usize| milestones_ref(save.game).get(i).and_then(|(_, m)| m.get("order").and_then(|v| v.as_i64())).unwrap_or(99);
-    let stands = chapter_of_module(save.game, save.module_name());
-    let goes = save.queued_trip().and_then(|t| chapter_of_module(save.game, &t));
-    let here = match (stands, goes) {
-        (Some(a), Some(b)) => Some(if order_of(b) < order_of(a) { b } else { a }),
-        (a, b) => a.or(b),
-    };
+    // Where the save stands says what was played only while no trip waits in its queue. Go
+    // Back leaves the save in the area gone back from and queues a trip (mostly to the Ebon
+    // Hawk or a cutscene area, not the chapter gone back to), and Travel Here can queue one to
+    // a later planet: either place would read chapters played that were not. With a trip
+    // waiting the journal alone decides. (2026-11-06, corrected twice: first the trip's area
+    // was used, then the earlier of the two; both read undone chapters played again.)
+    let here = if save.queued_trip().is_some() { None } else { chapter_of_module(save.game, save.module_name()) };
     if let Some(here) = here {
         line_before(save.game, &mut played, here);
     }
