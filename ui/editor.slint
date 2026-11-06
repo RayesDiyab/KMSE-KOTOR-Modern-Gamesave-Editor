@@ -1686,7 +1686,16 @@ component GalaxySection inherits Rectangle {
                     clip: true;
                     Rectangle { x: -parent.width * 0.25; y: -parent.height * 0.25; width: parent.width; height: self.width; border-radius: self.width / 2; background: #6f9cc2; }
                 }
-                if !p.has-globe && p.look == 1: Path {
+                // the Endar Spire: its picture (assets/timeline/endar-spire.png, 2026-11-06, the
+                // maintainer's render), a little larger than the stop's ring, as the ship it is
+                if !p.has-globe && p.look == 1 && p.planet == "Endar Spire": Image {
+                    width: parent.width * 1.3;
+                    height: parent.height * 1.3;
+                    source: @image-url("../assets/timeline/endar-spire.png");
+                    image-fit: contain;
+                    opacity: p.state == 2 ? 0.55 : 1.0;
+                }
+                if !p.has-globe && p.look == 1 && p.planet != "Endar Spire": Path {
                     width: parent.width * 0.9;
                     height: parent.height * 0.6;
                     viewbox-width: 100;

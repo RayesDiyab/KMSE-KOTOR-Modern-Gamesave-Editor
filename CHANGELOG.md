@@ -6,6 +6,10 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The Endar Spire is drawn as itself** on the Timeline (2026-11-06, the maintainer's
+  render): its picture in place of the outline of a ship, a little larger than its ring.
+  `assets/timeline/endar-spire.png`, cut from its black background and credited in the README.
+  Looked at in the program at 1600 by 900 and 1280 by 780.
 - **The Timeline map is the page** (2026-11-06, the maintainer's review). No panel around it
   and nothing above it: the map is 624 px tall at 1600 by 900 (it was 380 before the Timeline
   had its own tab). Where the save is and how to use the map are centred small print along

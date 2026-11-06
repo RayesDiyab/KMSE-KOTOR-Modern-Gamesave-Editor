@@ -152,6 +152,8 @@ Created by **RaymanGT**, the maker of KMRP.
   listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 * The **Ebon Hawk** on the galaxy map is a free-to-use render from Deadly Stream; its
   author is not recorded here.
+* The **Endar Spire** on the galaxy map is a render supplied by the maintainer; its origin
+  is not recorded here.
 * **Aurebesh AF** by AurekFonts (CC0), for the icon's datapad.
 * The public KotOR 1 decompilation
   [swkotor1-reconstruction](https://github.com/mattlgroff/swkotor1-reconstruction), for
