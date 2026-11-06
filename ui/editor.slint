@@ -1739,8 +1739,8 @@ component GalaxySection inherits Rectangle {
                     width: parent.width + 8px;
                     height: parent.hawk ? parent.height + 8px : self.width;
                     border-radius: parent.hawk ? 6px : self.width / 2;
-                    border-width: sd.has-hover ? 2px : 1px;
-                    border-color: sd.has-hover ? root.hover-gold : #7d9cc4.with-alpha(0.5);
+                    border-width: sd.has-hover || v.here ? 2px : 1px;
+                    border-color: sd.has-hover ? root.hover-gold : v.here ? root.gold : #7d9cc4.with-alpha(0.5);
                 }
                 if !sv.hawk: Text {
                     y: parent.height + 6px;
@@ -2046,6 +2046,13 @@ component GalaxySection inherits Rectangle {
                 }
             }
             Rectangle { horizontal-stretch: 1; }
+        }
+        // the note, and the way back to the save's own order on its line, so the chips keep
+        // the row (at Large text the button ran out of the panel beside them)
+        if App.gm-free-note != "" && (root.height >= 470px || App.gm-reordered): HorizontalLayout {
+            spacing: 14px;
+            height: max(note-text.preferred-height, App.gm-reordered ? 28px * Theme.ts : 0px);
+            note-text := Note { horizontal-stretch: 1; text: root.height >= 470px ? App.gm-free-note : ""; font-size: 12.5px * Theme.ts; vertical-alignment: center; }
             if App.gm-reordered: Rectangle {
                 width: reset-text.preferred-width + 24px;
                 border-radius: 5px;
@@ -2056,7 +2063,6 @@ component GalaxySection inherits Rectangle {
                 rt := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
             }
         }
-        if App.gm-free-note != "" && root.height >= 470px: Note { text: App.gm-free-note; font-size: 12.5px * Theme.ts; }
     }
 }
 

@@ -154,8 +154,12 @@ component StoryPreviewDetails inherits Rectangle {
         }
         if App.story-preview-ready: Label { text: "INVENTORY CHANGES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
         if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
+        // two rows, one where the skip asks two questions or more, so the totals above keep
+        // their room (at 1600 by 900 with Large text the skip's choices and a taller box left
+        // the totals out of view); it scrolls
         if App.story-preview-ready && App.story-items.length > 0: Rectangle {
-            height: root.back ? 144px : 184px;
+            property <int> asks: root.back ? 0 : (App.skip-jedi ? 1 : 0) + (App.skip-side ? 1 : 0) + (App.skip-prestige ? 1 : 0) + (App.skip-train ? 1 : 0);
+            height: (self.asks >= 2 ? 1 : 2) * 76px + 10px;
             border-width: 1px; border-color: Theme.edge; border-radius: 5px;
             Scroller {
                 x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
@@ -174,12 +178,13 @@ component StoryPreviewDetails inherits Rectangle {
                             background: Theme.field; border-width: 1px; border-color: Theme.edge; border-radius: 3px;
                             if r.has-icon: Image { source: r.icon; image-fit: contain; }
                         }
-                        Text {
-                            x: 66px; y: 9px; width: parent.width - 154px; height: 40px;
-                            text: r.name; font-size: 13px * Theme.ts; color: Theme.text;
-                            vertical-alignment: center; wrap: word-wrap; overflow: elide;
+                        VerticalLayout {
+                            x: 66px; width: parent.width - 154px;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: r.name; font-size: 13px * Theme.ts; color: Theme.text; wrap: word-wrap; overflow: elide; max-height: 2.6 * 13px * Theme.ts; }
+                            Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
                         }
-                        Text { x: 66px; y: 51px; width: parent.width - 154px; text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
                         Text {
                             x: parent.width - 80px; width: 72px; height: parent.height;
                             text: r.difference; font-size: 13px * Theme.ts;
@@ -207,7 +212,18 @@ export component AppWindow inherits Window {
 
     // Where the focus goes when the mouse is pressed anywhere (main.rs): a text box being
     // typed in then takes what was typed, as if Enter were pressed.
-    sink := FocusScope { width: 0; height: 0; }
+    sink := FocusScope {
+        width: 0;
+        height: 0;
+        // a click in a pop-up brings the focus here: Escape still closes it
+        key-pressed(e) => {
+            if (e.text == Key.Escape && App.overlay != 0) {
+                if (App.overlay == 13) { App.pool-cancel(); } else { App.close-overlay(); }
+                return accept;
+            }
+            return reject;
+        }
+    }
     public function drop-focus() {
         // Rename is explicit: outside presses cancel, while the field and save icon
         // keep their focus and draft until Enter or the icon is pressed.

@@ -471,7 +471,14 @@ impl State {
     }
 
     fn item_name(&self, item: &Struct) -> String {
-        let Some(data) = self.data() else { return item.string("Tag").unwrap_or_default() };
+        let Some(data) = self.data() else { return item.string("Tag").or_else(|| item.string("EquippedRes")).unwrap_or_default() };
+        // A creature made from its template wears template entries (EquippedRes alone): the
+        // name is the template's (the story preview listed a recruit's gear with no names)
+        let template = match (item.get("LocalizedName"), item.string("EquippedRes")) {
+            (None, Some(res)) if !res.is_empty() => data.gff(&res, "uti", kse_core::formats::erf::RES_TYPE_UTI),
+            _ => None,
+        };
+        let item = template.as_ref().map_or(item, |t| &t.root);
         let name = match item.get("LocalizedName") {
             Some(Value::LocString(l)) => data.loc(l),
             _ => String::new(),
@@ -1892,7 +1899,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
     // a side chapter's own place (Yavin Station) is not the ship
     let at_side = in_chapter.filter(|i| chapters.iter().any(|c| c.side && c.index == *i as i32)).map(|i| all[i].0.to_string()).filter(|p| !p.eq_ignore_ascii_case("Ebon Hawk"));
     let aboard = here_k.is_none() && at_side.is_none();
-    let here_k = here_k.or_else(|| main.iter().rposition(|c| c.played)).or(if main.is_empty() { None } else { Some(0) });
+    let here_k = if at_side.is_some() { None } else { here_k.or_else(|| main.iter().rposition(|c| c.played)).or(if main.is_empty() { None } else { Some(0) }) };
     // the chapter the save is in: the one it stands in, unplayed. Begun: a chapter not played
     // that the save has been to (one of its areas, or KotOR II's marker for it); a
     // free planet left half done is begun, not the save's place.
@@ -1988,7 +1995,9 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
 
     // the side chapters (the Ebon Hawk's own quests, Yavin Station): off the route, as they
     // come only when picked themselves. The Ebon Hawk waits beside the save's stop.
-    let (hx, hy) = here_k.map_or((0.5, 0.5), |k| (stops[k].x, stops[k].y));
+    // the Ebon Hawk beside the save's stop, or beside the side chapter's place it is at
+    let side_spot = at_side.as_deref().and_then(|p| place(p)).map(|m| (m.2, m.3));
+    let (hx, hy) = side_spot.or(here_k.map(|k| (stops[k].x, stops[k].y))).unwrap_or((0.5, 0.5));
     let mut sides: Vec<GalaxyStop> = Vec::new();
     for c in chapters.iter().filter(|c| c.side) {
         let spot = place(&c.planet);
@@ -2014,7 +2023,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             earlier: false,
             later: false,
             kind: if hawk && hx < 0.2 { 1 } else { -1 },
-            here: false,
+            here: at_side.as_deref().map_or(false, |p| p.eq_ignore_ascii_case(&c.planet)),
         });
     }
 
@@ -2098,7 +2107,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         } else if current {
             "Choose where to go: back to a point you have passed, or ahead to one you have not. Skipping ahead plays the story up to it for you: quests, XP, loot and companions.".into()
         } else {
-            "Choose where to skip to, from the chapter's beginning to its end. Everything before it in the story is played for you: quests, XP, loot and companions.".into()
+            "Choose where to skip to, from the chapter's beginning to its end. Everything before it on your route is played for you: quests, XP, loot and companions.".into()
         };
     }
     let app = ui.global::<App>();
@@ -3516,6 +3525,18 @@ macro_rules! on {
     }};
 }
 
+/// A folder picked in the system's dialog, which belongs to the window: the window takes no
+/// clicks while it is open (a click on a save row could otherwise wait and land on a list the
+/// dialog's result has changed).
+fn pick_folder(ui: &AppWindow, title: &str) -> Option<PathBuf> {
+    use slint::winit_030::WinitWindowAccessor;
+    let owned = ui.window().with_winit_window(|w| rfd::FileDialog::new().set_parent(w).set_title(title).pick_folder());
+    match owned {
+        Some(picked) => picked,
+        None => rfd::FileDialog::new().set_title(title).pick_folder(),
+    }
+}
+
 /// Runs a handler with the state. A handler can come while another still holds the state:
 /// a result from a background thread delivered while a folder dialog is open, whose modal loop
 /// runs the window's events. Borrowing it then ended the program (2026-11-06 audit); the
@@ -4084,7 +4105,7 @@ fn main() {
         }
     });
     on!(ui, state, on_add_save_folder, |u, st| {
-        if let Some(folder) = rfd::FileDialog::new().set_title("Pick a save, a saves folder or a game folder").pick_folder() {
+        if let Some(folder) = pick_folder(&u, "Pick a save, a saves folder or a game folder") {
             if !st.settings.added.contains(&folder) {
                 st.settings.added.push(folder.clone());
                 st.settings.store();
@@ -4098,7 +4119,7 @@ fn main() {
     });
 
     on!(ui, state, on_choose_game_folder, |u, st| {
-        let Some(folder) = rfd::FileDialog::new().set_title("Pick the game's folder (the one with chitin.key)").pick_folder() else { return };
+        let Some(folder) = pick_folder(&u, "Pick the game's folder (the one with chitin.key)") else { return };
         match games::identify(&folder) {
             Some(game) => {
                 match game {
@@ -4153,6 +4174,7 @@ fn main() {
     on!(ui, state, on_select_who, |u, st, i: i32| {
         st.who = i.max(0) as usize;
         st.feat_query.clear();
+        st.power_query.clear();
         u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         st.power_query.clear();
         u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));

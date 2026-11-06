@@ -155,7 +155,14 @@ pub fn interrupted_write(folder: &Path) -> Option<String> {
         .iter()
         .filter(|n| {
             n.ends_with(".kmrp-new")
-                || n.strip_suffix(".kmrp-old").map_or(false, |base| !names.iter().any(|x| x.len() > base.len() && x[..base.len()].eq_ignore_ascii_case(base) && x[base.len()..].starts_with('.') && !x.ends_with(".kmrp-old") && !x.ends_with(".kmrp-new")))
+                || n.strip_suffix(".kmrp-old").map_or(false, |base| {
+                    // compared as bytes: a name with letters of more than one byte cannot be cut
+                    let b = base.as_bytes();
+                    !names.iter().any(|x| {
+                        let xb = x.as_bytes();
+                        xb.len() > b.len() && xb[..b.len()].eq_ignore_ascii_case(b) && xb[b.len()] == b'.' && !x.ends_with(".kmrp-old") && !x.ends_with(".kmrp-new")
+                    })
+                })
         })
         .cloned()
         .collect();
