@@ -2166,11 +2166,16 @@ component GalaxySection inherits Rectangle {
         }
         // the note, and the way back to the save's own order on its line, so the chips keep
         // the row (at Large text the button ran out of the panel beside them)
-        if App.gm-free-note != "" && (root.height >= 470px || App.gm-reordered): HorizontalLayout {
+        // The button's room is kept whether it shows or not (hidden, not left out), so the
+        // note wraps the same and the line keeps its height: the map took the difference, so
+        // it changed size when a planet was moved (2026-11-06, the maintainer: "why does the
+        // timeline map size change when changing planet order?").
+        if App.gm-free-note != "": HorizontalLayout {
             spacing: 14px;
-            height: max(note-text.preferred-height, App.gm-reordered ? 28px * Theme.ts : 0px);
+            height: max(note-text.preferred-height, 28px * Theme.ts);
             note-text := Note { horizontal-stretch: 1; text: root.height >= 470px ? App.gm-free-note : ""; font-size: 12.5px * Theme.ts; vertical-alignment: center; }
-            if App.gm-reordered: Rectangle {
+            Rectangle {
+                visible: App.gm-reordered;
                 width: reset-text.preferred-width + 24px;
                 border-radius: 5px;
                 border-width: 1px;

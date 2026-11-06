@@ -13,8 +13,12 @@ CHANGELOG.
   out, in and Fit sit in its bottom right corner. A planet clicked while zoomed opens as
   before. The ring a tag of many saves opens into stays inside the map (sixteen saves at the
   Endar Spire ran off its top). The rename button's disk is centred: an empty label beside
-  it had pushed it 6 px left. Looked at in the program at 1600 by 900 and 1280 by 780 in
-  both games; in the game, **untested** (nothing here changes what is written).
+  it had pushed it 6 px left. The map keeps its size when a planet is moved: Undo order
+  changes, appearing under it, made its line taller and the map gave up the difference (at
+  short windows the whole line appeared); the line now keeps the button's room hidden.
+  Looked at in the program at 1600 by 900 and 1280 by 780 in both games, the map's corners
+  measured at the same rows before and after a move; in the game, **untested** (nothing here
+  changes what is written).
 - **Timeline is its own tab** (2026-11-06, the maintainer's review). The galaxy map moved out
   of Story into a Timeline tab beside it, with no section tabs above it, so the map is about a
   fifth taller (380 px to 453 px at 1600 by 900). Story now holds Quests and Planets, Pazaak, and opens on Quests. The
