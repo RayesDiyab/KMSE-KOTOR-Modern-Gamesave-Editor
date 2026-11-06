@@ -1988,8 +1988,8 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         String::new()
     } else {
         format!(
-            "These planets can be played in any order. Use the arrows to set yours: Skip Ahead follows it{}.",
-            if st.game == Game::K1 { ", and the Leviathan comes after the third, as in the game" } else { "" }
+            "These can be played in any order: set yours and Skip Ahead follows it.{}",
+            if st.game == Game::K1 { " The Leviathan comes after the third, as in the game." } else { "" }
         )
     };
     let here_text = match here_k.map(|k| &stops[k]) {
@@ -2336,14 +2336,16 @@ const GLOBES: &[(Game, &str, &str, f32, f32)] = &[
 /// meets them at (the Endar Spire over Taris, the Star Forge over the Unknown World, the
 /// Ravager over Malachor V); the masters' meeting is at Dantooine's enclave.
 const MAP_STOPS: &[(Game, &str, f32, f32, &str, u8)] = &[
-    (Game::K1, "Endar Spire", 0.10, 0.12, "", 1),
-    (Game::K1, "Taris", 0.03, 0.55, "Gui_Taris_1", 0),
+    // a little above where Taris's save tag reaches (at 1280 px it covered the Endar Spire's name)
+    (Game::K1, "Endar Spire", 0.11, 0.03, "", 1),
+    (Game::K1, "Taris", 0.03, 0.60, "Gui_Taris_1", 0),
     (Game::K1, "Dantooine", 0.25, 0.25, "Gui_Dantooine_1", 0),
-    (Game::K1, "Tatooine", 0.74, 0.85, "Gui_Tatooine_1", 0),
+    (Game::K1, "Tatooine", 0.76, 0.86, "Gui_Tatooine_1", 0),
     (Game::K1, "Kashyyyk", 0.24, 0.85, "Gui_Kashyyyk_1", 0),
     (Game::K1, "Manaan", 0.86, 0.22, "Gui_Manaan_1", 0),
     (Game::K1, "Korriban", 0.55, 0.08, "Gui_korriban_1", 0),
-    (Game::K1, "Leviathan", 0.66, 0.45, "", 1),
+    // a little above Tatooine's number (at 1280 px its name ran into it)
+    (Game::K1, "Leviathan", 0.65, 0.41, "", 1),
     (Game::K1, "Unknown World", 0.47, 0.56, "Gui_unknown_1", 0),
     (Game::K1, "Star Forge", 0.37, 0.38, "", 2),
     (Game::K1, "Yavin Station", 0.97, 0.62, "GUI_yavin_1", 0),
@@ -2356,8 +2358,10 @@ const MAP_STOPS: &[(Game, &str, f32, f32, &str, u8)] = &[
     (Game::K2, "Dantooine", 0.60, 0.25, "Gui_Dantooine_1", 0),
     (Game::K2, "Korriban", 0.84, 0.10, "Gui_korriban_1", 0),
     (Game::K2, "The Jedi Masters", 0.62, 0.75, "", 2),
-    (Game::K2, "Ravager", 0.30, 0.55, "", 1),
-    (Game::K2, "Malachor V", 0.44, 0.85, "Gui_malachor", 0),
+    // right of where the Ebon Hawk waits beside Telos (it covered the Ravager's name), below
+    // Nar Shaddaa's
+    (Game::K2, "Ravager", 0.36, 0.53, "", 1),
+    (Game::K2, "Malachor V", 0.47, 0.86, "Gui_malachor", 0),
     (Game::K2, "Ebon Hawk", 0.0, 0.0, "", 1),
 ];
 

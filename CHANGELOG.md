@@ -6,6 +6,19 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The Timeline map is the page** (2026-11-06, the maintainer's review). No panel around it
+  and nothing above it: the map is 624 px tall at 1600 by 900 (it was 380 before the Timeline
+  had its own tab). Where the save is and how to use the map are centred small print along
+  its top; the zoom is in its top right corner. The planet order is inside it along the
+  bottom, centred and only as wide as it needs, the buttons on the map with no bar behind
+  them; Undo order changes takes the place of "Skip Ahead follows it" under its name (on a
+  narrow map it floats just above), so nothing moves when it comes. The numbers in the
+  planets' and the order's circles are centred: the title font set its digits 2 to 2.5 px low,
+  now within half a pixel (measured). Stops whose names and tags ran into each other at 1280
+  by 780 moved a little: KotOR's Endar Spire, Taris, Leviathan and Tatooine, KotOR II's
+  Ravager and Malachor V. Looked at in the program in both games at 1600 by 900 and 1280 by
+  780, before and after a reorder; in the game, **untested** (nothing here changes what is
+  written).
 - **The Timeline zooms and moves** (2026-11-06, the maintainer: "make the timeline zoomable
   and movable with mouse"). The wheel zooms in and out about the pointer, from the whole map
   to four times its size; dragging an empty part of it moves it, never past its edges; a

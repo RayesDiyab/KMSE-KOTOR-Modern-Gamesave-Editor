@@ -1512,37 +1512,13 @@ component GalaxySection inherits Rectangle {
 
     VerticalLayout {
         spacing: 8px;
-        HorizontalLayout {
-            spacing: 18px;
-            Note {
-                horizontal-stretch: 1;
-                vertical-alignment: center;
-                font-size: 13.5px * Theme.ts;
-                text: App.gm-stops.length == 0
-                    ? "The editor has no chapters of this game mapped yet."
-                    : "Bands of light join the planets in the order you played them. Click a planet to see its quests, and to skip ahead or go back."
-                    + (App.tl-saves.length > 0 ? " The " + (Theme.k2 ? "blue" : "green") + " tags are your other saves." : "");
-            }
-            if App.gm-here-text != "": Rectangle {
-                width: here-row.preferred-width + 28px;
-                height: 32px * Theme.ts;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                border-width: 1px;
-                border-color: Theme.gold;
-                background: Theme.gold.with-alpha(0.08);
-                here-row := HorizontalLayout {
-                    x: 14px;
-                    width: self.preferred-width;
-                    spacing: 10px;
-                    Rectangle {
-                        width: 10px;
-                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.gold; }
-                    }
-                    Text { text: "YOU ARE HERE"; font-family: Theme.label-font; font-size: 11px * Theme.ts; letter-spacing: 3px; color: Theme.gold; vertical-alignment: center; }
-                    Text { text: App.gm-here-text; font-family: Theme.list-font; font-size: 14px * Theme.ts; color: Theme.text; vertical-alignment: center; }
-                }
-            }
+        // Everything that was above the map is in it now (2026-11-06, the maintainer: "Remove the
+        // top text, and incorporate it into the map itself, like the buttons below ... like
+        // small print, you are here, and the rest of the texts"); only a game with no chapters
+        // mapped, which shows no map, says so here.
+        if App.gm-stops.length == 0: Note {
+            font-size: 13.5px * Theme.ts;
+            text: "The editor has no chapters of this game mapped yet.";
         }
         map := Rectangle {
             vertical-stretch: 1;
@@ -1557,8 +1533,14 @@ component GalaxySection inherits Rectangle {
             // the box (bx, by, bw, bh) the whole map fits at zoom 1
             property <length> base-unit: min(70px * Theme.ts, max(34px, self.height / 6));
             property <length> bx: max(70px * Theme.ts, self.base-unit * 1.2);
-            property <length> by: self.base-unit * 0.85 + 14px * Theme.ts;
-            property <length> bb: self.base-unit * 0.6 + 34px * Theme.ts;
+            // the planet order's bar along the bottom (its height and the gap under it): the
+            // stops' names stand clear of it at zoom 1; the zoom sits in the top right corner,
+            // where no stop is
+            // the small print along the top (its height and the gap above it)
+            property <length> top-h: 10px + head.preferred-height + 4px;
+            property <length> bar-h: App.gm-free-note != "" ? 36px * Theme.ts + 8px + 10px : 0px;
+            property <length> by: max(self.base-unit * 0.85 + 14px * Theme.ts, self.top-h + self.base-unit * 0.62 + 8px);
+            property <length> bb: max(self.base-unit * 0.6 + 34px * Theme.ts, self.bar-h + self.base-unit * 0.5 + 30px * Theme.ts);
             property <length> bw: self.width - 2 * self.bx;
             property <length> bh: self.height - self.by - self.bb;
             // Zoomed with the wheel about the pointer and moved by dragging (2026-11-06, the
@@ -1748,7 +1730,9 @@ component GalaxySection inherits Rectangle {
                     background: p.state == 0 ? root.lane-blue : p.here || p.state == 1 ? root.gold : #1b2a3d;
                     border-width: p.state == 4 ? 2px : 1px;
                     border-color: p.state == 0 ? #bfe4ff : p.here || p.state == 1 ? #fff0b8 : p.state == 4 ? root.lane-blue : #4c6582;
-                    Text { text: p.stop; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? #06121e : root.ink-soft; }
+                    // centred, then moved up 0.12 and right 0.06 of its size: the title font's digits
+                    // sit that far off (measured 2026-11-06: 2 to 2.5 px low, up to 1 px left)
+                    Text { x: 0.06 * self.font-size; y: -0.12 * self.font-size; width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center; text: p.stop; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? #06121e : root.ink-soft; }
                 }
                 Text {
                     y: parent.height + 6px;
@@ -1883,10 +1867,10 @@ component GalaxySection inherits Rectangle {
                 property <TimelineGroup> g: root.shown-group >= 0 && root.shown-group < App.tl-groups.length ? App.tl-groups[root.shown-group] : { x: 0, y: 0, count: 0, start: 0 };
                 // inside the map whatever stop it opens at, and never taller than the map
                 // (2026-11-06: sixteen saves at the Endar Spire ran off the map's top)
-                property <length> r: min(root.ring(g.count), map.height / 2 - 34px);
+                property <length> r: min(root.ring(g.count), (map.height - map.top-h - map.bar-h) / 2 - 30px);
                 property <length> reach: self.r + 26px;
                 property <length> cx: max(self.reach + 6px, min(map.width - self.reach - 6px, map.px + g.x * map.iw + map.unit * 0.42 + 16px));
-                property <length> cy: max(self.reach + 6px, min(map.height - self.reach - 6px, map.pt + g.y * map.ih - map.unit * 0.62 + 9px));
+                property <length> cy: max(map.top-h + self.reach, min(map.height - map.bar-h - self.reach, map.pt + g.y * map.ih - map.unit * 0.62 + 9px));
                 visible: root.spread > 0.01 && g.count > 1;
                 x: self.cx - self.reach;
                 y: self.cy - self.reach;
@@ -1941,14 +1925,14 @@ component GalaxySection inherits Rectangle {
                     height: 26px;
                     border-radius: 13px;
                     background: root.save-green;
-                    Text { text: ring.g.count; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: #06121e; }
+                    Text { x: 0.06 * self.font-size; y: -0.12 * self.font-size; width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center; text: ring.g.count; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: #06121e; }
                 }
             }
 
-            // the zoom: out, in, and back to all of the map; bottom right, inside the corners
-            Rectangle {
+            // the zoom: out, in, and back to all of the map; top right, inside the corners
+            zoom-box := Rectangle {
                 x: map.width - self.width - 36px;
-                y: map.height - self.height - 12px;
+                y: 12px - 4px;
                 width: zoom-row.preferred-width + 8px;
                 height: 30px * Theme.ts + 8px;
                 border-radius: 7px;
@@ -1959,16 +1943,6 @@ component GalaxySection inherits Rectangle {
                 width: self.preferred-width;
                 height: 30px * Theme.ts;
                 spacing: 6px;
-                // how, beside the buttons (in the note above it took a third line from the map);
-                // left out where the map is narrow, where it covered a planet's name
-                if map.width >= 1300px: Text {
-                    text: "  Scroll to zoom, drag to move";
-                    font-family: Theme.body-font;
-                    font-size: 12px * Theme.ts;
-                    color: root.ink-faint;
-                    vertical-alignment: center;
-                }
-                if map.width >= 1300px: Rectangle { width: 2px; }
                 for b[i] in ["−", "+", "Fit"]: Rectangle {
                     property <bool> on: i == 0 ? map.zoom > 1.001 : i == 1 ? map.zoom < 3.999 : map.zoom > 1.001;
                     width: i == 2 ? zt.preferred-width + 20px : self.height;
@@ -1993,6 +1967,142 @@ component GalaxySection inherits Rectangle {
                     }
                 }
             }
+            }
+
+            // The small print along the top, centred, with nothing behind it: where the save is,
+            // then what the map shows and how to use it. As wide as the room between the zoom
+            // and its mirror on the left allows.
+            head := VerticalLayout {
+                width: max(200px, map.width - 2 * (zoom-box.width + 52px));
+                x: (map.width - self.width) / 2;
+                y: 10px;
+                height: self.preferred-height;
+                spacing: 3px;
+                if App.gm-here-text != "": HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: root.gold; }
+                    }
+                    Text { text: "YOU ARE HERE"; font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2.5px; color: root.gold; vertical-alignment: center; }
+                    Text { text: App.gm-here-text; font-family: Theme.list-font; font-size: 13px * Theme.ts; color: root.ink-text; vertical-alignment: center; }
+                }
+                Text {
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                    font-family: Theme.body-font;
+                    font-size: 11.5px * Theme.ts;
+                    color: root.ink-soft;
+                    text: "Bands of light join the planets in the order you played them. Click a planet to see its quests, and to skip ahead or go back."
+                        + (App.tl-saves.length > 0 ? " The " + (Theme.k2 ? "blue" : "green") + " tags are your other saves." : "")
+                        + " Scroll to zoom, drag to move.";
+                }
+            }
+
+            // The planet order along the bottom of the map: the free planets in the order the
+            // route takes them, each with its stop number and arrows to move it earlier or later;
+            // a click opens it, pointing at one lights it on the map. Over the map, so the map
+            // keeps its size when it changes. Only as wide as it needs, centred, with nothing
+            // behind it but the map: the buttons alone have their backgrounds (2026-11-06, the
+            // maintainer: "Make it only as wide as needed and always center the whole bar (make
+            // bar transparent but buttons not").
+            bar := Rectangle {
+                visible: App.gm-free-note != "";
+                width: min(map.width - 72px, bar-row.preferred-width);
+                x: (map.width - self.width) / 2;
+                y: map.height - self.height - 10px;
+                height: 36px * Theme.ts + 8px;
+                // tighter where the map is narrow (KotOR II's four ran past the map at 1280 px)
+                property <bool> tight: map.width < 1300px;
+                bar-row := HorizontalLayout {
+                    padding: 4px;
+                    spacing: bar.tight ? 5px : 8px;
+                    // its name, and what the order does under it, where the bar has room (the
+                    // sentence beside the chips wrapped to four lines and was cut)
+                    if map.width >= 1400px: VerticalLayout {
+                        alignment: center;
+                        spacing: 1px;
+                        Label { text: "PLANET ORDER"; font-size: 12px * Theme.ts; min-width: self.preferred-width; }
+                        // under it, what the order does; once it is changed, the way back, in the
+                        // same place, so nothing moves when it comes
+                        if !App.gm-reordered: Text { text: "Skip Ahead follows it"; font-family: Theme.body-font; font-size: 11px * Theme.ts; color: root.ink-soft; }
+                        if App.gm-reordered: Text {
+                            text: "Undo order changes";
+                            font-family: Theme.body-font;
+                            font-size: 11px * Theme.ts;
+                            color: undo-link.has-hover ? root.hover-gold : Theme.dark ? Theme.accent : #2ac6ef;
+                            undo-link := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
+                        }
+                    }
+                    if map.width >= 1400px: Rectangle { width: 4px; }
+                    for p[i] in App.gm-stops: HorizontalLayout {
+                        visible: p.free;
+                        width: p.free ? self.preferred-width : 0px;
+                        spacing: 0;
+                        if p.free: chip := Rectangle {
+                            property <bool> lit: ct.has-hover || root.hover-stop == i;
+                            width: chip-row.preferred-width + 10px;
+                            border-radius: 5px;
+                            border-width: 1px;
+                            border-color: self.lit ? Theme.hover-edge : p.here ? Theme.gold : Theme.accent.with-alpha(0.45);
+                            background: self.lit ? Theme.hover : p.here ? Theme.gold.with-alpha(0.08) : Theme.field;
+                            ct := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { App.open-chapter(p.index); }
+                                changed has-hover => {
+                                    if (self.has-hover) {
+                                        root.hover-stop = i;
+                                    } else if (root.hover-stop == i) {
+                                        root.hover-stop = -1;
+                                    }
+                                }
+                            }
+                            chip-row := HorizontalLayout {
+                                x: 5px;
+                                width: self.preferred-width;
+                                height: parent.height;
+                                spacing: bar.tight ? 3px : 6px;
+                                ArrowButton { left: true; enabled: p.earlier; clicked => { App.route-move(p.index, -1); } }
+                                Rectangle {
+                                    width: 20px * Theme.ts;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: self.width;
+                                        border-radius: self.width / 2;
+                                        background: p.state == 0 ? Theme.accent : p.here || p.state == 1 ? Theme.gold : transparent;
+                                        border-width: p.state == 0 || p.here || p.state == 1 ? 0px : p.state == 4 ? 2px : 1px;
+                                        border-color: p.state == 4 ? Theme.accent : Theme.edge;
+                                        Text { x: 0.06 * self.font-size; y: -0.12 * self.font-size; width: parent.width; height: parent.height; horizontal-alignment: center; vertical-alignment: center; text: p.stop; font-family: Theme.title-font; font-size: 11px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? Theme.ink : p.state == 4 ? Theme.text : Theme.soft; }
+                                    }
+                                }
+                                Text {
+                                    text: p.chip;
+                                    font-family: Theme.list-font;
+                                    font-size: (bar.tight ? 12.5px : 14px) * Theme.ts;
+                                    vertical-alignment: center;
+                                    color: p.here || p.state == 1 ? Theme.gold : p.state == 0 || p.state == 4 || chip.lit ? Theme.text : Theme.soft;
+                                }
+                                ArrowButton { left: false; enabled: p.later; clicked => { App.route-move(p.index, 1); } }
+                            }
+                        }
+                    }
+                }
+            }
+            // where the map is too narrow for the order's name, Undo floats centred just above the
+            // order, so the order stays centred and does not move when it comes (its room kept in
+            // the row pushed the order 37 px off centre at 1280 px)
+            if bar.visible && map.width < 1400px && App.gm-reordered: Rectangle {
+                x: (map.width - self.width) / 2;
+                y: bar.y - self.height;
+                height: 26px * Theme.ts;
+                width: reset-text.preferred-width + 24px;
+                border-radius: self.height / 2;
+                border-width: 1px;
+                border-color: rt.has-hover ? Theme.hover-edge : Theme.edge;
+                background: rt.has-hover ? Theme.hover : Theme.field;
+                reset-text := Text { text: "Undo order changes"; font-family: Theme.body-font; font-size: 12.5px * Theme.ts; color: Theme.text; }
+                rt := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
             }
 
             // a stop pointed at: its chapter, above it (below it near the top)
@@ -2103,88 +2213,6 @@ component GalaxySection inherits Rectangle {
             }
         }
 
-        // The free planets in the order the route takes them, each with its stop number and
-        // arrows to move it earlier or later; a click opens it, pointing at one lights it on
-        // the map.
-        if App.gm-free-note != "": HorizontalLayout {
-            spacing: 8px;
-            height: 40px * Theme.ts;
-            Label { text: "PLANET ORDER"; font-size: 12px * Theme.ts; vertical-alignment: center; min-width: self.preferred-width; }
-            Rectangle { width: 6px; }
-            for p[i] in App.gm-stops: HorizontalLayout {
-                visible: p.free;
-                width: p.free ? self.preferred-width : 0px;
-                spacing: 0;
-                if p.free: chip := Rectangle {
-                    property <bool> lit: ct.has-hover || root.hover-stop == i;
-                    width: chip-row.preferred-width + 10px;
-                    border-radius: 5px;
-                    border-width: 1px;
-                    border-color: self.lit ? Theme.hover-edge : p.here ? Theme.gold : Theme.accent.with-alpha(0.45);
-                    background: self.lit ? Theme.hover : p.here ? Theme.gold.with-alpha(0.08) : Theme.field;
-                    ct := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { App.open-chapter(p.index); }
-                        changed has-hover => {
-                            if (self.has-hover) {
-                                root.hover-stop = i;
-                            } else if (root.hover-stop == i) {
-                                root.hover-stop = -1;
-                            }
-                        }
-                    }
-                    chip-row := HorizontalLayout {
-                        x: 5px;
-                        width: self.preferred-width;
-                        height: parent.height;
-                        spacing: 6px;
-                        ArrowButton { left: true; enabled: p.earlier; clicked => { App.route-move(p.index, -1); } }
-                        Rectangle {
-                            width: 20px * Theme.ts;
-                            Rectangle {
-                                width: parent.width;
-                                height: self.width;
-                                border-radius: self.width / 2;
-                                background: p.state == 0 ? Theme.accent : p.here || p.state == 1 ? Theme.gold : transparent;
-                                border-width: p.state == 0 || p.here || p.state == 1 ? 0px : p.state == 4 ? 2px : 1px;
-                                border-color: p.state == 4 ? Theme.accent : Theme.edge;
-                                Text { text: p.stop; font-family: Theme.title-font; font-size: 11px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? Theme.ink : p.state == 4 ? Theme.text : Theme.soft; }
-                            }
-                        }
-                        Text {
-                            text: p.chip;
-                            font-family: Theme.list-font;
-                            font-size: 14px * Theme.ts;
-                            vertical-alignment: center;
-                            color: p.here || p.state == 1 ? Theme.gold : p.state == 0 || p.state == 4 || chip.lit ? Theme.text : Theme.soft;
-                        }
-                        ArrowButton { left: false; enabled: p.later; clicked => { App.route-move(p.index, 1); } }
-                    }
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
-        }
-        // the note, and the way back to the save's own order on its line, so the chips keep
-        // the row (at Large text the button ran out of the panel beside them)
-        // The button's room is kept whether it shows or not (hidden, not left out), so the
-        // note wraps the same and the line keeps its height: the map took the difference, so
-        // it changed size when a planet was moved (2026-11-06, the maintainer: "why does the
-        // timeline map size change when changing planet order?").
-        if App.gm-free-note != "": HorizontalLayout {
-            spacing: 14px;
-            height: max(note-text.preferred-height, 28px * Theme.ts);
-            note-text := Note { horizontal-stretch: 1; text: root.height >= 470px ? App.gm-free-note : ""; font-size: 12.5px * Theme.ts; vertical-alignment: center; }
-            Rectangle {
-                visible: App.gm-reordered;
-                width: reset-text.preferred-width + 24px;
-                border-radius: 5px;
-                border-width: 1px;
-                border-color: rt.has-hover ? Theme.hover-edge : Theme.edge;
-                background: rt.has-hover ? Theme.hover : Theme.field;
-                reset-text := Text { text: "Undo order changes"; font-family: Theme.body-font; font-size: 13px * Theme.ts; color: Theme.text; }
-                rt := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
-            }
-        }
     }
 }
 
@@ -2679,19 +2707,21 @@ export component EditorPage inherits Rectangle {
         y: 240px;
         width: parent.width - self.x - 60px;
         height: parent.height - 240px - 36px;
-        background: Theme.panel;
-        border-width: 1px;
+        // on the Timeline the map is the page: no panel around it, only the map's own frame
+        // (2026-11-06, the maintainer: "Remove the outer border and make the map the main piece
+        // on this timeline page")
+        background: App.tab == 7 ? transparent : Theme.panel;
+        border-width: App.tab == 7 ? 0px : 1px;
         border-color: Theme.panel-edge;
         border-radius: 10px;
-        // The Timeline: the galaxy map with nothing above it, closer to the panel's edge so the
-        // map has the most room. Made once with the page and only hidden on the other tabs, so
+        // The Timeline: the galaxy map filling the panel's place. Made once with the page and only hidden on the other tabs, so
         // opening the tab does not build it again (2026-11-06, the maintainer: "make the tab
         // less slow ... preload it").
         GalaxySection {
-            x: 18px;
-            y: 16px;
-            width: parent.width - 36px;
-            height: parent.height - 32px;
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
             visible: App.tab == 7;
         }
         Rectangle {
