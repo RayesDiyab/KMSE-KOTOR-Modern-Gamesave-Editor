@@ -207,14 +207,15 @@ Unknown World, Star Forge, and the Ebon Hawk and Yavin Station as side chapters)
 its quest file, milestone, rewards and XP scenario, in `data/quests` and `data/xp`, IDs only
 (no game text: names and journal text are looked up from the player's own game; the readable
 review pages go to the ignored `data/quests/local`). Skip to Here applies every main chapter
-before the picked one that the save has not played, in story order, then the picked one:
+before the picked one on the save's route (the galaxy map's order, below) that the save has not
+played, in that order, then the picked one:
 
 | Applied per chapter | How |
 | --- | --- |
 | Journal | the chapter's stages, then the quests the game itself removes (`journal_remove`) |
 | Story values | the milestone's globals |
 | Star maps | `K_STAR_MAP` counted the game's way (10 and 10 a planet whose map is found) and what reaching a count sets (the Leviathan capture after the third, the Unknown World after the fourth). Only the chapter's own `K_STAR_MAP_*` flag is set. Until 2026-11-02 closing a chapter's quests replayed every branch of the game's star map script, so a skip that included Tatooine or Korriban found all four maps, opened the Unknown World and left `K_STAR_MAP` at 10, and the capture never played. Checked by `tests/star_maps.rs`; in the game, **untested** |
-| Which planets | the timeline's order, Tatooine, Kashyyyk, Manaan, Korriban: a skip plays the planets the save has not played, first in that list first, and there is no choice of which. Planets a save played itself stay played, and the count follows them in any order. The Leviathan goes in before a fourth planet, as in the game (`leviathan_in_place` in `src/questdb.rs`), and a skip to the Leviathan leaves the fourth planet open. Until 2026-11-02 the Leviathan came after all four |
+| Which planets | the order on the galaxy map's route (`questdb::story_route`): the free planets the save has done, in the order it went to them, then those it has begun, then the rest in the order the player picks with the arrows under the map (the timeline's order, Tatooine, Kashyyyk, Manaan, Korriban, until the player picks another). A skip to a free planet plays the planets before it on the route that the save has not played; a planet picked first is played alone. The count follows the planets in any order. The Leviathan goes in after the third free planet, as in the game (`story_route`; `leviathan_in_place` in `src/questdb.rs` keeps it there when a skip runs), and a skip to the Leviathan leaves the fourth planet open. Until 2026-11-02 the Leviathan came after all four; until 2026-11-06 the order was always the timeline's, with no choice. Checked by `tests/galaxy_route.rs` |
 | Items, loot | held items, the enemies' Dropable items, the containers' loot (class gear by the game's tests); credit chips (base item 57) add their stack size to the party's credits |
 | Credits, alignment | what the chapter's conversations and scripts pay and take, for a light-side and for a dark-side run (`tools/questdb/credits.py`, in the rewards file's `credits`), plus the payments the main path cannot avoid (`credits_fixed`: the droid on Taris, the assassin droid on Tatooine); the alignment moves by the side's points, never toward the other side |
 | Light or dark | asked in the confirmation when it changes anything (`side_matters`), the player's current leaning first; the dark side applies the chapter's `dark` block where the story branches: on Dantooine slot 5 is killed, not recruited; at the temple summit slot 0 rejoins and slots 4 and 5 are lost, then slots 2 and 6 leave the ship; the Star Forge plays the dark-side ending |
@@ -294,20 +295,54 @@ picked in the confirmation (`a_pc_jedi`: the class added, `000_Prestige` 2); and
 player picks it, the companions trained as Jedi without their conversations (the class
 `a_makejedi` gives and the values their conversation chains end with).
 
-**The timeline** (Story, Timeline; 2026-10-23, designed by the maintainer from mockups in
-both games' colours). Story's sections are tabs under the main tab bar (Quests, Timeline, then
-Galaxy Map and Pazaak, then the modder sections), so the timeline runs the panel's full width.
-On a starfield (dark mode; light mode keeps the plain panel, whose text is dark):
+**The galaxy map** (Story, Galaxy Map; 2026-11-06, asked for by the maintainer: "the timeline
+needs to be changed into a galaxymap with blue bands of light connecting the planets visited in
+order a player visited them ... aesthetically pleasing in the style of kotor but also
+intuitive"). It replaced the timeline (below). Story's sections are tabs under the main tab bar
+(Galaxy Map, Quests, then Planets and Pazaak, then the modder sections). The map is a dark
+display in light mode too, on the generated starfield (`ui/editor.slint`, `GalaxySection`;
+`fill_skip` in `src/main.rs`):
+
+| What | How |
+| --- | --- |
+| Stops | each main chapter where the game's own galaxy map puts its planet (`MAP_STOPS` in `src/main.rs`; the planets as the editor's Planets page spreads them), drawn as the game's own planet texture wrapped on a globe (`globe_pixels`, read from the player's install); the ships (Endar Spire, Leviathan, Ravager) and stations (Star Forge, the masters' meeting) drawn by the editor, near the planet the story meets them at. Each carries its number on the route |
+| The route | the main chapters in the order the save plays them (`questdb::story_route`): outside the free planets the story is one line; the free planets (KotOR: Tatooine, Kashyyyk, Manaan, Korriban; KotOR II: Nar Shaddaa, Dxun with Onderon, Dantooine, Korriban) come done first, then begun, then not visited; KotOR's Leviathan after the third. Done: the game's flag (KotOR's `K_STAR_MAP_*` TRUE; KotOR II's master markers `351NAR_Ebon_Released`, `506OND_End`, `602DAN_End`, `702KOR_Vash` above 0) or the chapter played. Begun: one of its own quests in the journal |
+| The order of what is done | the save does not record the order planets were played in. The route takes the order in which each planet's own quests first appear in the journal (`JNL_Entries` keeps new entries at its end). Read from four of the maintainer's KotOR saves on 2026-11-06 (`examples/journal_order.rs`): the entries mostly follow the order of play, but not strictly (one KotOR save lists an Ebon Hawk quest before Taris's `tar_escape`), and `JNL_Date` is a day count of 0 or 1 with `JNL_Time` inside a day, so neither orders the planets. Where the journal guessed wrong, the arrows reorder what is done among itself |
+| Bands of light | lit blue lanes join the stops the save has played or begun, in route order; faint lanes run on along the route ahead. Each lane is a quadratic curve bending a little to one side (`lane` in `src/main.rs`) |
+| You are here | the stop whose areas hold the save's area (`questdb::chapter_of_module`, by each chapter's `cleared` areas): a gold ring and gold name, and a gold "You are here" pill above the map naming it. On the Ebon Hawk (or an area no chapter lists) it is the last stop played, "Aboard the Ebon Hawk, last at ...", and the Ebon Hawk is drawn beside it |
+| States | played (blue number, blue ring), the one the save is in (gold), begun and not finished (blue outlined number), the next stop (brighter), ahead (dim). Pointing at a stop shows a card with its number, state and chapter title |
+| Planet order | under the map, the free planets in route order, each with arrows to move it one place earlier or later among those of its kind (done, begun, not visited); Undo order changes goes back to the save's own order. The order changes nothing in the save; Skip Ahead and Go Back follow it. It is kept until another save opens |
+| Played | a chapter's journal entries reached, or its journal quests taken out of the journal by a chapter the save has played (`chapters_played`); since 2026-11-06 also every chapter before a played one on the story's line, and all the free planets before a chapter after them (KotOR's Leviathan excepted, which follows the third). A KotOR save on the Ebon Hawk after the Leviathan had no Dantooine entry left and read Dantooine as never played, so the map put the save in Dantooine |
+| Other saves | every other save of the game, any character's, as a tag with their number high on the right of the furthest stop each has played on its own route; green (blue in KotOR II); pointing at a tag of several opens a ring of them, pointing at one shows its picture, name, character, level and XP, how far its story is and where it loads, a click opens it |
+| The pop-up | a click on a stop opens it, as the timeline's did: the chapter's beginning, expandable quests and stages, and its end on the left; the selected point's description, choices and measured changes on the right. The beginning of a stop ahead is skipped to by playing the stop before it on the route, and is not offered when that stop is played (the save is at its beginning already). A begun stop is treated as the one the save is in: its beginning and the stages reached are gone back to |
+| Side chapters | the Ebon Hawk's own quests (the ship beside the save's stop) and Yavin Station (KotOR, at Yavin, the station from the game's movie where the build made it); off the route, a click opens their pop-ups |
+
+Measured on 2026-11-06: `tests/galaxy_route.rs` (the default route, a picked order in both
+games, done before begun before not visited, played chapters in journal order, the line
+before a played chapter, Skip Ahead's path following the route, and a whole route with the
+Leviathan after the third planet for each of the 32 saves of both games on the PC). The map
+was looked at in the program at 1600x900 with Medium text on a KotOR save aboard the Ebon
+Hawk after the Leviathan: the lanes, the hover card, the order arrows and the pop-up. Slint's
+software renderer draws a radial gradient as a square and fits a path's view into its element
+keeping the view's shape, so the glows are a picture (`glow_image`) and each lane is drawn in
+the box of its curve. In the game, nothing here changes what is written: Skip Ahead and Go Back
+write as before, in the route's order.
+
+**The timeline, replaced 2026-11-06** (Story, Timeline; 2026-10-23, designed by the maintainer
+from mockups in both games' colours). Kept as the record of what the galaxy map replaced. On a
+starfield (dark mode; light mode kept the plain panel, whose text is dark):
 
 | What | How |
 | --- | --- |
 | The line | START to END; each main chapter a point at even steps, the point being the chapter's end, numbered I to X; played chapters filled, the rest hollow; the stretch behind the open save bright |
 | You are here | a gold point just past the furthest main chapter the open save has played; the planets that can be played in any order (KotOR's four star maps, KotOR II's four free planets) may still be open behind it, and show hollow |
-| Played | a chapter's journal entries reached, or its journal quests taken out of the journal by a chapter the save has played (`chapters_played`): the game removes the Endar Spire's quest on Taris, so every save past Taris would otherwise read the Endar Spire as never played, and Skip Ahead would have played it again |
-| Other saves | every other save of the game, any character's, just past the furthest chapter each has played; green (blue in KotOR II, where green is the accent); in one stretch grouped by character and in the order of their time played, side by side, and stacked in columns above the line where the stretch is too short; pointing at one shows its picture, name, character, level and XP, how far its story is ("Story: after Korriban") and where it loads, a click opens it |
-| Chapters | pointing at one shows it above the line, "Click to choose where to go back to" (played), "where to skip to" (ahead) or both (the one the save is in); a click opens its pop-up |
-| The pop-up | a wider window with the chapter's beginning, expandable quests and stages, and its end on the left; the selected point's description, choices and measured changes on the right. The beginning of a chapter ahead is skipped to by playing the chapter before it; the end of a played chapter is gone back to by taking the chapter after it back out |
-| Side chapters | the Ebon Hawk's own quests and Yavin Station (KotOR; KotOR II: the Ebon Hawk) are not on the line, as Skip Ahead plays them only when picked themselves: their ships at the bottom middle open their pop-ups |
+| Other saves | every other save of the game, any character's, just past the furthest chapter each has played |
+| Chapters | pointing at one shows it above the line; a click opens its pop-up |
+| Side chapters | their ships at the bottom middle open their pop-ups |
+
+The timeline had no order for the free planets: it always drew and skipped them in the
+timeline's order, and put the Leviathan after all four, though the game plays it after the
+third.
 
 **The selected point's preview** (2026-10-25, `src/story_preview.rs`,
 `src/main.rs`, `ui/app.slint`). The editor clones the current in-memory save, including
@@ -394,7 +429,7 @@ copies from both installed games. Two creature unit tests cover later synthetic 
 and the retained-record check. The original crash's native cause has not been established;
 loading the corrected copy in the game remains **untested**.
 
-To check by hand, use a copy of a save. Open a chapter on the timeline, expand a quest,
+To check by hand, use a copy of a save. Open a stop on the galaxy map, expand a quest,
 and select a stage. Check the totals and both columns of item changes. Try a different
 story choice and wait for its new preview. Cancel, then verify that the pending edit
 count and values have not changed. Apply a prepared point, check the values in the editor,
@@ -564,7 +599,8 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
 | Two classes | the engine knows two |
 | A quest stage's way | a save does not record how a stage was reached. `one_way` takes one way per stage, the one that suits the side played, the first listed on a tie. It can differ from what a player chose |
 | Go Back and story values with no end value | a value a kept chapter also writes, with no known end value, stays as it is, and the report names it |
-| The fourth planet on a return to the Leviathan | the save does not say which planet came last, so it is the last on the timeline |
+| The fourth planet on a return to the Leviathan | the save does not say which planet came last; it is the last free planet on the route, which the player can reorder on the galaxy map (until 2026-11-06: the last on the timeline) |
+| The order free planets were played in | the save does not record it; the route takes the order each planet's own quests entered the journal, which mostly follows play but not strictly, and the player can reorder it |
 | Load-screen portrait of the leader | savenfo `PORTRAIT1` and `2` follow the party, by hand and after a skip, a return or an import (since 2026-11-02); `PORTRAIT0` is the leader's and is left to the game's next save |
 | Attributes shown with effects | an item equipped in the editor counts towards them only once the game has saved, because its effects are not in the save until then; the engine's caps and its rule for effects of one source are not modelled |
 

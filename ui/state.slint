@@ -28,14 +28,25 @@ export struct ChainLine { ending: int, text: string, can: bool, branch: string, 
 // goes back to it (index: the chapter to go back to), 2 it skips to it (index: the chapter to
 // skip through), 3 no button.
 export struct SkipRow { index: int, order: int, planet: string, title: string, note: string, state: int, depth: int, open: bool, key: string, tag: string, stage: int }
-// A main chapter on the timeline, at pos (0 the start, 1 the end; the chapter's end is its
-// point). state: 0 played, 1 the one the save is in, 2 ahead.
+// A side chapter (the Ebon Hawk, Yavin Station), shown as its ship under the galaxy map.
+// state: 0 played, 2 not.
 export struct TimelineNode { index: int, numeral: string, planet: string, title: string, state: int, pos: float }
-// Another save of the game on the timeline (index into the save list); level says whose.
-// group: its marker in tl-groups; slot: its place in the marker's list (0 nearest the line).
-export struct TimelineSave { index: int, pos: float, group: int, slot: int, name: string, area: string, time: string, level: string, story: string, shot: image, has-shot: bool }
-// The saves in one stretch of the timeline as one marker: count of them, the first in tl-saves.
-export struct TimelineGroup { pos: float, count: int, start: int }
+// A main chapter as a stop on the galaxy map, in the order of the save's route: stop is its
+// number on the route; x and y where it stands (shares of the map's width and height); look
+// what is drawn without a globe (0 a planet, 1 a ship, 2 a station). state: 0 played, 1 the
+// save is in it, 2 ahead, 3 the next stop, 4 begun and not finished. A free planet (free) can move earlier or later
+// among those of its kind (0 done, 1 begun, 2 not visited), named chip in the order row (its
+// group: "Dxun and Onderon"); here: the save is at this stop.
+export struct GalaxyStop { index: int, stop: string, planet: string, title: string, state: int, x: float, y: float, globe: image, has-globe: bool, look: int, free: bool, chip: string, earlier: bool, later: bool, kind: int, here: bool }
+// The way from one stop to the next: its box on the map (x, y, w, h, shares of the map's width
+// and height), and the curve from (ax, ay) through (cx, cy) to (bx, by), shares of the box;
+// lit where the save has gone.
+export struct GalaxyLane { x: float, y: float, w: float, h: float, ax: float, ay: float, cx: float, cy: float, bx: float, by: float, lit: bool }
+// Another save of the game on the galaxy map (index into the save list); level says whose.
+// group: its marker in tl-groups; slot: its place in the marker's ring.
+export struct TimelineSave { index: int, group: int, slot: int, name: string, area: string, time: string, level: string, story: string, shot: image, has-shot: bool }
+// The saves at one stop as one marker, at the stop's x and y: count of them, the first in tl-saves.
+export struct TimelineGroup { x: float, y: float, count: int, start: int }
 export struct SlotRow { slot: int, name: string, item: string, icon: image, has-icon: bool, empty: bool, changed: bool, art: image, has-art: bool }
 export struct CreatureRow { index: int, name: string, note: string, hp: int, max-hp: int }
 export struct MapMark { index: int, x: float, y: float, kind: int, name: string, selected: bool, face: image, has-face: bool }
@@ -367,14 +378,24 @@ export global App {
     in property <[Named]> travel-ways;
     callback travel(int);
     callback toggle-planet(string);
-    // The timeline: its main chapters, the other saves of this game and where the open
-    // save is (0 the start, 1 the end).
-    in property <[TimelineNode]> tl-nodes;
-    // the side chapters, shown as their ships under the line (the Ebon Hawk, Yavin Station)
-    in property <[TimelineNode]> tl-sides;
+    // The galaxy map: the stops of the save's route, the lanes between them, where the save
+    // is (gm-here-text; aboard: on the Ebon Hawk), the note on the free planets, and whether
+    // their order was changed from the save's own.
+    in property <[GalaxyStop]> gm-stops;
+    in property <[GalaxyLane]> gm-lanes;
+    in property <bool> gm-aboard;
+    in property <string> gm-here-text;
+    in property <string> gm-free-note;
+    in property <bool> gm-reordered;
+    // a soft white glow (main.rs glow_image), tinted for halos
+    in property <image> gm-glow;
+    // a free planet one place earlier (-1) or later (1) on the route, by milestone index
+    callback route-move(int, int);
+    callback route-reset();
+    // the side chapters, shown as their ships under the map (the Ebon Hawk, Yavin Station)
+    in property <[GalaxyStop]> tl-sides;
     in property <[TimelineSave]> tl-saves;
     in property <[TimelineGroup]> tl-groups;
-    in property <float> tl-here;
     // A chapter clicked on the timeline: its pop-up (overlay 12) with the rows below.
     callback open-chapter(int);
     // the other saves are read (main.rs reads them away from the window)

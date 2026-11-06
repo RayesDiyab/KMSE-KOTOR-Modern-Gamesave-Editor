@@ -326,6 +326,8 @@ struct State {
     // the chapter whose pop-up is open on the timeline (a milestone index), and the row
     // picked in it: (depth, chapter index, quest tag, stage), as SkipRow has them
     timeline_pick: Option<i32>,
+    // the order picked on the galaxy map for the free planets (planet names), for this save
+    route_plan: Vec<String>,
     pop_pick: Option<(i32, i32, String, i32)>,
     // a most Health or Force typed out of reach at the creature's level (overlay 13)
     pool_ask: Option<PoolAsk>,
@@ -738,6 +740,7 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.global_filter = (String::new(), false);
             st.map = None;
             st.map_pick = None;
+            st.route_plan.clear();
             forget_timeline_saves(st);
             prefetch_map_lists(st);
             preload_art(st);
@@ -1330,8 +1333,43 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
             Chapter { index: i as i32, order, side, planet: planet.to_string(), title, summary, played }
         })
         .collect();
+    // the main chapters in the order this save plays them: the free planets as the save went
+    // to them, then as picked on the galaxy map (side chapters keep their places after them)
+    let route = story_route(st);
+    for c in out.iter_mut().filter(|c| !c.side) {
+        if let Some(k) = route.order.iter().position(|i| *i as i32 == c.index) {
+            c.order = k as i64 + 1;
+        }
+    }
     out.sort_by_key(|c| c.order);
     out
+}
+
+/// The chapters (milestone indices) the open save has begun and not played: any of their own
+/// quests in the journal, or, for a free planet, the game's flag that it is done.
+fn begun_chapters(st: &State) -> Vec<i32> {
+    let Some(save) = st.save.as_ref() else { return Vec::new() };
+    let quests = save.quests();
+    let played = kse_core::questdb::chapters_played(st.game, &quests);
+    let route = story_route(st);
+    let all = kse_core::questdb::milestones_ref(st.game);
+    (0..all.len())
+        .filter(|i| !played.get(*i).copied().unwrap_or(false))
+        .filter(|i| {
+            let in_group = route.groups.iter().position(|g| g.contains(i)).map_or(false, |g| route.kinds[g] < 2);
+            let own = kse_core::questdb::chapter_quests(st.game, all[*i].0);
+            let shared = |t: &str| all.iter().enumerate().any(|(j, (p, _))| j != *i && kse_core::questdb::chapter_quests(st.game, p).iter().any(|(x, _)| x.eq_ignore_ascii_case(t)));
+            in_group || own.iter().any(|(t, _)| quests.iter().any(|(q, _)| q.eq_ignore_ascii_case(t)) && !shared(t))
+        })
+        .map(|i| i as i32)
+        .collect()
+}
+
+/// The open save's route through the story (questdb::story_route) with the order picked.
+fn story_route(st: &State) -> kse_core::questdb::Route {
+    let Some(save) = st.save.as_ref() else { return Default::default() };
+    let globals = save.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default();
+    kse_core::questdb::story_route(st.game, &save.quests(), &globals, &st.route_plan)
 }
 
 /// The Skip Ahead confirmation for chapter `i` (or, with st.skip_stage, a stage in it).
@@ -1362,7 +1400,7 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
     summary.push_str("\n\nWorked out from the game's files. None of this data has been checked by playing it.");
     if path.len() > 1 {
         let names: Vec<String> = path.iter().filter(|k| st.skip_stage.is_none() || **k != i).filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
-        summary.push_str(&format!("\n\nEvery chapter before it that this save has not played comes first, in story order: {}.", names.join(", ")));
+        summary.push_str(&format!("\n\nEvery chapter before it on your route that this save has not played comes first, in the route's order: {}.", names.join(", ")));
     }
     let app = u.global::<App>();
     app.set_skip_asked(i);
@@ -1630,7 +1668,7 @@ fn story_problems(ui: &AppWindow, notes: &[String]) {
 struct TimelineOther {
     // index into the save list
     index: usize,
-    // the furthest main chapter it has played, as its place in story order (-1: none yet)
+    // the furthest main chapter it has played on its route, a milestone index (-1: none yet)
     reached: i32,
     seconds: i64,
     // the player character's name
@@ -1643,23 +1681,15 @@ struct TimelineOther {
     story: String,
 }
 
-/// The main chapters (not the side ones) as milestone indices, in story order.
-fn main_chapters(game: Game) -> Vec<(usize, String)> {
-    let mut all: Vec<(usize, i64, String)> = kse_core::questdb::milestones_ref(game)
-        .iter()
-        .enumerate()
-        .filter(|(_, (_, m))| m.get("side_chapter").and_then(|v| v.as_bool()) != Some(true))
-        .map(|(i, (planet, m))| (i, m.get("order").and_then(|v| v.as_i64()).unwrap_or(99), planet.to_string()))
-        .collect();
-    all.sort_by_key(|x| x.1);
-    all.into_iter().map(|(i, _, p)| (i, p)).collect()
-}
-
-/// The furthest main chapter a save has played, as its place in story order, and its name.
-/// The planets in between that can be played in any order may still be open.
-fn furthest_played(game: Game, quests: &[(String, i64)]) -> Option<(usize, String)> {
-    let done = kse_core::questdb::chapters_played(game, quests);
-    main_chapters(game).into_iter().enumerate().filter(|(_, (i, _))| done.get(*i).copied().unwrap_or(false)).last().map(|(k, (_, p))| (k, p))
+/// The furthest main chapter a save has played on its own route, as a milestone index, and
+/// its name. A free planet earlier on the route may still be open.
+fn furthest_played(save: &Save) -> Option<(usize, String)> {
+    let quests = save.quests();
+    let done = kse_core::questdb::chapters_played(save.game, &quests);
+    let globals = save.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default();
+    let route = kse_core::questdb::story_route(save.game, &quests, &globals, &[]);
+    let all = kse_core::questdb::milestones_ref(save.game);
+    route.order.iter().filter(|i| done.get(**i).copied().unwrap_or(false)).last().map(|i| (*i, all[*i].0.to_string()))
 }
 
 /// Every other save of the open save's game (any character), each with where it is in the
@@ -1698,7 +1728,7 @@ fn timeline_saves(ui: &AppWindow, st: &mut State) -> Vec<TimelineOther> {
                 if other.game != game {
                     continue;
                 }
-                let furthest = furthest_played(game, &other.quests());
+                let furthest = furthest_played(&other);
                 out.push(TimelineOther {
                     index: i,
                     reached: furthest.as_ref().map_or(-1, |(k, _)| *k as i32),
@@ -1730,60 +1760,146 @@ fn forget_timeline_saves(st: &mut State) {
     st.timeline_loading = false;
 }
 
-/// A chapter's number on the timeline: I, II, III and on.
-fn numeral(mut n: usize) -> String {
-    let mut out = String::new();
-    for (v, r) in [(10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")] {
-        while n >= v {
-            out.push_str(r);
-            n -= v;
+/// A lane of the galaxy map from `a` to `b` (shares of the map): a quadratic curve bending a
+/// little to one side, as its own box (the curve's bounds) and its three points as shares of
+/// that box. Slint fits a path's view into its element keeping the view's shape, so the map
+/// draws each lane in a view the size of its box, in pixels.
+fn lane(a: (f32, f32), b: (f32, f32), lit: bool) -> GalaxyLane {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let bend = 0.12;
+    let c = ((a.0 + b.0) / 2.0 - dy * bend, (a.1 + b.1) / 2.0 + dx * bend);
+    // the curve's reach on each axis: its ends, and its turning point when it has one
+    let reach = |p0: f32, p1: f32, p2: f32| {
+        let mut lo = p0.min(p2);
+        let mut hi = p0.max(p2);
+        let den = p0 - 2.0 * p1 + p2;
+        if den.abs() > 1e-6 {
+            let t = (p0 - p1) / den;
+            if t > 0.0 && t < 1.0 {
+                let v = (1.0 - t) * (1.0 - t) * p0 + 2.0 * (1.0 - t) * t * p1 + t * t * p2;
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
         }
-    }
-    out
+        (lo, (hi - lo).max(0.002))
+    };
+    let (x, w) = reach(a.0, c.0, b.0);
+    let (y, h) = reach(a.1, c.1, b.1);
+    let at = |p: (f32, f32)| ((p.0 - x) / w, (p.1 - y) / h);
+    let (p0, p1, p2) = (at(a), at(c), at(b));
+    GalaxyLane { x, y, w, h, ax: p0.0, ay: p0.1, cx: p1.0, cy: p1.1, bx: p2.0, by: p2.1, lit }
 }
 
-/// The timeline: the main chapters at even steps along the line (a chapter's point is its
-/// end), the open save and the game's other saves each just past the furthest chapter it
-/// has played (the planets that can be played in any order may be open behind it), and the
-/// rows of the chapter whose pop-up is open (st.timeline_pick). The saves in one stretch are
-/// one marker: a point for one save, a larger point with their number for more, which opens
-/// upward into a list of them, grouped by character and in the order of their time played.
+/// A soft white glow, brightest in the middle and gone at the edge: the galaxy map tints it
+/// for the halos round its stops and the light at the galaxy's core (Slint's software renderer
+/// draws a radial gradient as a square, so the glow is a picture).
+fn glow_image() -> Image {
+    const N: usize = 128;
+    let mut px = vec![0u8; N * N * 4];
+    for y in 0..N {
+        for x in 0..N {
+            let u = (x as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            let v = (y as f32 + 0.5) / N as f32 * 2.0 - 1.0;
+            let r = (u * u + v * v).sqrt();
+            let a = if r >= 1.0 { 0.0 } else { (1.0 - r).powf(2.2) };
+            let o = (y * N + x) * 4;
+            px[o] = 255;
+            px[o + 1] = 255;
+            px[o + 2] = 255;
+            px[o + 3] = (a * 255.0) as u8;
+        }
+    }
+    Image::from_rgba8(SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(&px, N as u32, N as u32))
+}
+
+/// The Story tab's galaxy map: the main chapters as stops on the map in the order this save
+/// plays them, lit lanes along the part of the route behind the save and faint ones ahead, the
+/// open save's place (the chapter whose areas it is in, or the last one played when it is on
+/// the Ebon Hawk), the game's other saves at the furthest stop each has played, and the rows
+/// of the chapter whose pop-up is open (st.timeline_pick). The saves at one stop are one
+/// marker: a point for one save, a larger point with their number for more, which opens into
+/// a ring of them, grouped by character and in the order of their time played.
 fn fill_skip(ui: &AppWindow, st: &mut State) {
-    // the other saves only while the timeline shows
+    // the other saves only while the galaxy map shows
     let others = if st.story == 5 { timeline_saves(ui, st) } else { Vec::new() };
     let chapters = skip_chapters(st);
     let main: Vec<&Chapter> = chapters.iter().filter(|c| !c.side).collect();
-    let n = main.len();
+    let route = story_route(st);
     let next = main.iter().position(|c| !c.played);
-    let point = |k: usize| (k + 1) as f32 / (n + 1) as f32;
-    // the stretch after chapter k-1: from its point (or the start) to chapter k's (or the end)
-    let stretch = |k: usize| (if k == 0 { 0.0 } else { point(k - 1) }, if k >= n { 1.0 } else { point(k) });
-    let here_stretch = main.iter().rposition(|c| c.played).map_or(0, |k| k + 1);
+    let all = kse_core::questdb::milestones_ref(st.game);
+    // where the save is: the chapter whose areas hold its area; on the ship (or anywhere no
+    // chapter names), at the last stop played
+    let module = st.save.as_ref().map(|s| s.module_name().to_string()).unwrap_or_default();
+    let in_chapter = kse_core::questdb::chapter_of_module(st.game, &module);
+    let here_k = in_chapter.and_then(|i| main.iter().position(|c| c.index == i as i32));
+    let aboard = here_k.is_none();
+    let here_k = here_k.or_else(|| main.iter().rposition(|c| c.played)).or(if main.is_empty() { None } else { Some(0) });
+    // the chapter the save is in: the one it stands in, unplayed. Begun: a chapter not played
+    // that the save has been to (its quests are in the journal, or its star map found); a
+    // free planet left half done is begun, not the save's place.
+    let begun = begun_chapters(st);
+    let current_k = here_k.filter(|k| !main[*k].played);
+    let game = st.game;
+    let place = |planet: &str| MAP_STOPS.iter().find(|m| m.0 == game && m.1.eq_ignore_ascii_case(planet));
+    let data = st.data();
+    // the free planets by group, named as the order row shows them
+    let free: Vec<String> = route.groups.iter().map(|g| g.iter().map(|i| all[*i].0.to_string()).collect::<Vec<_>>().join(" and ")).collect();
+    let mut stops: Vec<GalaxyStop> = Vec::new();
+    for (k, c) in main.iter().enumerate() {
+        let spot = place(&c.planet);
+        let (x, y) = spot.map_or(((k as f32 + 0.5) / main.len().max(1) as f32, 0.5), |m| (m.2, m.3));
+        let globe = match (spot.filter(|m| !m.4.is_empty()), data.as_ref()) {
+            (Some(m), Some(d)) => picture(&mut st.portraits, &st.art, globe_key(m.4, false), || globe_pixels(d, m.4, false)),
+            _ => None,
+        };
+        // a free planet moves among the free planets of its own kind (done, begun, not visited)
+        let g = route.groups.iter().position(|g| g.first() == Some(&(c.index as usize)));
+        let kind = g.map_or(-1, |g| route.kinds[g] as i32);
+        let earlier = g.map_or(false, |g| g > 0 && route.kinds[g - 1] as i32 == kind);
+        let later = g.map_or(false, |g| g + 1 < route.groups.len() && route.kinds[g + 1] as i32 == kind);
+        stops.push(GalaxyStop {
+            index: c.index,
+            stop: s((k + 1).to_string()),
+            planet: s(&c.planet),
+            title: s(&c.title),
+            state: if c.played { 0 } else if Some(k) == current_k { 1 } else if begun.contains(&c.index) { 4 } else if Some(k) == next { 3 } else { 2 },
+            x,
+            y,
+            has_globe: globe.is_some(),
+            globe: globe.unwrap_or_default(),
+            look: spot.map_or(0, |m| m.5 as i32),
+            free: g.is_some(),
+            chip: s(g.map_or(String::new(), |g| free[g].clone())),
+            earlier,
+            later,
+            kind,
+            here: Some(k) == here_k,
+        });
+    }
+    // the lanes: from each stop to the next, curving a little to one side as hyperspace routes
+    // are drawn; lit where the save has gone (to a stop played, or to the one it stands in)
+    let mut lanes: Vec<GalaxyLane> = Vec::new();
+    for k in 1..stops.len() {
+        let (a, b) = (&stops[k - 1], &stops[k]);
+        let lit = b.state == 0 || b.state == 4 || (Some(k) == here_k && !aboard);
+        lanes.push(lane((a.x, a.y), (b.x, b.y), lit));
+    }
+    // the other saves, at the furthest stop each has played (none yet: at the first)
     let shots = st.shots.lock().unwrap().clone();
     let mut saves: Vec<TimelineSave> = Vec::new();
-    let mut here = 0.0f32;
     let mut groups: Vec<TimelineGroup> = Vec::new();
-    for k in 0..=n {
-        let (lo, hi) = stretch(k);
-        let mut at: Vec<&TimelineOther> = others.iter().filter(|o| (o.reached + 1) as usize == k).collect();
-        at.sort_by(|a, b| a.who.to_lowercase().cmp(&b.who.to_lowercase()).then(a.seconds.cmp(&b.seconds)));
-        let has_here = k == here_stretch;
-        // the open save at two thirds of the stretch, the others' marker at one third (alone:
-        // in the middle)
-        if has_here {
-            here = lo + (hi - lo) * if at.is_empty() { 0.5 } else { 2.0 / 3.0 };
-        }
+    for (k, stop) in stops.iter().enumerate() {
+        let mut at: Vec<&TimelineOther> = others.iter().filter(|o| if o.reached < 0 { k == 0 } else { o.reached == stop.index }).collect();
         if at.is_empty() {
             continue;
         }
-        let pos = lo + (hi - lo) * if has_here { 1.0 / 3.0 } else { 0.5 };
-        groups.push(TimelineGroup { pos, count: at.len() as i32, start: saves.len() as i32 });
+        at.sort_by(|a, b| a.who.to_lowercase().cmp(&b.who.to_lowercase()).then(a.seconds.cmp(&b.seconds)));
+        groups.push(TimelineGroup { x: stop.x, y: stop.y, count: at.len() as i32, start: saves.len() as i32 });
         let group = groups.len() as i32 - 1;
         for (slot, o) in at.into_iter().enumerate() {
             let shot = st.saves.get(o.index).and_then(|(f, _)| shots.get(&f.path).cloned().flatten());
             saves.push(TimelineSave {
                 index: o.index as i32,
-                pos,
                 group,
                 slot: slot as i32,
                 name: s(&o.name),
@@ -1796,26 +1912,51 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             });
         }
     }
-    let nodes: Vec<TimelineNode> = main
-        .iter()
-        .enumerate()
-        .map(|(k, c)| TimelineNode {
+    let free_note = if free.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "These planets can be played in any order. Use the arrows to set yours: Skip Ahead follows it{}.",
+            if st.game == Game::K1 { ", and the Leviathan comes after the third, as in the game" } else { "" }
+        )
+    };
+    let here_text = match here_k.map(|k| &stops[k]) {
+        Some(h) if aboard => format!("Aboard the Ebon Hawk, last at {}", h.planet),
+        Some(h) => format!("On {}", h.planet),
+        None => String::new(),
+    };
+
+    // the side chapters (the Ebon Hawk's own quests, Yavin Station): off the route, as they
+    // come only when picked themselves. The Ebon Hawk waits beside the save's stop.
+    let (hx, hy) = here_k.map_or((0.5, 0.5), |k| (stops[k].x, stops[k].y));
+    let mut sides: Vec<GalaxyStop> = Vec::new();
+    for c in chapters.iter().filter(|c| c.side) {
+        let spot = place(&c.planet);
+        let hawk = spot.map_or(false, |m| m.5 == 1);
+        let (x, y) = if hawk { (hx, hy) } else { spot.map_or((0.95, 0.9), |m| (m.2, m.3)) };
+        let globe = match (spot.filter(|m| !m.4.is_empty()), data.as_ref()) {
+            (Some(m), Some(d)) => picture(&mut st.portraits, &st.art, globe_key(m.4, false), || globe_pixels(d, m.4, false)),
+            _ => None,
+        };
+        sides.push(GalaxyStop {
             index: c.index,
-            numeral: s(numeral(k + 1)),
+            stop: s(""),
             planet: s(&c.planet),
             title: s(&c.title),
-            state: if c.played { 0 } else if Some(k) == next { 1 } else { 2 },
-            pos: point(k),
-        })
-        .collect();
-
-    // the side chapters (the Ebon Hawk's own quests, Yavin Station): not on the line, as
-    // they come only when picked themselves; the ships at the bottom of the timeline
-    let sides: Vec<TimelineNode> = chapters
-        .iter()
-        .filter(|c| c.side)
-        .map(|c| TimelineNode { index: c.index, numeral: s(""), planet: s(&c.planet), title: s(&c.title), state: if c.played { 0 } else { 2 }, pos: 0.0 })
-        .collect();
+            state: if c.played { 0 } else { 2 },
+            x,
+            y,
+            has_globe: globe.is_some(),
+            globe: globe.unwrap_or_default(),
+            look: if hawk { 1 } else { 0 },
+            free: false,
+            chip: s(""),
+            earlier: false,
+            later: false,
+            kind: if hawk && hx < 0.2 { 1 } else { -1 },
+            here: false,
+        });
+    }
 
     // the open pop-up's rows
     let mut rows: Vec<SkipRow> = Vec::new();
@@ -1825,7 +1966,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
     let mut note = String::new();
     if let Some(c) = st.timeline_pick.and_then(|i| chapters.iter().find(|c| c.index == i)) {
         let k = main.iter().position(|x| x.index == c.index);
-        let current = k.is_some() && k == next;
+        let current = k.is_some() && (k == current_k || begun.contains(&c.index));
         let row = |depth: i32, title: String, note: &str, state: i32, index: i32, key: String, tag: &str, stage: i32, open: bool| SkipRow {
             index,
             order: 0,
@@ -1840,11 +1981,12 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             stage,
         };
         // Its beginning: gone back to when the save has played it or is in it; otherwise
-        // skipped to by playing the chapter before it.
+        // skipped to by playing the stop before it on the route (none when that one is
+        // played: the save is at its beginning already).
         let begin = if c.played || current {
             Some((0, c.index))
         } else {
-            k.and_then(|k| k.checked_sub(1)).map(|p| (2, main[p].index))
+            k.and_then(|k| k.checked_sub(1)).filter(|p| !main[*p].played).map(|p| (2, main[p].index))
         };
         if let Some((state, index)) = begin {
             rows.push(row(5, "The beginning of the chapter".into(), "", state, index, String::new(), "", 0, false));
@@ -1887,7 +2029,7 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
             height += 44.0;
         }
         kicker = match k {
-            Some(k) => format!("CHAPTER {}  ·  {}", numeral(k + 1), if c.played { "BEHIND YOU" } else if current { "YOU ARE IN IT" } else { "AHEAD OF YOU" }),
+            Some(k) => format!("STOP {}  ·  {}", k + 1, if c.played { "BEHIND YOU" } else if Some(k) == current_k { "YOU ARE IN IT" } else if current { "BEGUN, NOT FINISHED" } else if Some(k) == next { "YOUR NEXT STOP" } else { "AHEAD OF YOU" }),
             None => format!("SIDE CHAPTER  ·  {}", if c.played { "PLAYED" } else { "NOT PLAYED" }),
         };
         title = c.planet.clone();
@@ -1900,11 +2042,15 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         };
     }
     let app = ui.global::<App>();
-    app.set_tl_nodes(model(nodes));
+    app.set_gm_stops(model(stops));
+    app.set_gm_lanes(model(lanes));
+    app.set_gm_aboard(aboard);
+    app.set_gm_here_text(s(here_text));
+    app.set_gm_free_note(s(free_note));
+    app.set_gm_reordered(!st.route_plan.is_empty());
     app.set_tl_sides(model(sides));
     app.set_tl_saves(model(saves));
     app.set_tl_groups(model(groups));
-    app.set_tl_here(here);
     // the row picked, found again by what it is (opening a quest moves the rows)
     let picked = st.pop_pick.as_ref().and_then(|(d, i, tag, stage)| rows.iter().position(|r| r.depth == *d && r.index == *i && r.tag.as_str() == tag && r.stage == *stage));
     app.set_pop_picked(picked.map_or(-1, |k| k as i32));
@@ -2102,6 +2248,38 @@ const GLOBES: &[(Game, &str, &str, f32, f32)] = &[
     (Game::K2, "Onderon", "Gui_onderon", 0.76, 0.60),
     (Game::K2, "Korriban", "Gui_korriban_1", 0.82, 0.18),
     (Game::K2, "M4_78", "Gui_M4-78", 0.90, 0.82),
+];
+
+/// The story's chapters on the Story tab's galaxy map: where each stands (a share of the map's
+/// width and height; the planets where GLOBES puts them, as the game's own map spreads them),
+/// the game's planet texture for its globe ("" for none), and what is drawn without one: 0 a
+/// planet, 1 a ship, 2 a station. The ships and stations are placed near the planet the story
+/// meets them at (the Endar Spire over Taris, the Star Forge over the Unknown World, the
+/// Ravager over Malachor V); the masters' meeting is at Dantooine's enclave.
+const MAP_STOPS: &[(Game, &str, f32, f32, &str, u8)] = &[
+    (Game::K1, "Endar Spire", 0.10, 0.12, "", 1),
+    (Game::K1, "Taris", 0.03, 0.55, "Gui_Taris_1", 0),
+    (Game::K1, "Dantooine", 0.25, 0.25, "Gui_Dantooine_1", 0),
+    (Game::K1, "Tatooine", 0.74, 0.85, "Gui_Tatooine_1", 0),
+    (Game::K1, "Kashyyyk", 0.24, 0.85, "Gui_Kashyyyk_1", 0),
+    (Game::K1, "Manaan", 0.86, 0.22, "Gui_Manaan_1", 0),
+    (Game::K1, "Korriban", 0.55, 0.08, "Gui_korriban_1", 0),
+    (Game::K1, "Leviathan", 0.66, 0.45, "", 1),
+    (Game::K1, "Unknown World", 0.48, 0.50, "Gui_unknown_1", 0),
+    (Game::K1, "Star Forge", 0.40, 0.90, "", 2),
+    (Game::K1, "Yavin Station", 0.97, 0.62, "GUI_yavin_1", 0),
+    (Game::K1, "Ebon Hawk", 0.0, 0.0, "", 1),
+    (Game::K2, "Peragus", 0.04, 0.20, "Gui_peragus", 0),
+    (Game::K2, "Telos", 0.16, 0.75, "Gui_telos", 0),
+    (Game::K2, "Nar Shaddaa", 0.36, 0.12, "Gui_narshada", 0),
+    (Game::K2, "Dxun", 0.80, 0.88, "Gui_dxun", 0),
+    (Game::K2, "Onderon", 0.90, 0.50, "Gui_onderon", 0),
+    (Game::K2, "Dantooine", 0.60, 0.25, "Gui_Dantooine_1", 0),
+    (Game::K2, "Korriban", 0.84, 0.10, "Gui_korriban_1", 0),
+    (Game::K2, "The Jedi Masters", 0.62, 0.75, "", 2),
+    (Game::K2, "Ravager", 0.30, 0.55, "", 1),
+    (Game::K2, "Malachor V", 0.44, 0.85, "Gui_malachor", 0),
+    (Game::K2, "Ebon Hawk", 0.0, 0.0, "", 1),
 ];
 
 /// planetary.2da rows that are not places the galaxy map flies to: k_sup_galaxymap (the trip)
@@ -3634,6 +3812,7 @@ fn report_panics() {
 fn main() {
     report_panics();
     let ui = AppWindow::new().expect("the window could not be made");
+    ui.global::<App>().set_gm_glow(glow_image());
     {
         // A mouse press anywhere first takes the focus out of a text box, so a number typed
         // and then left counts as entered (the boxes treat losing focus as Enter).
@@ -3708,6 +3887,7 @@ fn main() {
         timeline_load: Arc::new(Mutex::new(None)),
         timeline_loading: false,
         timeline_pick: None,
+        route_plan: Vec::new(),
         pop_pick: None,
         quest_open: false,
         stage_pick: None,
@@ -4753,6 +4933,26 @@ fn main() {
         if st.story == 5 {
             fill_skip(&u, st);
         }
+    });
+    // A free planet moved one place earlier (-1) or later (1) on the galaxy map's route, among
+    // the free planets of its kind (done, begun, not visited). Nothing in the save changes: the
+    // order is what Skip Ahead and Go Back then follow.
+    on!(ui, state, on_route_move, |u, st, index: i32, dir: i32| {
+        let route = story_route(st);
+        let all = kse_core::questdb::milestones_ref(st.game);
+        let Some(g) = route.groups.iter().position(|g| g.first() == Some(&(index.max(0) as usize))) else { return };
+        let to = g as i32 + dir.signum();
+        if to < 0 || to as usize >= route.groups.len() || route.kinds[to as usize] != route.kinds[g] {
+            return;
+        }
+        let mut names: Vec<String> = route.groups.iter().map(|g| all[g[0]].0.to_string()).collect();
+        names.swap(g, to as usize);
+        st.route_plan = names;
+        fill_skip(&u, st);
+    });
+    on!(ui, state, on_route_reset, |u, st| {
+        st.route_plan.clear();
+        fill_skip(&u, st);
     });
     on!(ui, state, on_open_chapter, |u, st, i: i32| {
         u.global::<App>().set_back_alignment(50);

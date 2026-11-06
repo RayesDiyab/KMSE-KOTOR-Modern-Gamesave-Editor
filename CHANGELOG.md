@@ -6,6 +6,19 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The timeline is a galaxy map** (2026-11-06). Story opens on a map of the galaxy: each
+  chapter at its planet, as the game's own map places them, with the game's planet pictures;
+  bands of blue light join the planets in the order the save played them, faint lanes run on
+  along the route ahead, and the save's stop has a gold ring with the Ebon Hawk beside it. A
+  click on a planet opens its quests as before. The other saves are tags at the furthest stop
+  each has played. **The order of the free planets can be picked**: arrows under the map move
+  Tatooine, Kashyyyk, Manaan and Korriban (KotOR II: Nar Shaddaa, Dxun and Onderon, Dantooine,
+  Korriban) earlier or later, and Skip Ahead and Go Back follow that order; a planet picked
+  first is skipped to alone. The Leviathan comes after the third free planet, as in the game.
+  A chapter before a played one on the story's line now reads played, though the game took
+  its quests out of the journal (a save after the Leviathan read Dantooine as never played).
+  The Galaxy Map page that opens and closes planets is now Planets. `tests/galaxy_route.rs`;
+  looked at in the program; in the game, **untested**.
 - **The audit's findings fixed** (2026-11-02; [the worklist](docs/audit-2026-11-02-worklist.md)
   has each one and how it was checked). No work is lost without asking: a timeline click
   is refused and closing asks once. Cancel in Copy and Save as a New Save cancels. A save the

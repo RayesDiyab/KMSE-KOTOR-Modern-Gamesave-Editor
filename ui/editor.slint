@@ -5,7 +5,7 @@
 import { Theme } from "theme.slint";
 // written by build.rs: Yavin Station, made from the player's game
 import { TimelineArt } from "timeline-art.slint";
-import { App, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, Toggle, MapMark, AreaRow, SlotRow, TimelineNode, TimelineSave, TimelineGroup, StageRow } from "state.slint";
+import { App, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, Toggle, MapMark, AreaRow, SlotRow, TimelineNode, TimelineSave, TimelineGroup, GalaxyStop, GalaxyLane, StageRow } from "state.slint";
 import { Button, Stepper, Field, Switch, Label, Note, Scroller, Cross, Sign, BackArrow, Choice, Link, CopyButton } from "widgets.slint";
 
 component Line inherits Rectangle {
@@ -1007,7 +1007,7 @@ component MoreSection inherits Rectangle {
     Rectangle {
         x: 0;
         width: split;
-        Label { x: 0; y: 0; text: "GALAXY MAP"; }
+        Label { x: 0; y: 0; text: "WHERE THE EBON HAWK CAN FLY"; }
         Note { x: 0; y: 28px; width: parent.width; text: "Where the Ebon Hawk can fly. Click a planet to open it (green) or close it (grey)."; }
         sky := Rectangle {
             y: 56px;
@@ -1381,36 +1381,61 @@ component JournalSection inherits Rectangle {
 }
 
 
-// The ends of the timeline: a small diamond in the edge colour.
-component Diamond inherits Path {
-    width: 14px;
-    height: 14px;
-    viewbox-width: 14;
-    viewbox-height: 14;
-    stroke: Theme.edge;
-    stroke-width: 1px;
-    fill: Theme.panel;
-    commands: "M 7 0.5 L 13.5 7 L 7 13.5 L 0.5 7 Z";
+// A small arrow on a route stop: moves a free planet one place earlier (left) or later.
+component ArrowButton inherits Rectangle {
+    in property <bool> left;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 22px * Theme.ts;
+    border-radius: 4px;
+    background: at.has-hover && root.enabled ? Theme.accent.with-alpha(0.18) : transparent;
+    Path {
+        width: 8px * Theme.ts;
+        height: 12px * Theme.ts;
+        viewbox-width: 8;
+        viewbox-height: 12;
+        stroke: !root.enabled ? Theme.faint.with-alpha(0.35) : at.has-hover ? Theme.hover-edge : Theme.accent;
+        stroke-width: 2px;
+        commands: root.left ? "M 7 1 L 1 6 L 7 11" : "M 1 1 L 7 6 L 1 11";
+    }
+    at := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
 }
 
-// The timeline: the story's main chapters on one line from start to end (each point is a
-// chapter's end), the open save's place in gold, and the game's other saves on the
-// line too, any character's (green; blue in KotOR II): a point for one save in a stretch, a
-// larger point with their number for several, which opens into a ring of them while the
-// others fade (2026-10-23, the maintainer). Pointing at a chapter shows it above the line, at
-// a save its card (below the line, or beside the ring). A chapter opens its pop-up (app.slint, overlay 12) to pick where in it to
-// skip to or go back to; a save opens that save. (2026-10-23, the maintainer's design.)
-component TimelineSection inherits Rectangle {
-    property <int> hover-node: -1;
+// The galaxy map (2026-11-06, the maintainer: "the timeline needs to be changed into a
+// galaxymap with blue bands of light connecting the planets visited in order a player visited
+// them ... in the style of kotor but also intuitive"). The story's main chapters stand where
+// the game's own galaxy map puts their planets; bands of blue light join them in the order the
+// save played them, and faint lanes run on along the route still ahead. The open save's stop
+// has the gold ring, with the Ebon Hawk beside it. Pointing at a stop shows its chapter;
+// clicking one opens its pop-up (app.slint, overlay 12) with its quests, to skip to or go back
+// to any point in it. Under the map, the route as a row of stops: the free planets there carry
+// arrows to choose the order they are played in. The game's other saves wait at the furthest
+// stop each has played, a point for one, a larger point with their number for several, which
+// opens into a ring of them.
+//
+// The map is a dark display in light mode too: space is dark, and its lights read only on it.
+component GalaxySection inherits Rectangle {
+    // the map's own colours, the same in both modes
+    property <color> space: #04080f;
+    property <color> ink-text: #ecf3f8;
+    property <color> ink-soft: #9db1c3;
+    property <color> ink-faint: #6d8196;
+    property <color> lane-blue: #3d9dff;
+    property <color> lane-core: #9fdcff;
+    property <color> gold: #e2c35c;
+    property <color> hover-gold: #f4d03f;
+    property <color> save-green: Theme.k2 ? #60b2ff : #7ee0ab;
+    property <int> hover-stop: -1;
+    property <int> hover-side: -1;
     property <int> hover-save: -1;
-    // A marker of several saves opened: its saves come out from under it into a ring. It
-    // stays open while the pointer is anywhere inside the ring's circle (the gaps between
-    // the saves too) or on one of them, and closes when it leaves the circle.
+    // A marker of several saves opened: its saves come out from under it into a ring. It stays
+    // open while the pointer is inside the ring's circle or on the marker that opened it.
     property <int> open-group: -1;
-    // the group the ring shows (kept while it closes, so it can shrink back)
     property <int> shown-group: -1;
-    // the pointer inside the ring's circle (the circle's touch area holds the saves, so it
-    // stays hovered over them), or still on the marker that opened it
     property <bool> in-ring: area.has-hover && ring.inside(area.mouse-x, area.mouse-y);
     property <int> marker-hover: -1;
     property <bool> keep: open-group >= 0 && (in-ring || marker-hover == open-group);
@@ -1427,134 +1452,297 @@ component TimelineSection inherits Rectangle {
             shown-group = open-group;
         }
     }
-    // 0 closed to 1 open: the saves move out from under the marker
     property <float> spread: open-group >= 0 ? 1 : 0;
     animate spread { duration: 220ms; easing: ease-out; }
-    // the ring's radius for a number of saves: room for each, at least 46 px
     function ring(count: int) -> length {
         return max(46px, count * 30px / 6.2832) * Theme.ts;
     }
+    // a stop's globe: larger where the save is, smaller ahead
+    function size(unit: length, state: int, here: bool) -> length {
+        return unit * (here ? 1.0 : state == 0 || state == 4 ? 0.86 : state == 1 || state == 3 ? 0.8 : 0.7);
+    }
+
     VerticalLayout {
-        spacing: 6px;
-        Text { text: "Timeline"; font-family: Theme.title-font; font-size: 24px * Theme.ts; color: Theme.text; }
-        Note {
-            font-size: 13.5px * Theme.ts;
-            text: App.tl-nodes.length == 0
-                ? "The editor has no chapters of this game mapped yet."
-                : "Your story from start to end. Point at a chapter or a save to see it. Click a chapter to choose where in it to skip to, or to go back to. The " + (Theme.k2 ? "blue" : "green") + " points are your other saves of this game; point at one to see whose it is, click it to open it.";
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 18px;
+            Note {
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                font-size: 13.5px * Theme.ts;
+                text: App.gm-stops.length == 0
+                    ? "The editor has no chapters of this game mapped yet."
+                    : "The bands of light join the planets in the order you played them; the faint lanes are the way ahead. Click a planet to see its quests and to skip ahead or go back to any point in it."
+                    + (App.tl-saves.length > 0 ? " The " + (Theme.k2 ? "blue" : "green") + " tags are your other saves." : "");
+            }
+            if App.gm-here-text != "": Rectangle {
+                width: here-row.preferred-width + 28px;
+                height: 32px * Theme.ts;
+                y: (parent.height - self.height) / 2;
+                border-radius: self.height / 2;
+                border-width: 1px;
+                border-color: Theme.gold;
+                background: Theme.gold.with-alpha(0.08);
+                here-row := HorizontalLayout {
+                    x: 14px;
+                    width: self.preferred-width;
+                    spacing: 10px;
+                    Rectangle {
+                        width: 10px;
+                        Rectangle { width: 10px; height: 10px; border-radius: 5px; background: Theme.gold; }
+                    }
+                    Text { text: "YOU ARE HERE"; font-family: Theme.label-font; font-size: 11px * Theme.ts; letter-spacing: 3px; color: Theme.gold; vertical-alignment: center; }
+                    Text { text: App.gm-here-text; font-family: Theme.list-font; font-size: 14px * Theme.ts; color: Theme.text; vertical-alignment: center; }
+                }
+            }
         }
-        graph := Rectangle {
+        map := Rectangle {
             vertical-stretch: 1;
-            min-height: 440px;
-            visible: App.tl-nodes.length > 0;
-            property <length> x0: 96px * Theme.ts;
-            property <length> x1: self.width - 70px * Theme.ts;
-            property <length> ty: self.height / 2;
-            property <length> span: self.x1 - self.x0;
+            min-height: 300px;
+            visible: App.gm-stops.length > 0;
             clip: true;
-            // space, fading into the panel at every edge rather than sitting in a box
-            // (2026-10-24, the maintainer)
-            if Theme.dark: Rectangle {
-                property <length> fade: min(120px, self.height / 3);
-                Image {
+            border-radius: 10px;
+            background: root.space;
+            border-width: 1px;
+            border-color: Theme.dark ? Theme.panel-edge : #2a3d5c;
+            // where the stops stand: inside margins that leave room for the names under them
+            property <length> unit: min(70px * Theme.ts, max(34px, self.height / 6));
+            property <length> px: max(70px * Theme.ts, self.unit * 1.2);
+            property <length> pt: self.unit * 0.85 + 14px * Theme.ts;
+            property <length> pb: self.unit * 0.6 + 34px * Theme.ts;
+            property <length> iw: self.width - 2 * self.px;
+            property <length> ih: self.height - self.pt - self.pb;
+            // the stars, and a faint glow where the galaxy's core is
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: @image-url("../assets/timeline/stars.png");
+                image-fit: cover;
+                opacity: 0.9;
+            }
+            Image {
+                x: parent.width * 0.12;
+                y: -parent.height * 0.1;
+                width: parent.width * 0.76;
+                height: parent.height * 1.2;
+                source: App.gm-glow;
+                colorize: #2f6fd8;
+                opacity: 0.22;
+                image-fit: fill;
+            }
+            // the display's corners, as the game's own screens frame theirs
+            for c in [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: 1, y: 1 }]: Rectangle {
+                x: c.x == 0 ? 10px : parent.width - 10px - self.width;
+                y: c.y == 0 ? 10px : parent.height - 10px - self.height;
+                width: 22px;
+                height: 22px;
+                Rectangle { x: c.x == 0 ? 0 : parent.width - self.width; y: c.y == 0 ? 0 : parent.height - 2px; width: parent.width; height: 2px; background: Theme.accent.with-alpha(0.55); }
+                Rectangle { x: c.x == 0 ? 0 : parent.width - 2px; y: c.y == 0 ? 0 : parent.height - self.height; width: 2px; height: parent.height; background: Theme.accent.with-alpha(0.55); }
+            }
+
+            // the lanes: faint ahead, bands of light behind; each path in the box of its curve
+            // with a margin for the glow (a path is cut at its own bounds), its view that size
+            // in pixels (a path keeps its view's shape)
+            for l in App.gm-lanes: Rectangle {
+                property <length> m: 14px;
+                x: map.px + l.x * map.iw - self.m;
+                y: map.pt + l.y * map.ih - self.m;
+                width: max(1px, l.w * map.iw) + 2 * self.m;
+                height: max(1px, l.h * map.ih) + 2 * self.m;
+                property <float> vw: self.width / 1px;
+                property <float> vh: self.height / 1px;
+                property <float> iw: (self.width - 2 * self.m) / 1px;
+                property <float> ih: (self.height - 2 * self.m) / 1px;
+                property <float> o: self.m / 1px;
+                property <string> d: "M " + (self.o + l.ax * self.iw) + " " + (self.o + l.ay * self.ih) + " Q " + (self.o + l.cx * self.iw) + " " + (self.o + l.cy * self.ih) + " " + (self.o + l.bx * self.iw) + " " + (self.o + l.by * self.ih);
+                for w[k] in (l.lit ? [18, 9, 3.5, 1.2] : [1.5]): Path {
+                    width: parent.width; height: parent.height;
+                    viewbox-width: parent.vw; viewbox-height: parent.vh;
+                    commands: parent.d;
+                    stroke: !l.lit ? #8fb0d8.with-alpha(0.5) : k == 0 ? root.lane-blue.with-alpha(0.10) : k == 1 ? root.lane-blue.with-alpha(0.22) : k == 2 ? root.lane-core.with-alpha(0.75) : #f2fbff;
+                    stroke-width: w * 1px;
+                }
+            }
+
+            // the stops
+            for p[i] in App.gm-stops: Rectangle {
+                property <length> size: root.size(map.unit, p.state, p.here);
+                property <bool> lit: st.has-hover || root.hover-stop == i;
+                x: map.px + p.x * map.iw - self.width / 2;
+                y: map.pt + p.y * map.ih - self.height / 2;
+                width: self.size;
+                height: self.size;
+                // a halo behind the stop: blue where played, gold where the save is
+                if p.state == 0 || p.here: Image {
+                    width: parent.width * 1.9;
+                    height: self.width;
+                    source: App.gm-glow;
+                    colorize: p.here ? root.gold : root.lane-blue;
+                    opacity: p.here ? 0.55 : 0.45;
+                }
+                if p.has-globe: Image {
                     width: parent.width;
                     height: parent.height;
-                    source: @image-url("../assets/timeline/stars.png");
-                    image-fit: cover;
+                    source: p.globe;
+                    opacity: p.state == 2 ? 0.55 : p.state == 3 ? 0.8 : 1.0;
                 }
-                Rectangle { y: 0; height: parent.fade; background: @linear-gradient(180deg, Theme.panel 0%, Theme.panel.with-alpha(0) 100%); }
-                Rectangle { y: parent.height - parent.fade; height: parent.fade; background: @linear-gradient(0deg, Theme.panel 0%, Theme.panel.with-alpha(0) 100%); }
-                Rectangle { x: 0; width: parent.fade; background: @linear-gradient(90deg, Theme.panel 0%, Theme.panel.with-alpha(0) 100%); }
-                Rectangle { x: parent.width - parent.fade; width: parent.fade; background: @linear-gradient(270deg, Theme.panel 0%, Theme.panel.with-alpha(0) 100%); }
-            }
-
-            Text {
-                x: (graph.x0 - self.width) / 2;
-                y: graph.ty - self.height / 2;
-                text: "START";
-                font-family: Theme.label-font;
-                font-size: 12px * Theme.ts;
-                letter-spacing: 4px;
-                color: Theme.soft;
-            }
-            Text {
-                x: graph.x1 + (graph.width - graph.x1 - self.width) / 2;
-                y: graph.ty - self.height / 2;
-                text: "END";
-                font-family: Theme.label-font;
-                font-size: 12px * Theme.ts;
-                letter-spacing: 4px;
-                color: Theme.soft;
-            }
-            Rectangle { x: graph.x0; y: graph.ty - 1px; width: graph.span; height: 2px; background: Theme.edge; }
-            // the part of the story behind the save
-            Rectangle { x: graph.x0; y: graph.ty - 2px; width: App.tl-here * graph.span; height: 4px; border-radius: 2px; background: Theme.accent; }
-            Diamond { x: graph.x0 - 7px; y: graph.ty - 7px; }
-            Diamond { x: graph.x1 - 7px; y: graph.ty - 7px; }
-
-            // the chapters: a point on the line, the name and number under it
-            for n[i] in App.tl-nodes: Rectangle {
-                x: graph.x0 + n.pos * graph.span - 12px;
-                y: graph.ty - 12px;
-                width: 24px;
-                height: 24px;
-                border-radius: 12px;
-                border-width: 2px;
-                border-color: n.state == 0 || nt.has-hover ? Theme.accent : Theme.edge;
-                background: n.state == 0 ? Theme.accent : nt.has-hover ? Theme.hover : Theme.field;
-                if n.state == 0: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.panel; }
-                nt := TouchArea {
+                // without the game's texture: a lit sphere, a ship or a station, drawn
+                if !p.has-globe && p.look == 0: Rectangle {
+                    width: parent.width * 0.86;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    opacity: p.state == 2 ? 0.55 : 1.0;
+                    background: #35597a;
+                    clip: true;
+                    Rectangle { x: -parent.width * 0.25; y: -parent.height * 0.25; width: parent.width; height: self.width; border-radius: self.width / 2; background: #6f9cc2; }
+                }
+                if !p.has-globe && p.look == 1: Path {
+                    width: parent.width * 0.9;
+                    height: parent.height * 0.6;
+                    viewbox-width: 100;
+                    viewbox-height: 60;
+                    opacity: p.state == 2 ? 0.55 : 1.0;
+                    fill: @linear-gradient(180deg, #d5e3ef 0%, #7f97ad 100%);
+                    stroke: #0b1420;
+                    stroke-width: 1px;
+                    commands: "M 4 30 L 30 18 L 62 14 L 96 26 L 96 34 L 62 46 L 30 42 Z M 40 22 L 58 20 L 58 40 L 40 38 Z";
+                }
+                if !p.has-globe && p.look == 2: Rectangle {
+                    width: parent.width * 0.86;
+                    height: self.width;
+                    opacity: p.state == 2 ? 0.55 : 1.0;
+                    Rectangle {
+                        width: parent.width;
+                        height: self.width;
+                        border-radius: self.width / 2;
+                        border-width: 3px;
+                        border-color: #c58b3a;
+                    }
+                    Image { width: parent.width * 1.3; height: self.width; source: App.gm-glow; colorize: #ff9a3c; opacity: 0.8; }
+                    Rectangle { width: parent.width * 0.42; height: self.width; border-radius: self.width / 2; background: #ffd27a; }
+                    Rectangle { width: parent.width * 0.22; height: self.width; border-radius: self.width / 2; background: #fff6dc; }
+                }
+                // the ring: gold where the save is, blue where played, yellow when pointed at
+                Rectangle {
+                    width: parent.width + (p.here ? 12px : 8px);
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    border-width: parent.lit || p.here ? 2px : p.state == 0 || p.state == 3 || p.state == 4 ? 1px : 0px;
+                    border-color: parent.lit ? root.hover-gold : p.here ? root.gold : p.state == 0 || p.state == 4 ? root.lane-blue.with-alpha(0.8) : #7d9cc4.with-alpha(0.6);
+                }
+                // its number on the route
+                Rectangle {
+                    x: -4px;
+                    y: -4px;
+                    width: 22px * Theme.ts;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: p.state == 0 ? root.lane-blue : p.here || p.state == 1 ? root.gold : #1b2a3d;
+                    border-width: p.state == 4 ? 2px : 1px;
+                    border-color: p.state == 0 ? #bfe4ff : p.here || p.state == 1 ? #fff0b8 : p.state == 4 ? root.lane-blue : #4c6582;
+                    Text { text: p.stop; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? #06121e : root.ink-soft; }
+                }
+                Text {
+                    y: parent.height + 6px;
+                    x: (parent.width - self.width) / 2;
+                    width: 150px * Theme.ts;
+                    horizontal-alignment: center;
+                    text: p.planet;
+                    font-family: Theme.list-font;
+                    font-size: 14px * Theme.ts;
+                    color: parent.lit ? root.hover-gold : p.here ? root.gold : p.state == 0 || p.state == 4 ? root.ink-text : p.state == 2 ? root.ink-faint : root.ink-soft;
+                    wrap: word-wrap;
+                }
+                st := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { App.open-chapter(n.index); }
+                    clicked => { App.open-chapter(p.index); }
                     changed has-hover => {
                         if (self.has-hover) {
-                            root.hover-node = i;
-                        } else if (root.hover-node == i) {
-                            root.hover-node = -1;
+                            root.hover-stop = i;
+                        } else if (root.hover-stop == i) {
+                            root.hover-stop = -1;
                         }
                     }
                 }
             }
-            for n in App.tl-nodes: VerticalLayout {
-                x: graph.x0 + n.pos * graph.span - self.width / 2;
-                y: graph.ty + 24px;
-                width: min(130px * Theme.ts, graph.span / max(1, App.tl-nodes.length) - 4px);
-                height: self.preferred-height;
-                spacing: 2px;
-                Text {
-                    text: n.planet;
+
+            // the side chapters: the Ebon Hawk beside the save's stop, Yavin Station at its
+            // planet; each opens its pop-up
+            for v[i] in App.tl-sides: sv := Rectangle {
+                property <bool> hawk: v.look == 1;
+                property <length> size: self.hawk ? map.unit * 0.95 : map.unit * 0.7;
+                x: map.px + v.x * map.iw - self.width / 2 + (self.hawk ? v.kind * map.unit * 1.15 : 0px);
+                y: map.pt + v.y * map.ih - self.height / 2 + (self.hawk ? map.unit * 0.1 : 0px);
+                width: self.size;
+                height: self.hawk ? self.size * 0.62 : self.size;
+                if sv.hawk: Image {
+                    width: parent.width;
+                    height: parent.height;
+                    source: @image-url("../assets/timeline/ebon-hawk.png");
+                    image-fit: contain;
+                    opacity: sd.has-hover ? 1.0 : 0.9;
+                }
+                property <bool> station: v.planet == "Yavin Station" && TimelineArt.yavin.width > 0;
+                if !sv.hawk && sv.station: Image { width: parent.width * 1.4; height: parent.height * 1.4; source: TimelineArt.yavin; image-fit: contain; opacity: v.state == 0 ? 1.0 : 0.8; }
+                if !sv.hawk && !sv.station && v.has-globe: Image { width: parent.width; height: parent.height; source: v.globe; opacity: v.state == 0 ? 1.0 : 0.55; }
+                if !sv.hawk && !sv.station && !v.has-globe: Rectangle {
+                    width: parent.width * 0.8;
+                    height: self.width;
+                    border-radius: self.width / 2;
+                    background: #a8662e;
+                    opacity: v.state == 0 ? 1.0 : 0.55;
+                }
+                if !sv.hawk || sd.has-hover: Rectangle {
+                    width: parent.width + 8px;
+                    height: parent.hawk ? parent.height + 8px : self.width;
+                    border-radius: parent.hawk ? 6px : self.width / 2;
+                    border-width: sd.has-hover ? 2px : 1px;
+                    border-color: sd.has-hover ? root.hover-gold : #7d9cc4.with-alpha(0.5);
+                }
+                if !sv.hawk: Text {
+                    y: parent.height + 6px;
+                    x: (parent.width - self.width) / 2;
+                    text: v.planet;
                     font-family: Theme.list-font;
                     font-size: 13px * Theme.ts;
-                    color: n.state == 0 ? Theme.muted : Theme.soft;
-                    horizontal-alignment: center;
-                    wrap: word-wrap;
+                    color: sd.has-hover ? root.hover-gold : root.ink-soft;
                 }
-                Text { text: n.numeral; font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2px; color: Theme.faint; horizontal-alignment: center; }
+                sd := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { App.open-chapter(v.index); }
+                    changed has-hover => {
+                        if (self.has-hover) {
+                            root.hover-side = i;
+                        } else if (root.hover-side == i) {
+                            root.hover-side = -1;
+                        }
+                    }
+                }
             }
 
-            // the game's other saves: a point for one save in a stretch, a larger point with
-            // their number for several
+            // the game's other saves at a stop: a tag low on the right of it, with their number
             for g[gi] in App.tl-groups: Rectangle {
-                // whole pixels and even sizes, so the inner dot sits exactly in the middle
-                x: round((graph.x0 + g.pos * graph.span - self.width / 2) / 1px) * 1px;
-                y: round((graph.ty - self.height / 2) / 1px) * 1px;
+                x: round((map.px + g.x * map.iw + map.unit * 0.42) / 1px) * 1px;
+                y: round((map.pt + g.y * map.ih - map.unit * 0.62) / 1px) * 1px;
                 opacity: root.open-group >= 0 && root.open-group != gi ? 0 : 1;
                 animate opacity { duration: 160ms; }
-                width: g.count > 1 ? 30px : 18px;
-                height: self.width;
-                border-radius: self.width / 2;
-                border-width: gt.has-hover ? 2px : 1px;
-                border-color: gt.has-hover ? Theme.hover-edge : Theme.save-mark;
-                background: Theme.panel;
-                Rectangle {
-                    width: g.count > 1 ? 24px : 10px;
-                    height: self.width;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    border-radius: self.width / 2;
-                    background: Theme.save-mark;
+                width: tag-row.preferred-width + 12px;
+                height: 18px * Theme.ts;
+                border-radius: self.height / 2;
+                border-width: 1px;
+                border-color: gt.has-hover ? root.hover-gold : root.save-green;
+                background: gt.has-hover ? #10301f : root.space;
+                tag-row := HorizontalLayout {
+                    x: 6px;
+                    width: self.preferred-width;
+                    spacing: 4px;
+                    // a little save disc
+                    Rectangle {
+                        width: 9px * Theme.ts;
+                        Rectangle { width: parent.width; height: self.width; border-radius: 2px; border-width: 1.5px; border-color: root.save-green; Rectangle { y: 1px; width: parent.width * 0.5; height: parent.height * 0.3; background: root.save-green; } }
+                    }
+                    Text { text: g.count; font-family: Theme.title-font; font-size: 11px * Theme.ts; color: root.save-green; vertical-alignment: center; }
                 }
-                if g.count > 1: Text { text: g.count; font-family: Theme.title-font; font-size: 13px * Theme.ts; color: Theme.ink; }
                 gt := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
@@ -1582,82 +1770,25 @@ component TimelineSection inherits Rectangle {
                 }
             }
 
-            // where the open save is
-            Rectangle {
-                x: graph.x0 + App.tl-here * graph.span - 15px;
-                y: graph.ty - 15px;
-                width: 30px;
-                height: 30px;
-                border-radius: 15px;
-                border-width: 2px;
-                border-color: Theme.gold;
-                background: Theme.panel;
-                Rectangle { width: 14px; height: 14px; border-radius: 7px; background: Theme.gold; }
-            }
-            Text {
-                x: graph.x0 + App.tl-here * graph.span - self.width / 2;
-                y: graph.ty - 44px;
-                text: "YOU ARE HERE";
-                font-family: Theme.label-font;
-                font-size: 11px * Theme.ts;
-                letter-spacing: 3px;
-                color: Theme.gold;
-            }
-
-            // the side chapters: their ships at the bottom middle, each opening its pop-up
-            ships := HorizontalLayout {
-                x: (graph.width - self.width) / 2;
-                y: graph.height - self.height - 14px;
-                width: self.preferred-width;
-                height: self.preferred-height;
-                spacing: 40px;
-                for n in App.tl-sides: Rectangle {
-                    width: 170px * Theme.ts;
-                    height: 120px * Theme.ts;
-                    border-radius: 8px;
-                    background: st.has-hover ? Theme.hover-edge.with-alpha(0.08) : transparent;
-                    border-width: st.has-hover ? 2px : 0px;
-                    border-color: Theme.hover-edge;
-                    Image {
-                        y: 6px;
-                        width: parent.width - 20px;
-                        height: parent.height - 36px;
-                        image-fit: contain;
-                        source: n.planet == "Yavin Station" ? TimelineArt.yavin : @image-url("../assets/timeline/ebon-hawk.png");
-                        opacity: st.has-hover ? 1.0 : 0.85;
-                    }
-                    Text {
-                        y: parent.height - 24px;
-                        text: n.planet;
-                        font-family: Theme.label-font;
-                        font-size: 11px * Theme.ts;
-                        letter-spacing: 3px;
-                        color: st.has-hover ? Theme.accent : Theme.soft;
-                    }
-                    st := TouchArea { mouse-cursor: pointer; clicked => { App.open-chapter(n.index); } }
-                }
-            }
-
             // a marker of several saves, opened: the ring
             ring := Rectangle {
-                property <TimelineGroup> g: root.shown-group >= 0 && root.shown-group < App.tl-groups.length ? App.tl-groups[root.shown-group] : { pos: 0, count: 0, start: 0 };
-                property <length> cx: graph.x0 + g.pos * graph.span;
+                property <TimelineGroup> g: root.shown-group >= 0 && root.shown-group < App.tl-groups.length ? App.tl-groups[root.shown-group] : { x: 0, y: 0, count: 0, start: 0 };
+                property <length> cx: map.px + g.x * map.iw + map.unit * 0.42 + 16px;
+                property <length> cy: map.pt + g.y * map.ih - map.unit * 0.62 + 9px;
                 property <length> r: root.ring(g.count);
-                // the circle that keeps it open: the ring and a margin round it
                 property <length> reach: self.r + 26px;
                 visible: root.spread > 0.01 && g.count > 1;
                 x: self.cx - self.reach;
-                y: graph.ty - self.reach;
+                y: self.cy - self.reach;
                 width: 2 * self.reach;
                 height: 2 * self.reach;
-                // a faint disc so the open ring reads as one thing
                 Rectangle {
                     width: parent.width * root.spread;
                     height: self.width;
                     border-radius: self.width / 2;
-                    background: Theme.window.with-alpha(0.72);
+                    background: root.space.with-alpha(0.82);
                     border-width: 1px;
-                    border-color: Theme.save-mark.with-alpha(0.35);
+                    border-color: root.save-green.with-alpha(0.35);
                 }
                 function inside(mx: length, my: length) -> bool {
                     return (mx - self.reach) * (mx - self.reach) / 1px + (my - self.reach) * (my - self.reach) / 1px <= self.reach * self.reach / 1px;
@@ -1672,15 +1803,15 @@ component TimelineSection inherits Rectangle {
                         y: round((ring.reach + sin(self.a) * ring.r * root.spread - self.height / 2) / 1px) * 1px;
                         border-radius: self.width / 2;
                         border-width: rs.has-hover ? 2px : 1px;
-                        border-color: rs.has-hover ? Theme.hover-edge : Theme.save-mark;
-                        background: Theme.panel;
+                        border-color: rs.has-hover ? root.hover-gold : root.save-green;
+                        background: root.space;
                         Rectangle {
                             width: 10px;
                             height: 10px;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             border-radius: 5px;
-                            background: Theme.save-mark;
+                            background: root.save-green;
                         }
                         rs := TouchArea {
                             mouse-cursor: pointer;
@@ -1695,70 +1826,97 @@ component TimelineSection inherits Rectangle {
                         }
                     }
                 }
-                // the marker itself in the middle, still showing the number
                 Rectangle {
-                    width: 30px;
-                    height: 30px;
-                    border-radius: 15px;
-                    background: Theme.save-mark;
-                    Text { text: ring.g.count; font-family: Theme.title-font; font-size: 13px * Theme.ts; color: Theme.ink; }
+                    width: 26px;
+                    height: 26px;
+                    border-radius: 13px;
+                    background: root.save-green;
+                    Text { text: ring.g.count; font-family: Theme.title-font; font-size: 12px * Theme.ts; color: #06121e; }
                 }
             }
 
-            // a chapter pointed at: above the line
-            if root.hover-node >= 0 && root.hover-node < App.tl-nodes.length: Rectangle {
-                property <TimelineNode> n: App.tl-nodes[root.hover-node];
-                property <length> cx: graph.x0 + n.pos * graph.span;
-                Rectangle { x: parent.cx; y: graph.ty - 74px; width: 1px; height: 60px; background: Theme.edge; }
+            // a stop pointed at: its chapter, above it (below it near the top)
+            if root.hover-stop >= 0 && root.hover-stop < App.gm-stops.length: Rectangle {
+                property <GalaxyStop> p: App.gm-stops[root.hover-stop];
+                property <length> cx: map.px + p.x * map.iw;
+                property <length> cy: map.pt + p.y * map.ih;
+                property <length> half: root.size(map.unit, p.state, p.here) / 2 + 30px;
                 Rectangle {
-                    width: 280px * Theme.ts;
-                    height: chapter-tip.preferred-height;
-                    x: max(0px, min(parent.cx - 40px, graph.width - self.width));
-                    y: graph.ty - 74px - self.height;
-                    background: Theme.field;
+                    width: 300px * Theme.ts;
+                    height: tip.preferred-height;
+                    x: max(8px, min(parent.cx - self.width / 2, map.width - self.width - 8px));
+                    y: parent.cy - parent.half - self.height >= 8px ? parent.cy - parent.half - self.height : parent.cy + parent.half + 24px;
+                    background: #0a1424.with-alpha(0.96);
                     border-width: 1px;
-                    border-color: Theme.edge;
+                    border-color: root.lane-blue.with-alpha(0.6);
                     border-radius: 6px;
-                    chapter-tip := VerticalLayout {
+                    tip := VerticalLayout {
                         padding: 12px;
                         padding-left: 14px;
                         spacing: 4px;
                         Text {
-                            text: "CHAPTER " + n.numeral + "  ·  " + (n.state == 0 ? "PLAYED" : n.state == 1 ? "YOU ARE IN IT" : "AHEAD");
+                            text: "STOP " + p.stop + "  ·  " + (p.state == 0 ? "PLAYED" : p.state == 1 ? "YOU ARE IN IT" : p.state == 4 ? "BEGUN, NOT FINISHED" : p.state == 3 ? "YOUR NEXT STOP" : "AHEAD");
                             font-family: Theme.label-font;
                             font-size: 10px * Theme.ts;
                             letter-spacing: 2.5px;
-                            color: Theme.soft;
+                            color: p.state == 0 || p.state == 4 ? root.lane-core : p.state == 1 ? root.gold : root.ink-soft;
                         }
-                        Text { text: n.planet; font-family: Theme.list-font; font-size: 17px * Theme.ts; color: Theme.text; }
+                        Text { text: p.planet; font-family: Theme.list-font; font-size: 18px * Theme.ts; color: root.ink-text; }
+                        Text { text: p.title; font-family: Theme.body-font; font-size: 13px * Theme.ts; color: root.ink-soft; wrap: word-wrap; }
                         Text {
-                            text: n.state == 0 ? "Click to choose where to go back to"
-                                : n.state == 1 ? "Click to choose where to go back or skip to"
-                                : "Click to choose where to skip to";
+                            text: p.state == 0 ? "Click to see its quests and go back to any point in it"
+                                : p.state == 1 || p.state == 4 ? "Click to see its quests and go back or skip ahead"
+                                : "Click to see its quests and skip ahead to any point in it";
+                            font-family: Theme.body-font;
                             font-size: 13px * Theme.ts;
-                            color: Theme.accent;
+                            color: Theme.dark ? Theme.accent : #2ac6ef;
                             wrap: word-wrap;
                         }
                     }
                 }
             }
+            // a side chapter pointed at
+            if root.hover-side >= 0 && root.hover-side < App.tl-sides.length: Rectangle {
+                property <GalaxyStop> v: App.tl-sides[root.hover-side];
+                property <bool> hawk: v.look == 1;
+                property <length> cx: map.px + v.x * map.iw + (self.hawk ? v.kind * map.unit * 1.15 : 0px);
+                property <length> cy: map.pt + v.y * map.ih + (self.hawk ? map.unit * 0.1 : 0px);
+                Rectangle {
+                    width: 280px * Theme.ts;
+                    height: side-tip.preferred-height;
+                    x: max(8px, min(parent.cx - self.width / 2, map.width - self.width - 8px));
+                    y: parent.cy + map.unit * 0.7 + self.height <= map.height - 8px ? parent.cy + map.unit * 0.7 : parent.cy - map.unit * 0.7 - self.height;
+                    background: #0a1424.with-alpha(0.96);
+                    border-width: 1px;
+                    border-color: root.lane-blue.with-alpha(0.6);
+                    border-radius: 6px;
+                    side-tip := VerticalLayout {
+                        padding: 12px;
+                        padding-left: 14px;
+                        spacing: 4px;
+                        Text { text: "SIDE CHAPTER  ·  " + (v.state == 0 ? "PLAYED" : "NOT PLAYED"); font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2.5px; color: root.ink-soft; }
+                        Text { text: v.planet; font-family: Theme.list-font; font-size: 18px * Theme.ts; color: root.ink-text; }
+                        Text { text: v.title; font-family: Theme.body-font; font-size: 13px * Theme.ts; color: root.ink-soft; wrap: word-wrap; }
+                        Text { text: "Off the main route. Click to see its quests"; font-family: Theme.body-font; font-size: 13px * Theme.ts; color: Theme.dark ? Theme.accent : #2ac6ef; wrap: word-wrap; }
+                    }
+                }
+            }
 
-            // a save pointed at: below the line
+            // a save pointed at: its card beside its marker (or the ring it is in)
             if root.hover-save >= 0 && root.hover-save < App.tl-saves.length: card := Rectangle {
                 property <TimelineSave> v: App.tl-saves[root.hover-save];
-                property <length> cx: graph.x0 + v.pos * graph.span;
-                property <bool> listed: App.tl-groups[v.group].count > 1;
-                // beside the dot (or the ring it is in): right of it, or left where there is
-                // no room, level with the line
-                property <length> side: self.listed ? root.ring(App.tl-groups[v.group].count) + 34px : 24px;
+                property <TimelineGroup> g: App.tl-groups[v.group];
+                property <length> cx: map.px + g.x * map.iw + map.unit * 0.42 + 16px;
+                property <length> cy: map.pt + g.y * map.ih - map.unit * 0.62 + 9px;
+                property <length> side: g.count > 1 ? root.ring(g.count) + 34px : 30px;
                 Rectangle {
                     width: 430px * Theme.ts;
                     height: 146px * Theme.ts;
-                    x: parent.cx + parent.side + self.width <= graph.width ? parent.cx + parent.side : max(0px, parent.cx - parent.side - self.width);
-                    y: max(0px, min(graph.ty - self.height / 2, graph.height - self.height));
-                    background: Theme.field;
+                    x: parent.cx + parent.side + self.width <= map.width ? parent.cx + parent.side : max(0px, parent.cx - parent.side - self.width);
+                    y: max(0px, min(parent.cy - self.height / 2, map.height - self.height));
+                    background: #0a1424.with-alpha(0.97);
                     border-width: 1px;
-                    border-color: Theme.save-mark;
+                    border-color: root.save-green;
                     border-radius: 6px;
                     HorizontalLayout {
                         padding: 12px;
@@ -1766,26 +1924,99 @@ component TimelineSection inherits Rectangle {
                         Rectangle {
                             width: self.height * 1.25;
                             border-radius: 3px;
-                            background: Theme.window;
+                            background: #000000;
                             clip: true;
                             if v.has-shot: Image { width: parent.width; height: parent.height; source: v.shot; image-fit: cover; }
                         }
                         VerticalLayout {
                             spacing: 3px;
                             alignment: start;
-                            Text { text: "YOUR SAVE"; font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2.5px; color: Theme.save-mark; }
-                            Text { text: v.name; font-family: Theme.list-font; font-size: 17px * Theme.ts; color: Theme.text; overflow: elide; }
-                            Text { text: v.area; font-size: 13px * Theme.ts; color: Theme.muted; wrap: word-wrap; }
-                            Text { text: v.story; font-size: 13px * Theme.ts; color: Theme.text; }
-                            Text { text: "Played " + v.time; font-size: 13px * Theme.ts; color: Theme.muted; }
-                            if v.level != "": Text { text: v.level; font-size: 13px * Theme.ts; color: Theme.muted; }
+                            Text { text: "YOUR SAVE"; font-family: Theme.label-font; font-size: 10px * Theme.ts; letter-spacing: 2.5px; color: root.save-green; }
+                            Text { text: v.name; font-family: Theme.list-font; font-size: 17px * Theme.ts; color: root.ink-text; overflow: elide; }
+                            Text { text: v.area; font-size: 13px * Theme.ts; color: root.ink-soft; wrap: word-wrap; }
+                            Text { text: v.story; font-size: 13px * Theme.ts; color: root.ink-text; }
+                            Text { text: "Played " + v.time; font-size: 13px * Theme.ts; color: root.ink-soft; }
+                            if v.level != "": Text { text: v.level; font-size: 13px * Theme.ts; color: root.ink-soft; }
                         }
                     }
                 }
             }
         }
+
+        // The free planets in the order the route takes them, each with its stop number and
+        // arrows to move it earlier or later; a click opens it, pointing at one lights it on
+        // the map.
+        if App.gm-free-note != "": HorizontalLayout {
+            spacing: 8px;
+            height: 40px * Theme.ts;
+            Label { text: "PLANET ORDER"; font-size: 12px * Theme.ts; vertical-alignment: center; }
+            Rectangle { width: 6px; }
+            for p[i] in App.gm-stops: HorizontalLayout {
+                visible: p.free;
+                width: p.free ? self.preferred-width : 0px;
+                spacing: 0;
+                if p.free: chip := Rectangle {
+                    property <bool> lit: ct.has-hover || root.hover-stop == i;
+                    width: chip-row.preferred-width + 10px;
+                    border-radius: 5px;
+                    border-width: 1px;
+                    border-color: self.lit ? Theme.hover-edge : p.here ? Theme.gold : Theme.accent.with-alpha(0.45);
+                    background: self.lit ? Theme.hover : p.here ? Theme.gold.with-alpha(0.08) : Theme.field;
+                    ct := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { App.open-chapter(p.index); }
+                        changed has-hover => {
+                            if (self.has-hover) {
+                                root.hover-stop = i;
+                            } else if (root.hover-stop == i) {
+                                root.hover-stop = -1;
+                            }
+                        }
+                    }
+                    chip-row := HorizontalLayout {
+                        x: 5px;
+                        width: self.preferred-width;
+                        height: parent.height;
+                        spacing: 6px;
+                        ArrowButton { left: true; enabled: p.earlier; clicked => { App.route-move(p.index, -1); } }
+                        Rectangle {
+                            width: 20px * Theme.ts;
+                            Rectangle {
+                                width: parent.width;
+                                height: self.width;
+                                border-radius: self.width / 2;
+                                background: p.state == 0 ? Theme.accent : p.here || p.state == 1 ? Theme.gold : transparent;
+                                border-width: p.state == 0 || p.here || p.state == 1 ? 0px : p.state == 4 ? 2px : 1px;
+                                border-color: p.state == 4 ? Theme.accent : Theme.edge;
+                                Text { text: p.stop; font-family: Theme.title-font; font-size: 11px * Theme.ts; color: p.state == 0 || p.here || p.state == 1 ? Theme.ink : p.state == 4 ? Theme.text : Theme.soft; }
+                            }
+                        }
+                        Text {
+                            text: p.chip;
+                            font-family: Theme.list-font;
+                            font-size: 14px * Theme.ts;
+                            vertical-alignment: center;
+                            color: p.here || p.state == 1 ? Theme.gold : p.state == 0 || p.state == 4 || chip.lit ? Theme.text : Theme.soft;
+                        }
+                        ArrowButton { left: false; enabled: p.later; clicked => { App.route-move(p.index, 1); } }
+                    }
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            if App.gm-reordered: Rectangle {
+                width: reset-text.preferred-width + 24px;
+                border-radius: 5px;
+                border-width: 1px;
+                border-color: rt.has-hover ? Theme.hover-edge : Theme.edge;
+                background: rt.has-hover ? Theme.hover : Theme.field;
+                reset-text := Text { text: "Undo order changes"; font-family: Theme.body-font; font-size: 13px * Theme.ts; color: Theme.text; }
+                rt := TouchArea { mouse-cursor: pointer; clicked => { App.route-reset(); } }
+            }
+        }
+        if App.gm-free-note != "": Note { text: App.gm-free-note; font-size: 12.5px * Theme.ts; }
     }
 }
+
 
 // Story and Advanced: their sections as tabs under the main tab bar, a thin line between
 // each two (2026-10-24, the maintainer: Story holds the timeline, the quests and the galaxy
@@ -1822,7 +2053,7 @@ component StoryTab inherits Rectangle {
             if App.story-section == 2: CreaturesSection { }
             if App.story-section == 3: JournalSection { }
             if App.story-section == 4: MoreSection { }
-            if App.story-section == 5: TimelineSection { }
+            if App.story-section == 5: GalaxySection { }
         }
     }
 }
@@ -2279,11 +2510,11 @@ export component EditorPage inherits Rectangle {
             if App.tab == 3: PartyTab { }
             if App.tab == 4: StoryTab {
                 items: [
-                    { name: "Timeline", section: 5 },
+                    { name: "Galaxy Map", section: 5 },
                     { name: "", section: -1 },
                     { name: "Quests", section: 3 },
                     { name: "", section: -1 },
-                    { name: "Galaxy Map, Pazaak", section: 4 },
+                    { name: "Planets, Pazaak", section: 4 },
                 ];
             }
             if App.tab == 6: StoryTab {

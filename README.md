@@ -37,8 +37,10 @@ changes before that day are in KMRP's CHANGELOG.
   sizes, and what each party member wears.
 * **Party**: recruited, can be picked, influence, party experience, and bringing a member
   over from another save.
-* **Story**: a timeline of the game's chapters with every save on it, Skip Ahead to a later
-  chapter and Go Back to an earlier one; a quest tracker; the galaxy map; Pazaak cards.
+* **Story**: a galaxy map of the story, with bands of light joining the planets in the order you
+  played them and every save on it; pick the order of the planets that can be played in any
+  order, Skip Ahead to a later chapter and Go Back to an earlier one; a quest tracker; the
+  planets the Ebon Hawk can fly to; Pazaak cards.
 * **Map**: the area's map with its people, doors and containers; moving the player, travel
   to any area, and spawning a creature.
 * **Advanced**: every global variable, and a comparison with another save to fix a stuck
@@ -113,7 +115,7 @@ The window is set in the KMRP Original HD fonts: the four it uses are in `fonts/
 of KMRP's own, under the SIL Open Font License 1.1 ([fonts/OFL.txt](fonts/OFL.txt)). A
 folder named by `KMRP_FONTS` is used instead when it holds all four.
 
-If KotOR and ffmpeg are on the build machine, the build makes the timeline's picture of
+If KotOR and ffmpeg are on the build machine, the build makes the galaxy map's picture of
 Yavin Station from the game's own movie; it is never committed. Without them the button
 shows the name alone.
 
@@ -148,7 +150,7 @@ Created by **RaymanGT**, the maker of KMRP.
 * The **KMRP Original HD fonts**, from KMRP (OFL 1.1).
 * **Slint**, the interface toolkit, used under the GPL-3.0, and the other Rust crates
   listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-* The **Ebon Hawk** on the timeline is a free-to-use render from Deadly Stream; its
+* The **Ebon Hawk** on the galaxy map is a free-to-use render from Deadly Stream; its
   author is not recorded here.
 * **Aurebesh AF** by AurekFonts (CC0), for the icon's datapad.
 * The public KotOR 1 decompilation

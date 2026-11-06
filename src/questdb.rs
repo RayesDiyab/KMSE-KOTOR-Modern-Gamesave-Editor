@@ -1153,6 +1153,32 @@ pub fn chapters_played(game: Game, quests: &[(String, i64)]) -> Vec<bool> {
             break;
         }
     }
+    // Outside the free planets the story is one line, so a chapter played means every chapter
+    // before it on that line was played, though the game took its quests out of the journal (a
+    // KotOR 1 save on Korriban had no Dantooine entry left). A chapter after the free planets
+    // means all of them, except KotOR 1's Leviathan, which comes after the third.
+    let order_of = |m: &serde_json::Value| m.get("order").and_then(|v| v.as_i64()).unwrap_or(99);
+    let side = |m: &serde_json::Value| m.get("side_chapter").and_then(|v| v.as_bool()) == Some(true);
+    let free_max = all.iter().filter(|(p, _)| is_free(game, p)).map(|(_, m)| order_of(m)).max().unwrap_or(0);
+    let known = played.clone();
+    for (i, (planet, m)) in all.iter().enumerate() {
+        if !known[i] || side(m) {
+            continue;
+        }
+        let after_free = order_of(m) > free_max && !(game == Game::K1 && planet.eq_ignore_ascii_case("Leviathan"));
+        for (j, (other, o)) in all.iter().enumerate() {
+            if side(o) || order_of(o) >= order_of(m) {
+                continue;
+            }
+            let free = is_free(game, other);
+            // KotOR 1's Leviathan sits after the free planets in the files, but before the
+            // fourth in the game: what comes after it says nothing about it unless after_free
+            let leviathan = game == Game::K1 && other.eq_ignore_ascii_case("Leviathan");
+            if (!free && !leviathan) || after_free {
+                played[j] = true;
+            }
+        }
+    }
     played
 }
 
@@ -1221,6 +1247,119 @@ pub fn return_to(chapters: &[ChapterState], index: i32) -> Return {
     let undo = chapters.iter().filter(|c| !c.side && c.order >= target.order && (c.played || Some(c.index) == current)).map(|c| c.index).collect::<Vec<_>>();
     let unfinished = current.filter(|c| undo.contains(c));
     Return { kept, undo, unfinished }
+}
+
+/// The planets a player may fly to in any order, each group moving as one (KotOR 2's Dxun
+/// leads straight into Onderon), with the story value the game leaves once the planet is done:
+/// KotOR 1's star map flag (TRUE), KotOR 2's marker of the master found there (above 0; the
+/// list in tools/questdb/chapters_k2/the_jedi_masters.py, STAR_MAP_RULE).
+const FREE: &[(Game, &[&str], &str)] = &[
+    (Game::K1, &["Tatooine"], "K_STAR_MAP_TATOOINE"),
+    (Game::K1, &["Kashyyyk"], "K_STAR_MAP_KASHYYYK"),
+    (Game::K1, &["Manaan"], "K_STAR_MAP_MANAAN"),
+    (Game::K1, &["Korriban"], "K_STAR_MAP_KORRIBAN"),
+    (Game::K2, &["Nar Shaddaa"], "351NAR_Ebon_Released"),
+    (Game::K2, &["Dxun", "Onderon"], "506OND_End"),
+    (Game::K2, &["Dantooine"], "602DAN_End"),
+    (Game::K2, &["Korriban"], "702KOR_Vash"),
+];
+
+/// Whether `planet` is one of the planets the player may visit in any order.
+pub fn is_free(game: Game, planet: &str) -> bool {
+    FREE.iter().any(|(g, planets, _)| *g == game && planets.iter().any(|p| p.eq_ignore_ascii_case(planet)))
+}
+
+/// The chapter (milestone index) whose areas include `module`, by the areas each chapter's data
+/// lists as its own ("cleared"); the Ebon Hawk's areas give the Ebon Hawk's side chapter.
+pub fn chapter_of_module(game: Game, module: &str) -> Option<usize> {
+    milestones_ref(game).iter().position(|(_, m)| {
+        m.get("cleared").and_then(|c| c.as_array()).map_or(false, |c| {
+            c.iter().any(|e| e.get("module").and_then(|v| v.as_str()).map_or(false, |x| x.eq_ignore_ascii_case(module)))
+        })
+    })
+}
+
+/// The order this save plays the story in.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Route {
+    /// The main chapters by milestone index, in the order of the story as this save plays it.
+    pub order: Vec<usize>,
+    /// The free planets as groups (milestone indices), in the route's order.
+    pub groups: Vec<Vec<usize>>,
+    /// Per group: 0 done, 1 begun, 2 not yet visited. The player's choice moves a group only
+    /// among those of its own kind: what is done stays before what is begun, and what is begun
+    /// before what is not visited.
+    pub kinds: Vec<u8>,
+}
+
+/// The story's main chapters in the order this save plays them. Outside the free planets the
+/// story is one line. The free planets come in the order the save went to them: those done
+/// first (the game's flag, or the chapter played), then those begun, each in the order their
+/// own quests first appear in the journal, which keeps new entries at its end; then the ones
+/// not yet visited in the order of `plan` (planet names; the timeline's order without one).
+/// `plan` also reorders the done and the begun among themselves, where the journal guessed
+/// wrong. KotOR 1's Leviathan comes after the third free planet, as the game plays it (the
+/// capture starts at the take-off after the third star map).
+pub fn story_route(game: Game, quests: &[(String, i64)], globals: &[crate::globals::Global], plan: &[String]) -> Route {
+    let all = milestones_ref(game);
+    let played = chapters_played(game, quests);
+    let order_of = |m: &serde_json::Value| m.get("order").and_then(|v| v.as_i64()).unwrap_or(99);
+    let side = |m: &serde_json::Value| m.get("side_chapter").and_then(|v| v.as_bool()) == Some(true);
+    let mut mains: Vec<(i64, usize)> = all.iter().enumerate().filter(|(_, (_, m))| !side(m)).map(|(i, (_, m))| (order_of(m), i)).collect();
+    mains.sort();
+    let index = |planet: &str| all.iter().position(|(p, _)| p.eq_ignore_ascii_case(planet));
+    // every chapter's own quests, once
+    let owns: Vec<Vec<String>> = all.iter().map(|(p, _)| chapter_quests(game, p).into_iter().map(|(t, _)| t.to_ascii_lowercase()).collect()).collect();
+    let mut groups: Vec<(u8, usize, usize, i64, Vec<usize>, String)> = Vec::new();
+    for (_, planets, flag) in FREE.iter().filter(|(g, _, _)| *g == game) {
+        let members: Vec<usize> = planets.iter().filter_map(|p| index(p)).collect();
+        if members.is_empty() {
+            continue;
+        }
+        let flag_on = globals.iter().any(|v| {
+            v.name.eq_ignore_ascii_case(flag)
+                && match v.value {
+                    crate::globals::GlobalValue::Bool(b) => b,
+                    crate::globals::GlobalValue::Number(n) => n > 0,
+                    _ => false,
+                }
+        });
+        // the group's own quests (a quest more than one chapter shares says nothing)
+        let at = quests.iter().position(|(t, _)| {
+            let t = t.to_ascii_lowercase();
+            members.iter().any(|i| owns[*i].contains(&t)) && owns.iter().filter(|o| o.contains(&t)).count() == 1
+        });
+        let done = flag_on || members.iter().all(|i| played.get(*i).copied().unwrap_or(false));
+        let kind = if done { 0 } else if at.is_some() || members.iter().any(|i| played.get(*i).copied().unwrap_or(false)) { 1 } else { 2 };
+        let base = members.iter().map(|i| order_of(all[*i].1)).min().unwrap_or(99);
+        groups.push((kind, at.unwrap_or(usize::MAX), 0, base, members, planets[0].to_string()));
+    }
+    for g in groups.iter_mut() {
+        g.2 = plan.iter().position(|p| p.eq_ignore_ascii_case(&g.5)).unwrap_or(usize::MAX);
+    }
+    // the plan first where it names the group; else the journal's order (done and begun) or
+    // the timeline's (not yet visited)
+    groups.sort_by(|a, b| a.0.cmp(&b.0).then(a.2.cmp(&b.2)).then(if a.0 < 2 { a.1.cmp(&b.1) } else { std::cmp::Ordering::Equal }).then(a.3.cmp(&b.3)));
+    let flat: Vec<usize> = groups.iter().flat_map(|g| g.4.clone()).collect();
+    // the free planets take the places the timeline gives them, in the route's order
+    let mut slots = mains.iter().enumerate().filter(|(_, (_, i))| flat.contains(i)).map(|(k, _)| k);
+    let mut order: Vec<usize> = mains.iter().map(|(_, i)| *i).collect();
+    for i in &flat {
+        if let Some(k) = slots.next() {
+            order[k] = *i;
+        }
+    }
+    if game == Game::K1 {
+        if let Some(lev) = index("Leviathan") {
+            let third = groups.get(2).and_then(|g| g.4.last().copied());
+            if let (Some(from), Some(third)) = (order.iter().position(|i| *i == lev), third) {
+                order.remove(from);
+                let to = order.iter().position(|i| *i == third).map_or(order.len(), |k| k + 1);
+                order.insert(to, lev);
+            }
+        }
+    }
+    Route { order, groups: groups.iter().map(|g| g.4.clone()).collect(), kinds: groups.iter().map(|g| g.0).collect() }
 }
 
 /// The companions a quest step brings into the party (AddAvailableNPCByTemplate, or KotOR 2's
