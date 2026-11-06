@@ -684,7 +684,7 @@ fn undo_read_only(ui: &AppWindow, st: &mut State) -> bool {
     if let Ok(fresh) = Save::open(&folder) {
         st.save = Some(fresh);
     }
-    let why = read_only_reason(&folder).unwrap_or("It is read only.");
+    let why = read_only_reason(&folder).or_else(|| st.save.as_ref().and_then(|s| s.module_problem())).unwrap_or("It is read only.");
     message(ui, "This save cannot be changed", why);
     true
 }
@@ -727,7 +727,7 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
     st.ensure_game(folder.game);
     match (Save::open(&folder.path), Save::open(&folder.path)) {
         (Ok(sv), Ok(orig)) => {
-            st.read_only = read_only_reason(&folder.path).is_some();
+            st.read_only = read_only_reason(&folder.path).is_some() || sv.module_problem().is_some();
             st.save = Some(sv);
             st.original = Some(orig);
             st.quest_xp.clear();
@@ -2198,11 +2198,13 @@ fn fill_area(ui: &AppWindow, st: &mut State) {
         app.set_area_note(s("The area of this save could not be read."));
         return;
     };
-    let orig_doors = st.original.as_ref().and_then(|o| o.area_git()).map(|g| area::doors(&g.root)).unwrap_or_default();
+    // the same area as opened (after a move the save is in another, which nothing marks)
+    let same_area = |o: &&Save| st.save.as_ref().map_or(false, |s| s.module_name().eq_ignore_ascii_case(o.module_name()));
+    let orig_doors = st.original.as_ref().filter(same_area).and_then(|o| o.area_git()).map(|g| area::doors(&g.root));
     let doors: Vec<DoorRow> = area::doors(&git)
         .into_iter()
         .map(|d| {
-            let o = orig_doors.get(d.index);
+            let o = orig_doors.as_ref().and_then(|v| v.get(d.index));
             let mut note = Vec::new();
             if d.key_required {
                 note.push(format!("needs the key {}", d.key));
@@ -2261,7 +2263,7 @@ fn fill_area(ui: &AppWindow, st: &mut State) {
         .unwrap_or_default();
     let orig_items: Vec<Struct> = st
         .selected_box
-        .and_then(|(l, i)| st.original.as_ref().and_then(|o| o.area_git()).and_then(|g| area::container(&g.root, l, i).cloned()))
+        .and_then(|(l, i)| st.original.as_ref().filter(same_area).and_then(|o| o.area_git()).and_then(|g| area::container(&g.root, l, i).cloned()))
         .and_then(|c| c.list("ItemList").cloned())
         .unwrap_or_default();
     let module = save.nfo.root.string("AREANAME").unwrap_or_default();

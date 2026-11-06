@@ -422,6 +422,14 @@ impl Save {
 
     // ---- creatures ----
 
+    /// Why edits to this save could miss what the game reads, found by reading it: the area it
+    /// is in would not read, so its player would be edited in `pc.utc` alone (KotOR II), while
+    /// the game reads the player from that area.
+    pub fn module_problem(&self) -> Option<&'static str> {
+        let held = self.archive.find(&self.module_name, RES_TYPE_SAV).is_some();
+        (held && self.ifo.is_none()).then_some("The area this save is in could not be read, so its player could not be changed where the game reads it. It can be looked at but not changed.")
+    }
+
     pub fn player(&self) -> Option<&Struct> {
         if let Some(p) = self.ifo.as_ref().and_then(|i| i.root.list("Mod_PlayerList")).and_then(|l| l.first()) {
             return Some(p);
@@ -578,6 +586,10 @@ impl Save {
             .unwrap_or_else(|| name.clone());
         if let Some(slot) = self.loaded.iter_mut().find(|(n, k, _)| *k == RES_TYPE_UTC && n.eq_ignore_ascii_case(&name)) {
             slot.2 = creature;
+        } else if let Some(existing) = self.archive.resources.iter().find(|r| r.kind == RES_TYPE_UTC && r.name.eq_ignore_ascii_case(&name)).map(|r| r.name.clone()) {
+            // in the archive but not read (it would not parse): written over where it is, so
+            // the archive never holds the member twice
+            self.loaded.push((existing, RES_TYPE_UTC, creature));
         } else {
             // Keep the archive's order: the members come first, by index.
             let at = self
@@ -1300,7 +1312,12 @@ pub fn next_save_folder(folder: &Path) -> Option<PathBuf> {
 }
 
 fn backup_folder(backups: &Path, _game: Game, folder: &Path) -> PathBuf {
-    let name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "save".into());
+    let mut name = folder.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "save".into());
+    // KotOR II's local and Steam Cloud saves share their folder names ("000001 - QuickSave")
+    // and their backups' folder: told apart by name, not by time alone
+    if folder.ancestors().any(|a| a.file_name().map_or(false, |n| n.to_string_lossy().eq_ignore_ascii_case("cloudsaves"))) {
+        name.push_str(" (Steam Cloud)");
+    }
     let stamp = timestamp();
     let mut path = backups.join(&name).join(&stamp);
     let mut n = 2;
