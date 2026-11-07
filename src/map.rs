@@ -263,6 +263,40 @@ pub struct Area {
     /// The outlines of the area's ways out (transition triggers), in the area's own
     /// coordinates: a spot picked on the map keeps out of them (Area::clear_of_exits).
     pub exit_shapes: Vec<Vec<(f32, f32)>>,
+    /// Where the area's objects (placeables: crates, consoles, the Ebon Hawk's hyperdrive)
+    /// stand on the floor, as the triangles of their walkmeshes, in the area's coordinates:
+    /// a spot picked on the map keeps out of them too (Area::clear_spot, W-4).
+    pub object_shapes: Vec<Vec<(f32, f32)>>,
+}
+
+/// The triangles of a placeable's walkmesh (its model's .pwk, BWM V1.0, in the model's own
+/// coordinates) as it stands in the area: turned by its bearing about its position. Every
+/// face counts, whatever its material: the game keeps characters off the whole of it.
+fn object_footprint(data: &GameData, files: &ModuleFiles, p: &Struct) -> Vec<Vec<(f32, f32)>> {
+    let Some(app) = p.int("Appearance").filter(|a| *a >= 0) else { return Vec::new() };
+    let table = data.table("placeables");
+    let Some(model) = table.cell(app as usize, "modelname").filter(|m| !m.is_empty() && *m != "****").map(str::to_string) else { return Vec::new() };
+    let Some(d) = files.read(&model, 2053).or_else(|| data.resource(&model, "pwk", 2053)) else { return Vec::new() };
+    if d.get(0..8) != Some(b"BWM V1.0") {
+        return Vec::new();
+    }
+    let (Some(vn), Some(vo), Some(fnum), Some(fo)) = (u32_at(&d, 72), u32_at(&d, 76), u32_at(&d, 80), u32_at(&d, 84)) else { return Vec::new() };
+    let (x, y) = (p.float("X").unwrap_or(0.0), p.float("Y").unwrap_or(0.0));
+    let (s, c) = p.float("Bearing").unwrap_or(0.0).sin_cos();
+    let vert = |i: u32| -> Option<(f32, f32)> {
+        if i >= vn {
+            return None;
+        }
+        let o = vo as usize + i as usize * 12;
+        let (vx, vy) = (f32_at(&d, o)?, f32_at(&d, o + 4)?);
+        Some((x + vx * c - vy * s, y + vx * s + vy * c))
+    };
+    (0..fnum.min(4096) as usize)
+        .filter_map(|f| {
+            let o = fo as usize + f * 12;
+            Some(vec![vert(u32_at(&d, o)?)?, vert(u32_at(&d, o + 4)?)?, vert(u32_at(&d, o + 8)?)?])
+        })
+        .collect()
 }
 
 /// The area files of a module as the game finds them: a .mod (from a mod) first, then the
@@ -527,7 +561,25 @@ impl Area {
             }
         }
         let picture = picture(data, &area);
-        Area { module: module.to_string(), area, name, calibration, picture, floor, objects, exit_shapes }
+        let object_shapes = git.list("Placeable List").map(|l| l.iter().flat_map(|p| object_footprint(data, &files, p)).collect()).unwrap_or_default();
+        Area { module: module.to_string(), area, name, calibration, picture, floor, objects, exit_shapes, object_shapes }
+    }
+
+    /// Whether a character stands clear of every object at (x, y): its middle and a ring of
+    /// 0.45 (the reach `standable` takes for a character) outside every object's walkmesh.
+    pub fn clear_of_objects(&self, x: f32, y: f32) -> bool {
+        const R: f32 = 0.45;
+        !self.object_shapes.iter().any(|t| {
+            [(0.0, 0.0), (R, 0.0), (-R, 0.0), (0.0, R), (0.0, -R), (0.7 * R, 0.7 * R), (-0.7 * R, 0.7 * R), (0.7 * R, -0.7 * R), (-0.7 * R, -0.7 * R)]
+                .iter()
+                .any(|(dx, dy)| inside(t, x + dx, y + dy))
+        })
+    }
+
+    /// Whether a spot picked on the map is one to stand on: clear of the ways out and of the
+    /// objects (W-4: a click on a crate put the player inside it).
+    pub fn clear_spot(&self, x: f32, y: f32) -> bool {
+        self.clear_of_exits(x, y) && self.clear_of_objects(x, y)
     }
 
     /// Whether a spot is clear of every way out, with the margin exit spots keep (0.75 on each

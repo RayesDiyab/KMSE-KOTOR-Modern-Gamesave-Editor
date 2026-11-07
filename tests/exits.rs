@@ -86,3 +86,35 @@ fn a_clicked_spot_keeps_out_of_the_ways_out() {
     }
     eprintln!("{} clicks at ways out; {} would have stood inside one before", clicks, moved);
 }
+
+/// A spot clicked on the map keeps out of the area's objects too (2026-11-07 audit, W-4, its
+/// second half): clicked at the middle of each placeable, the floor picked is clear of every
+/// placeable's walkmesh, with a character's reach. Before, only the ways out were kept clear.
+#[test]
+fn a_clicked_spot_keeps_out_of_the_objects() {
+    let installs = find_installs(&[]);
+    let (mut clicks, mut moved, mut shapes) = (0, 0, 0);
+    for game in [Game::K1, Game::K2] {
+        let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
+        let data = GameData::open(game, &install.path);
+        for module in kse_core::map::game_modules(&install.path).into_iter().take(60) {
+            let Some(git) = kse_core::map::game_git(&data, &module) else { continue };
+            let area = Area::build(&data, &module, &git.root, &|_| String::new());
+            shapes += area.object_shapes.len();
+            for p in git.root.list("Placeable List").map(|l| l.to_vec()).unwrap_or_default() {
+                let (x, y, z) = (p.float("X").unwrap_or(0.0), p.float("Y").unwrap_or(0.0), p.float("Z").unwrap_or(0.0));
+                if area.clear_of_objects(x, y) {
+                    continue; // no walkmesh here (an invisible marker)
+                }
+                let Some(spot) = area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_spot(px, py)) else { continue };
+                clicks += 1;
+                assert!(area.clear_of_objects(spot[0], spot[1]), "{} {}: the picked spot is inside an object", module, p.string("Tag").unwrap_or_default());
+                assert!(area.clear_of_exits(spot[0], spot[1]), "{}: the picked spot is in a way out", module);
+                if area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_of_exits(px, py)).map_or(false, |q| !area.clear_of_objects(q[0], q[1])) {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{} object triangles; {} clicks on objects; {} would have stood inside one before", shapes, clicks, moved);
+}

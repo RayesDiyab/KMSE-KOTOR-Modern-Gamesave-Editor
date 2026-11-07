@@ -147,6 +147,11 @@ pub struct Save {
     /// it keeps it): with `edits`, it tells one save's edits from another's, whose count
     /// starts at 0 again (2026-11-07 second review).
     pub session: u64,
+    /// Object ids of the area's creatures the editor spawned (its own spawns here, and those
+    /// the window read from spawned.txt): a copy of a party member made with "Copy of one in
+    /// this area" has the member's tag and classes, and an edit of the member left it alone
+    /// only by these (2026-11-07 audit, W-3).
+    pub spawned: Vec<u32>,
 }
 
 static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -239,6 +244,7 @@ impl Save {
             backup: None,
             edits: 0,
             session: SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            spawned: Vec::new(),
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -486,11 +492,13 @@ impl Save {
             }
             Who::Npc(i) => {
                 let tag = self.creature(who).and_then(|c| c.string("Tag")).unwrap_or_default();
-                // The member's own copy in the area has their tag and their classes; another
-                // creature can share the tag (the Endar Spire's Carth, where Skip Ahead's
-                // saves resume, beside the Carth recruited from his template) and is left
-                // alone.
+                // The member's own copy in the area (a companion standing on the Ebon Hawk)
+                // has their tag and their classes; another creature can share the tag (the
+                // Endar Spire's Carth, where Skip Ahead's saves resume, beside the Carth
+                // recruited from his template) and is left alone, and so is a copy the editor
+                // spawned, which has both (W-3).
                 let classes = self.creature(who).map(crate::creature::classes).unwrap_or_default();
+                let spawned = self.spawned.clone();
                 if let Some(npc) = self.loaded_mut(&format!("availnpc{}", i), RES_TYPE_UTC) {
                     f(&mut npc.root);
                 }
@@ -498,7 +506,11 @@ impl Save {
                     if let Some((_, git)) = self.git.as_mut() {
                         let mut touched = false;
                         if let Some(list) = git.root.list_mut("Creature List") {
-                            let same = |c: &Struct| c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag)) && crate::creature::classes(c) == classes;
+                            let same = |c: &Struct| {
+                                c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag))
+                                    && crate::creature::classes(c) == classes
+                                    && !c.int("ObjectId").map_or(false, |id| spawned.contains(&(id as u32)))
+                            };
                             for c in list.iter_mut().filter(|c| same(c)) {
                                 f(c);
                                 touched = true;
@@ -1018,6 +1030,7 @@ impl Save {
             item.set("ObjectId", Value::Dword(new));
         }
         self.edit_area(&format!("spawn{}", id), move |git| crate::area::add_creature(git, c));
+        self.spawned.push(id);
         id
     }
 
@@ -1034,15 +1047,17 @@ impl Save {
     /// KotOR's current planet (`K_CURRENT_PLANET`) set for a trip to `module` where the planet
     /// is known: scripts and conversations read it (Juhani's "what do you know about this
     /// world" spoke of Manaan after a trip to Dantooine, the maintainer in the game,
-    /// 2026-11-07). The values as the game writes them, measured in its own saves and in the
-    /// quest data: Endar Spire 5, Taris 10, Dantooine 15, Manaan 25, Tatooine 35, Unknown
-    /// World 45. Kashyyyk and Korriban are not measured and are left as they are; so is KotOR 2.
+    /// 2026-11-07). The values as the game writes them, measured in its own saves and read in
+    /// the Ebon Hawk's arrival scripts (k_ebn12_<planet>, 2026-11-07 audit, W-5): Endar Spire
+    /// 5, Taris 10, Dantooine 15, Kashyyyk 20, Manaan 25, Korriban 30, Tatooine 35, Leviathan
+    /// 40, Unknown World 45, Star Forge 50. The Ebon Hawk keeps the planet it left. KotOR 2 has
+    /// the global but never sets it (0 in its saves on Peragus and Telos), so it is left alone.
     fn set_planet_for(&mut self, module: &str) {
         if self.game != Game::K1 {
             return;
         }
         let m = module.to_ascii_lowercase();
-        let value = [("end_", 5), ("tar_", 10), ("dan", 15), ("man", 25), ("tat_", 35), ("unk_", 45)]
+        let value = [("end_", 5), ("tar_", 10), ("dan", 15), ("kas_", 20), ("man", 25), ("korr_", 30), ("tat_", 35), ("lev_", 40), ("unk_", 45), ("sta_", 50)]
             .iter()
             .find(|(prefix, _)| m.starts_with(prefix))
             .map(|(_, v)| *v);

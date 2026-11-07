@@ -297,6 +297,8 @@ export global App {
     in-out property <int> backup-picked: -1;
     callback revert-to-backup(int);
     callback confirm-revert();
+    // Advanced, Creatures: the creature asked about is removed (W-2)
+    callback confirm-remove-creature();
     // The saves page's pen: the selected save renamed on the game's Load screen
     callback rename-save(string);
     callback do-copy-save(string);

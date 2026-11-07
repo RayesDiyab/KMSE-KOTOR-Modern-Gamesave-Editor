@@ -346,6 +346,8 @@ struct State {
     stage_pick: Option<i64>,
     /// spawned.txt lines of spawns not saved yet.
     pending_spawns: Vec<String>,
+    /// The creature Advanced, Creatures asked to remove, until the question is answered (W-2).
+    remove_pick: Option<usize>,
     // the chapter whose pop-up is open on the timeline (a milestone index), and the row
     // picked in it: (depth, chapter index, quest tag, stage), as SkipRow has them
     timeline_pick: Option<i32>,
@@ -2643,6 +2645,48 @@ fn preload_art(st: &mut State) {
     });
 }
 
+/// The size the layout is drawn for, in logical pixels (the window's former minimum).
+const DESIGN_WIDTH: f32 = 1280.0;
+const DESIGN_HEIGHT: f32 = 780.0;
+
+/// Everything in the window shrinks evenly when the window is smaller than the layout is drawn
+/// for (2026-11-07 audit, U-6, the maintainer: "make everything smaller ... pictures fonts
+/// tables everything needs to be dynamic and anchored correctly"). At 150% on a 1920x1080
+/// screen Windows leaves about 690 logical pixels of height, and the window, at least 780
+/// high, ran off the screen. Now the window's scale factor (Windows' own, 1.5 there) is lowered
+/// as far as the layout's 1280 x 780 needs to fit the window's real pixels, so text, pictures,
+/// tables and spacing all shrink together and keep their places; at the design size or larger
+/// Windows' factor is used again. Never below half of it. A change of Windows' factor (another
+/// monitor, a new setting) is taken as the new full size. Checked every tenth of a second.
+fn fit_to_window(ui: &AppWindow) -> slint::Timer {
+    let timer = slint::Timer::default();
+    let weak = ui.as_weak();
+    // (Windows' scale factor, the factor last set here; 0 until the first look)
+    let factors = std::cell::Cell::new((0.0f32, 0.0f32));
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let window = ui.window();
+        let now = window.scale_factor();
+        let (mut system, ours) = factors.get();
+        if system == 0.0 || (now - ours).abs() > 0.001 {
+            system = now; // the first look, or Windows changed it
+        }
+        let size = window.size();
+        if size.width == 0 || size.height == 0 {
+            return; // minimised
+        }
+        let fit = system.min(size.width as f32 / DESIGN_WIDTH).min(size.height as f32 / DESIGN_HEIGHT).max(system * 0.5);
+        if (fit - now).abs() > 0.004 {
+            window.dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: fit });
+            window.dispatch_event(slint::platform::WindowEvent::Resized { size: slint::LogicalSize::new(size.width as f32 / fit, size.height as f32 / fit) });
+            factors.set((system, fit));
+        } else {
+            factors.set((system, now));
+        }
+    });
+    timer
+}
+
 fn texture_key(name: &str) -> String {
     format!("tex:{}", name.to_ascii_lowercase())
 }
@@ -3510,6 +3554,14 @@ fn spawned_key(game: Game, module: &str, id: u32, tag: &str) -> String {
     format!("{}|{}|{}|{}", game.title(), module.to_ascii_lowercase(), id, tag.to_ascii_lowercase())
 }
 
+/// The object ids of the creatures spawned.txt records in `module` of `game`.
+fn spawned_ids(game: Game, module: &str) -> Vec<u32> {
+    let head = format!("{}|{}|", game.title(), module.to_ascii_lowercase());
+    std::fs::read_to_string(spawned_path())
+        .map(|t| t.lines().filter_map(|l| l.strip_prefix(&head)).filter_map(|rest| rest.split('|').next()?.parse().ok()).collect())
+        .unwrap_or_default()
+}
+
 fn was_spawned(game: Game, module: &str, c: &Struct) -> bool {
     let (Some(id), tag) = (c.int("ObjectId"), c.string("Tag").unwrap_or_default()) else { return false };
     let key = spawned_key(game, module, id as u32, &tag);
@@ -3940,6 +3992,13 @@ fn set_pool(ui: &AppWindow, st: &mut State, force: bool, now: i64, most: i64) {
 fn edit_who(ui: &AppWindow, st: &mut State, key: &str, f: impl Fn(&mut Struct)) {
     let who = st.who();
     if let Some(save) = st.save.as_mut() {
+        // creatures the editor spawned here, in this session or an earlier one, are never
+        // edited along with a party member they copy (W-3)
+        for id in spawned_ids(save.game, save.module_name()) {
+            if !save.spawned.contains(&id) {
+                save.spawned.push(id);
+            }
+        }
         save.edit(who, key, f);
     }
     st.status = (String::new(), false);
@@ -4291,6 +4350,7 @@ fn main() {
         quest_open: false,
         stage_pick: None,
         pending_spawns: Vec::new(),
+        remove_pick: None,
         pool_ask: None,
         back_to: None,
         story_plan: None,
@@ -5261,8 +5321,25 @@ fn main() {
                 }
             }
         }
+        // asked first (2026-11-07 audit, W-2, the maintainer: a confirmation): a creature was
+        // gone with one click
+        let index = index.max(0) as usize;
+        let Some(c) = st.save.as_ref().and_then(|s| s.area_git()).and_then(|g| g.root.list(area::CREATURES)).and_then(|l| l.get(index)).cloned() else { return };
+        let mut name = st.data().map(|d| creature_label(&d, &c)).unwrap_or_default();
+        if name.is_empty() {
+            name = c.string("Tag").unwrap_or_default();
+        }
+        st.remove_pick = Some(index);
+        let app = u.global::<App>();
+        app.set_message_title(s(format!("Remove {}?", if name.is_empty() { "this creature".to_string() } else { name })));
+        app.set_message_body(s("It is taken out of this area, along with what it carries. Scripts that look for it will not find it. Nothing is written until Save Changes, and your save was backed up when you opened it."));
+        app.set_overlay(18);
+    });
+    on!(ui, state, on_confirm_remove_creature, |u, st| {
+        u.global::<App>().set_overlay(0);
+        let Some(index) = st.remove_pick.take() else { return };
         if let Some(save) = st.save.as_mut() {
-            save.edit_area(&format!("creature{}", index), |git| area::remove_creature(git, index.max(0) as usize));
+            save.edit_area(&format!("creature{}", index), |git| area::remove_creature(git, index));
         }
         // the map's people are numbered as the area lists them: read it again
         st.map = None;
@@ -5303,8 +5380,8 @@ fn main() {
             eprintln!("map click {} {} -> {} {}", fx, fy, x, y);
         }
         let z = st.save.as_ref().and_then(|s| s.player()).map(|p| area::position(p)[2]).unwrap_or(0.0);
-        // the nearest walkable floor that keeps out of the area's ways out (W-4)
-        match area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_of_exits(px, py)) {
+        // the nearest walkable floor that keeps out of the area's ways out and its objects (W-4)
+        match area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_spot(px, py)) {
             Some(spot) => st.map_pick = Some(MapPick::Floor(spot)),
             None => {
                 st.map_pick = None;
@@ -6133,6 +6210,9 @@ fn main() {
             slint::CloseRequestResponse::KeepWindowShown
         });
     }
+    // Kept running beside the window: it shrinks the whole window evenly when it is smaller
+    // than the layout is drawn for.
+    let _fit = fit_to_window(&ui);
     ui.run().expect("the window closed with an error");
     let mut st = state.borrow_mut();
     // spawns left unsaved at closing are in no save: their spawned.txt lines go

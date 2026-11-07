@@ -449,8 +449,11 @@ export component AppWindow inherits Window {
     icon: @image-url("../assets/save-editor-icon.png");
     preferred-width: 1600px;
     preferred-height: 900px;
-    min-width: 1280px;
-    min-height: 780px;
+    // The layout is drawn for 1280 x 780 or more. A smaller window is not crowded: main.rs
+    // (fit_to_window) shrinks everything evenly so that size fits (U-6). These only stop the
+    // window going smaller than half of it.
+    min-width: 640px;
+    min-height: 390px;
     background: Theme.window;
     default-font-family: Theme.body-font;
 
@@ -845,6 +848,23 @@ export component AppWindow inherits Window {
                 // Cancel goes back to the list
                 Button { width: 170px; text: "Cancel"; clicked => { App.show-history(); } }
                 Button { width: 200px; kind: 0; text: "Revert"; clicked => { App.confirm-revert(); } }
+            }
+        }
+    }
+
+    // Advanced, Creatures: removing a creature, asked once (W-2): its name, what removing does, Cancel.
+    if App.overlay == 18: Overlay {
+        panel-width: 640px;
+        panel-height: 300px;
+        VerticalLayout {
+            spacing: 14px;
+            Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: end;
+                Button { width: 170px; text: "Cancel"; clicked => { App.close-overlay(); } }
+                Button { width: 200px; kind: 0; text: "Remove"; clicked => { App.confirm-remove-creature(); } }
             }
         }
     }

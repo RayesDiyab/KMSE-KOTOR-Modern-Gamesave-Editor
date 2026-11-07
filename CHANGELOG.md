@@ -57,8 +57,9 @@ CHANGELOG.
     (`CrownFutureLeader`). Found and confirmed in the game by KMRP's agent.
   - Travel to a KotOR planet sets the current planet (`K_CURRENT_PLANET`): after a trip to
     Dantooine, Juhani still spoke of Manaan. Values as the game writes them: Endar Spire 5,
-    Taris 10, Dantooine 15, Manaan 25, Tatooine 35, Unknown World 45; Kashyyyk and Korriban
-    are not measured and stay as they are.
+    Taris 10, Dantooine 15, Kashyyyk 20, Manaan 25, Korriban 30, Tatooine 35, Leviathan 40,
+    Unknown World 45, Star Forge 50 (the Ebon Hawk's arrival scripts); the Ebon Hawk keeps the
+    planet it left. KotOR II never sets it and is left alone.
   - A spot clicked on the map keeps out of the area's ways out, as the offered exit spots do:
     clicked at the middle of a way out, 17 of 17 tested landed inside the trigger.
   - With two installs of one game, a save reads the game's data from the install that holds it.
@@ -84,6 +85,13 @@ CHANGELOG.
     of ordinary enemies); KotOR II's Tech Specialist, Bao-Dur's class, to party members only;
     a prestige class only to a player with one Jedi class at level 15 or above, as Kreia
     offers it, with its side in the note. Party members get no prestige class.
+  - A window smaller than 1280 by 780 is drawn smaller as a whole: text, pictures and tables
+    shrink together and keep their places. At 150% scaling on a 1920x1080 laptop the window
+    ran off the bottom of the screen.
+  - A spot clicked on the map keeps out of the area's objects too (each placeable's walkmesh):
+    clicked on 2,186 placeables, 2,125 would have put the player inside one.
+  - Advanced, Creatures asks before removing a creature. Editing a party member no longer
+    changes a copy of them the editor spawned.
   - Every row of the story pop-ups' change table has an icon. The new ones are the game's own,
     read from the open game: Health the Cure power's, Force KotOR II's gain and loss icons
     (KotOR's Force Sensitivity icon), influence KotOR II's gain and loss icons, and class,

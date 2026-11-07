@@ -200,7 +200,8 @@ fn a_story_move_leaves_the_player_leading() {
 
 /// Travel to another KotOR planet sets the current planet (`K_CURRENT_PLANET`), as the game's
 /// own saves on each planet hold it: after a trip from Manaan to Dantooine, Juhani spoke of
-/// Manaan (the maintainer, in the game). Unknown planets and KotOR 2 are left as they are.
+/// Manaan (the maintainer, in the game). Kashyyyk (20) and Korriban (30) are as the Ebon Hawk's
+/// arrival scripts set them (W-5); the Ebon Hawk itself keeps the planet it left.
 #[test]
 fn travel_sets_the_current_planet() {
     let installs = find_installs(&[]);
@@ -208,16 +209,16 @@ fn travel_sets_the_current_planet() {
     let Some(original) = find_saves(&installs, Game::K1, &[]).into_iter().filter_map(|f| Save::open(&f.path).ok()).find(|s| s.module_name().to_ascii_lowercase().starts_with("man") && planet(s).is_some()) else {
         return eprintln!("no KotOR save on Manaan here: nothing checked");
     };
-    for (module, want) in [("danm13", 15), ("tar_m02aa", 10), ("tat_m17aa", 35)] {
+    for (module, want) in [("danm13", 15), ("tar_m02aa", 10), ("tat_m17aa", 35), ("kas_m22aa", 20), ("korr_m33aa", 30)] {
         let mut s = original.clone();
         s.queue_transition(module, "wp_test", &[]).unwrap();
         assert_eq!(planet(&s), Some(kse_core::globals::GlobalValue::Number(want)), "travel to {}", module);
     }
-    // a planet with no measured value: left as it was
+    // the Ebon Hawk: the planet it left stays
     let mut s = original.clone();
     let before = planet(&s);
-    s.queue_transition("kas_m22aa", "wp_test", &[]).unwrap();
-    assert_eq!(planet(&s), before, "Kashyyyk is not measured: unchanged");
+    s.queue_transition("ebo_m12aa", "wp_test", &[]).unwrap();
+    assert_eq!(planet(&s), before, "the Ebon Hawk keeps the planet");
 }
 
 /// E-4: Add a Class and Change Class offered every class in classes.2da, which marks all of
@@ -263,4 +264,35 @@ fn class_pickers_offer_what_the_game_gives() {
             }
         }
     }
+}
+
+/// W-3: a copy of a party member spawned with "Copy of one in this area" has the member's tag
+/// and classes, and an edit of the member changed it too. On a save where companions stand on
+/// the Ebon Hawk (their own copies in the area), a spawned copy is left alone and the member's
+/// own copy is still edited.
+#[test]
+fn a_spawned_copy_of_a_party_member_is_not_edited_with_them() {
+    let installs = find_installs(&[]);
+    let found = [Game::K1, Game::K2].into_iter().flat_map(|g| find_saves(&installs, g, &[])).filter(|f| !save::player_outside_archive(&f.path)).find_map(|f| {
+        let s = Save::open(&f.path).ok()?;
+        let git = s.area_git()?;
+        let list = git.root.list(kse_core::area::CREATURES)?;
+        let slot = s.npcs().into_iter().filter(|n| s.recruited(*n)).find(|n| {
+            let m = s.creature(Who::Npc(*n)).unwrap();
+            let tag = m.string("Tag").unwrap_or_default();
+            list.iter().any(|c| c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag)) && creature::classes(c) == creature::classes(m))
+        })?;
+        Some((s, slot))
+    });
+    let Some((mut s, slot)) = found else { return eprintln!("no save here with a companion standing in the area: nothing checked") };
+    let tag = s.creature(Who::Npc(slot)).unwrap().string("Tag").unwrap_or_default();
+    let own = s.area_git().unwrap().root.list(kse_core::area::CREATURES).unwrap().iter().find(|c| c.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag))).cloned().unwrap();
+    let own_id = own.int("ObjectId").unwrap();
+    let copy_id = s.spawn_creature(kse_core::area::copy_creature(&own)) as i64;
+    let before = creature::experience(&own);
+    s.edit(Who::Npc(slot), "w3", |c| creature::set_experience(c, before + 777));
+    let xp_of = |id: i64| s.area_git().unwrap().root.list(kse_core::area::CREATURES).unwrap().iter().find(|c| c.int("ObjectId") == Some(id)).map(creature::experience).unwrap();
+    println!("{} ({}): own copy {} -> {}, spawned copy {}", tag, s.module_name(), before, xp_of(own_id), xp_of(copy_id));
+    assert_eq!(xp_of(own_id), before + 777, "the member's own copy is edited");
+    assert_eq!(xp_of(copy_id), before, "the spawned copy is not");
 }

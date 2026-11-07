@@ -110,11 +110,11 @@ No row is VERIFIED for gameplay: nothing was loaded in a game (section E).
 | Influence, components | NOT TESTED | PARTIAL | `edits.rs` (influence) |
 | Finish Quest | PARTIAL | PARTIAL | `finish_quest.rs` (84 + K2 finishes prepared), `finish_quest_audit.rs`; S-4 and S-7 fixed later; S-6 answered in both games |
 | Skip Ahead, Go Back | PARTIAL | PARTIAL | `story_safety.rs`, `star_maps.rs`, `galaxy_route.rs`, `audit_fixes.rs`; S-8 remains |
-| Map, travel, spawn | PARTIAL | PARTIAL | `audit_round2.rs`, `exits.rs`; W-1, W-3, W-4, W-5 remain |
+| Map, travel, spawn | PARTIAL | PARTIAL | `audit_round2.rs`, `exits.rs`, `audit_2026_11_07.rs`; W-1 to W-5 fixed |
 | Pazaak, destinations | PARTIAL | PARTIAL | code read; W-8 remains |
 | Advanced (globals, objects, creatures) | PARTIAL | PARTIAL | `edits.rs` (a global flipped); W-2 remains |
 | Window at 1600x900 and 1280x780, 100% | PARTIAL | PARTIAL | seen in the program this session (Finish Quest, travel, History) |
-| Window at 150% scaling on 1920x1080 | FAILED | FAILED | U-6: minimum height 780 logical px, more than the 720 the screen has (by reading `app.slint`; not run) |
+| Window at 150% scaling on 1920x1080 | VERIFIED (shrinking) | VERIFIED (shrinking) | U-6 fixed: a window smaller than 1280 x 780 is drawn smaller as a whole (`fit_to_window`); run at 1100 x 680 and 860 x 530 on this PC (100% scaling), everything in place. Not run on a 150% screen |
 | 1920x1080, 2560x1440, 3840x2160, 125%, 200% | NOT TESTED | NOT TESTED | not run this session |
 | Loading edited saves in the game | PARTIAL | PARTIAL | section E: two Finish Quest saves loaded and played in KotOR; nine more made for the maintainer; in KotOR II one Finish Quest save loaded by the maintainer (S-6) |
 
@@ -260,12 +260,12 @@ Not fixed. Each was checked against the code, and none is P0 or P1.
 | E-4 | P2 | both | ~~Classes no player can get (Minion; K2 Tech Specialist, Bounty Hunter; prestige classes at any level) are offered~~ | **fixed** by a hand-kept rule, since no game data tells them apart (`classes.2da` `playerclass` is 1 for all of them): no Minion; Tech Specialist for party members only; a prestige class only for a player with one Jedi class at level 15 or above, party members never; the Bounty Hunter row has no name and was already hidden (`questdb::class_offered`, `audit_2026_11_07.rs`, rows checked against both games' tables). What the game does with a class it never gives was not tried |
 | E-5..E-15 | P3 | both | `MClassLevUpIn` left after removing a class; party leader flag; story lock on "With you"; equip checks in the backend; feat prerequisites; class change keeps granted feats; three classes from a damaged rewind; companion rename language; portrait changes gender; XP display above 2^31 | small or need a design choice |
 | W-1 | P2 | both | ~~Stored area copies drop each door's and trigger's own `Tag`~~ | **fixed**: measured in 12 KotOR areas, every one of 107 doors carries its own Tag (2 differ from the template), 8 of 160 triggers (1 differs); now kept |
-| W-2 | P2 | both | ~~Advanced, Creatures removes any creature with one click, party copies included~~ | **fixed** in part: a recruited member's own copy is refused, with the reason; other creatures still go with one click (a confirmation is a design change) |
-| W-3 | P2 | both | A spawned copy of a party member is edited along with them | |
-| W-4 | P2 | both | ~~A clicked floor spot is not checked against transition triggers~~ | **fixed** for triggers: `Area::clear_of_exits`; clicked at the middle of a way out, 17 of 17 tested landed inside before (`exits.rs`). Placeables are still not checked |
-| W-5 | P2 | both | Moving to another module leaves the current-planet values as they were (unverified) | |
+| W-2 | P2 | both | ~~Advanced, Creatures removes any creature with one click, party copies included~~ | **fixed**: a recruited member's own copy is refused, with the reason; any other creature is removed only after a confirmation naming it (the maintainer chose the confirmation) |
+| W-3 | P2 | both | ~~A spawned copy of a party member is edited along with them~~ | **fixed**: `Save::edit` leaves alone the creatures the editor spawned (`Save::spawned`: its own spawns and the ids `spawned.txt` records for the area). Checked on a real save with companions in the area: the member's own copy takes the edit, a spawned copy of them does not (`audit_2026_11_07.rs`) |
+| W-4 | P2 | both | ~~A clicked floor spot is not checked against transition triggers or placeables~~ | **fixed**: `Area::clear_spot` keeps out of the ways out (17 of 17 tested landed inside before) and of every placeable's walkmesh (its `.pwk`, turned to its bearing; 2,125 of 2,186 clicks on placeables landed inside one before), `exits.rs` |
+| W-5 | P2 | both | ~~Moving to another module leaves the current-planet values as they were~~ | **fixed** for KotOR (G-2), now with every planet: the Ebon Hawk's arrival scripts (`k_ebn12_<planet>`) set Kashyyyk 20, Korriban 30, Leviathan 40 and Star Forge 50 beside the measured values; the Ebon Hawk keeps the planet it left. KotOR II has `K_CURRENT_PLANET` but never sets it (0 in its four saves here, Peragus and Telos): nothing to set |
 | W-14 | P2 | both | ~~Two installs of one game: the first found supplies the data~~ | **fixed**: `State::ensure_game_for` reads the install that holds the save; not run here (one install of each game) |
-| U-6 | P2 | both | Minimum window height 780 does not fit 150% scaling on 1920x1080 | a layout change at smaller heights wants a mockup first (AGENTS.md) |
+| U-6 | P2 | both | ~~Minimum window height 780 does not fit 150% scaling on 1920x1080~~ | **fixed** (the maintainer: everything smaller, pictures, fonts and tables alike, anchored as they are): the window's scale factor is lowered as far as the layout's 1280 x 780 needs to fit the window's real pixels, so the whole window shrinks evenly; Windows' own factor at the design size or larger, never below half of it. The window's minimum is 640 x 390 |
 | U-8..U-11 | P3 | both | Revert asks nothing (the failed reopen leaving no save open is **fixed**); a story result applied over edits made after it was asked for; fixed widths at 1280; an old install's item list after changing the game folder at start | |
 | W-6..W-12, W-15, W-18..W-21 | P3 | | as reported in the world and filesystem review: counters on module moves, `spawned.txt` matching, galaxy bits, module names with `:`, map indexes, work on the window's thread, backups inside the game folder, UNC paths, old Steam library format, save list details | |
 | F-3..F-5, F-7, F-8 | P3 | | game files sized before checking (BIF, RIM), Latin-1 labels written as UTF-8, more than 64 localized substrings cut, a Screen.tga up to about 768 MB, `:` in a module name | game files, not saves; or no real file is affected |
@@ -286,7 +286,7 @@ What supports it:
 What stops a release candidate:
 - Few edited saves were loaded in the game: Finish Quest, Skip Ahead, travel and companion saves in KotOR (section E), one Finish Quest save in KotOR II.
 - No P2 story defect is left unanswered: S-4, S-7, E-3 and E-4 are fixed, S-6 is not a defect (both games raise companions on load), and S-8 is answered by a switch that keeps the items. Story moves (Skip Ahead, Go Back) are still unplayed in KotOR II.
-- The window does not fit a common laptop at 150% scaling (U-6).
+- The window at 150% scaling on a 1920x1080 laptop (U-6) is fixed by shrinking, but not yet seen on such a screen.
 
 A beta should load edited saves in both games, above all Finish Quest, Skip Ahead, Go Back, companion import and travel, and report back.
 

@@ -550,16 +550,38 @@ the change on the maintainer's own Endar Spire save.
 **Travel sets the current planet, KotOR only (2026-11-07).** A move to another module, by
 travel or by a story move, sets the global number `K_CURRENT_PLANET` in GLOBALVARS.res to the
 value the game writes for the target's planet (`Save::set_planet_for`), and only when it
-differs. The values, measured in the game's own saves and matching the quest data: `end_` 5,
-`tar_` 10, `dan` 15, `man` 25, `tat_` 35, `unk_` 45. Kashyyyk and Korriban are not measured,
-so a move there leaves the value as it was; KotOR 2 is not touched. Without it, after a trip
+differs. The values, measured in the game's own saves and read in the Ebon Hawk's arrival
+scripts (`k_ebn12_<planet>`): `end_` 5, `tar_` 10, `dan` 15, `kas_` 20, `man` 25, `korr_` 30,
+`tat_` 35, `lev_` 40, `unk_` 45, `sta_` 50. The Ebon Hawk keeps the planet it left. KotOR 2 has
+the global but never sets it (0 in every save of it here, on Peragus and Telos), so it is not
+touched. Without it, after a trip
 from Manaan to Dantooine Juhani still spoke of Manaan (the maintainer, in the game). Checked
 by `travel_sets_the_current_planet`.
 
 **A clicked map spot keeps out of the ways out (2026-11-07).** A spot clicked on the map moves
 to the nearest walkable point that is clear, with 0.75 to each side, of every transition
 trigger's shape in the area's GIT (`Area::clear_of_exits`), as the offered exit spots already did. Stored area copies now keep
-each door's and trigger's own `Tag`.
+each door's and trigger's own `Tag`. It keeps out of the area's objects too (`Area::clear_spot`):
+each placeable's walkmesh (its model's `.pwk`, from `placeables.2da` `modelname`, turned by its
+bearing about its position), with a character's reach of 0.45. Clicked at the middle of 2,186
+placeables in the first 60 modules of each game, 2,125 would have put the player inside one before
+(`exits.rs`).
+
+**A small window shows everything smaller (2026-11-07).** The layout is drawn for 1280 by 780
+logical pixels or more. When the window has fewer real pixels than that at Windows' scaling
+(150% on a 1920x1080 screen leaves about 690 of height), `fit_to_window` in main.rs lowers the
+window's scale factor until 1280 by 780 fits, by dispatching Slint's ScaleFactorChanged and
+Resized events every tenth of a second when the size calls for it. Text, pictures, tables and
+spacing then shrink together and keep their places; at the design size or larger Windows' own
+factor is used, and a change of it (another monitor) is followed. The window can be made as
+small as half the design size. Run on this PC at 1100 by 680 and 860 by 530.
+
+**Advanced, Creatures asks before removing (2026-11-07).** Removing a creature from the area
+asks first, naming it and saying what removing does; a party member's own copy is still
+refused. An edit of a party member no longer changes a copy of them the editor spawned
+("Copy of one in this area"): `Save::edit` leaves alone the creatures whose object ids
+`spawned.txt` records for the area, and those it spawns itself (`Save::spawned`). Checked on a
+save where companions stand in the area (`a_spawned_copy_of_a_party_member_is_not_edited_with_them`).
 
 **Stages in the story's order (2026-11-07).** A quest's stages are taken in the order the story
 reaches them (`questdb::story_order`) by the Quests tab, Finish Quest (which stages are still
