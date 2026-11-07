@@ -422,12 +422,23 @@ impl Save {
             }
         }
         ifo.root.set("Mod_PlayerList", Value::List(vec![moved]));
+        // the game's clock and its counters go on from the module left, not from when the
+        // target was stored: game time went back, and the player's effect ids could clash with
+        // new ones (2026-11-07 audit, W-6). The labels are those played_through carries over.
+        if let Some(live) = self.ifo.as_ref().map(|i| i.root.clone()) {
+            for label in ["Mod_NextCharId0", "Mod_NextCharId1", "Mod_Effect_NxtId", "Mod_PauseDay", "Mod_PauseTime", "Mod_StartYear", "Mod_StartMonth", "Mod_StartDay", "Mod_StartHour", "Mod_StartMinute", "Mod_StartSecond", "Mod_StartMiliSec"] {
+                if let Some(v) = live.get(label) {
+                    ifo.root.set(label, v.clone());
+                }
+            }
+        }
         ifo_res.data = ifo.write();
         let bytes = erf.write();
         self.archive.find_mut(&target, RES_TYPE_SAV).unwrap().data = bytes;
         self.archive_dirty = true;
         let name_bytes = crate::text::encode(area_name);
-        let module_bytes = target.as_bytes().to_vec();
+        // in the save's own text encoding, as every other string (F-4: it wrote UTF-8)
+        let module_bytes = crate::text::encode(&target);
         self.edit_nfo(|n| {
             n.set("LASTMODULE", Value::String(module_bytes));
             n.set("AREANAME", Value::String(name_bytes));
@@ -846,6 +857,13 @@ impl Save {
         if self.slot_is_template(who, slot).is_some() {
             return false;
         }
+        // no inventory to take it (INVENTORY.res missing or unreadable): the item came off the
+        // creature and went nowhere (2026-11-07 audit, E-8). The slot rules (equipableslots,
+        // droid or human, two hands) are checked where an item is picked for a slot, the one
+        // caller (main.rs on_equip), which has the game's tables.
+        if self.loaded("inventory", RES_TYPE_RES).is_none() {
+            return false;
+        }
         let Some(mut item) = self.creature(who).and_then(|c| crate::creature::in_slot(c, slot)).cloned() else { return false };
         self.edit(who, &format!("equip{}", slot), |c| {
             crate::creature::unequip(c, slot);
@@ -909,25 +927,35 @@ impl Save {
         if members.len() > 2 {
             return Err("two party members at most".into());
         }
+        let before = self.party_members();
         for &m in members {
             if self.creature(Who::Npc(m)).is_none() {
                 return Err("that member is not in this save".into());
             }
+            // one the story keeps out of the party (PT_NPC_SELECT 0) is not put in it here
+            // either (2026-11-07 audit, E-7)
+            if !before.contains(&m) && !self.selectable(m) {
+                return Err("the story keeps this member out of the party for now (Can be picked is off)".into());
+            }
         }
-        let shape = self.party.root.list("PT_MEMBERS").and_then(|l| l.first().cloned()).unwrap_or_else(|| {
+        let old = self.party.root.list("PT_MEMBERS").cloned().unwrap_or_default();
+        let shape = old.first().cloned().unwrap_or_else(|| {
             let mut s = Struct::new(0);
             s.set("PT_MEMBER_ID", Value::Int(0));
             s.set("PT_IS_LEADER", Value::Byte(0));
             s
         });
-        let before = self.party_members();
+        // a member who stays keeps their own entry, the leader flag with it: every entry was
+        // made new with the flag off while PT_CONTROLLED_NP still named the member (E-6)
         let list: Vec<Struct> = members
             .iter()
             .map(|&m| {
-                let mut e = shape.clone();
-                e.set_int("PT_MEMBER_ID", m as i64, Value::Int(0));
-                e.set_int("PT_IS_LEADER", 0, Value::Byte(0));
-                e
+                old.iter().find(|e| e.int("PT_MEMBER_ID") == Some(m as i64)).cloned().unwrap_or_else(|| {
+                    let mut e = shape.clone();
+                    e.set_int("PT_MEMBER_ID", m as i64, Value::Int(0));
+                    e.set_int("PT_IS_LEADER", 0, Value::Byte(0));
+                    e
+                })
             })
             .collect();
         let controlled = self.party.root.int("PT_CONTROLLED_NP").unwrap_or(-1);
@@ -1081,7 +1109,8 @@ impl Save {
         let area = ifo.root.list("Mod_Area_list").and_then(|l| l.first()).and_then(|a| a.int("ObjectId")).unwrap_or(1);
         let text = |t: &str| {
             let mut p = Struct::new(0x69);
-            p.set("Parameter", Value::String(t.as_bytes().to_vec()));
+            // the save's own text encoding (F-4: UTF-8 was written)
+            p.set("Parameter", Value::String(crate::text::encode(t)));
             p
         };
         let mut data = Struct::new(0xEEEE);

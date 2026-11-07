@@ -126,6 +126,18 @@ impl GameData {
         table
     }
 
+    /// The language of the game's dialog.tlk (its header's LanguageID: 0 English, 1 French,
+    /// 2 German, 3 Italian, 4 Spanish...), 0 when it cannot be read.
+    pub fn language(&self) -> u32 {
+        use std::io::Read;
+        let mut head = [0u8; 12];
+        find_case_insensitive(&self.root, "dialog.tlk")
+            .and_then(|p| std::fs::File::open(p).ok())
+            .and_then(|mut f| f.read_exact(&mut head).ok())
+            .filter(|_| &head[0..8] == b"TLK V3.0")
+            .map_or(0, |_| u32::from_le_bytes([head[8], head[9], head[10], head[11]]))
+    }
+
     pub fn string(&self, strref: u32) -> Option<String> {
         if strref == u32::MAX {
             return None;

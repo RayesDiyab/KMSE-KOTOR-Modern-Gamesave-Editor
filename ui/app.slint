@@ -61,6 +61,20 @@ component Overlay inherits Rectangle {
     }
 }
 
+// A pop-up's message: it scrolls when it is longer than the pop-up has room for, so the buttons
+// under it stay in view (2026-11-07 audit, U-10: a long list of what a story move could not do,
+// or the half-written save's text, pushed OK off the pop-up's fixed height).
+component MessageText inherits Scroller {
+    vertical-stretch: 1;
+    min-height: 40px;
+    content-height: body.preferred-height;
+    body := Note {
+        x: 0px; y: 0px;
+        width: parent.width - 16px;
+        text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted;
+    }
+}
+
 // The story pop-ups (Finish Quest, and travelling on the timeline) drawn as a screen of the
 // game's own menus (2026-11-07, the maintainer approved the mock-up: "this looks amazing"): a
 // framed dialog with a double line and a soft light around it, a notched rail along its top, a
@@ -436,6 +450,12 @@ component StoryPreviewDetails inherits Rectangle {
                     committed => { App.refresh-story-preview(); }
                 }
                 StoryValues { compact: root.back; }
+                // what the move cannot do, before it is applied (S-9: it was told only after)
+                if App.story-preview-ready && App.story-problems != "": VerticalLayout {
+                    spacing: 6px;
+                    Label { text: "NOT DONE"; font-size: 11px * Theme.ts; }
+                    Note { text: App.story-problems; font-size: 13px * Theme.ts; color: Theme.muted; }
+                }
                 // in the same scroll, right under the changes, as in Finish Quest (2026-11-07):
                 // in a box of its own at the column's foot, a tall window left a gap between them
                 StoryItems { keep-option: root.back; }
@@ -734,7 +754,7 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 14px;
             Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            MessageText { }
             HorizontalLayout {
                 alignment: end;
                 Button { width: 200px; kind: 0; text: "OK"; clicked => { App.close-overlay(); } }
@@ -841,13 +861,30 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 14px;
             Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            MessageText { }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
                 // Cancel goes back to the list
                 Button { width: 170px; text: "Cancel"; clicked => { App.show-history(); } }
                 Button { width: 200px; kind: 0; text: "Revert"; clicked => { App.confirm-revert(); } }
+            }
+        }
+    }
+
+    // Revert, asked once (U-8): how many changes go, that the save on disk stays, Cancel.
+    if App.overlay == 19: Overlay {
+        panel-width: 600px;
+        panel-height: 280px;
+        VerticalLayout {
+            spacing: 14px;
+            Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            MessageText { }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: end;
+                Button { width: 170px; text: "Cancel"; clicked => { App.close-overlay(); } }
+                Button { width: 200px; kind: 0; text: "Revert"; clicked => { App.confirm-revert-changes(); } }
             }
         }
     }
@@ -859,7 +896,7 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 14px;
             Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            MessageText { }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -876,7 +913,7 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 14px;
             Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            MessageText { }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -1327,77 +1364,85 @@ export component AppWindow inherits Window {
         VerticalLayout {
             spacing: 12px;
             Text { text: "Settings"; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; }
-            Rectangle { height: 4px; }
-            Label { text: "TEXT SIZE"; }
-            Choice {
-                options: ["Small", "Medium", "Large"];
-                current: Theme.text-size;
-                picked(i) => { Theme.text-size = i; App.settings-changed(); }
-            }
-            Rectangle { height: 6px; }
-            Label { text: "APPEARANCE"; }
-            Choice {
-                options: ["Dark", "Light"];
-                icons: 1;
-                current: Theme.dark ? 0 : 1;
-                picked(i) => { Theme.dark = i == 0; App.settings-changed(); }
-            }
-            Rectangle { height: 6px; }
-            Label { text: "GAME FOLDERS"; }
-            for g[i] in [{ name: "KotOR", path: App.k1-folder }, { name: "KotOR II", path: App.k2-folder }]: Rectangle {
-                height: 52px;
-                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                HorizontalLayout {
-                    spacing: 14px;
-                    Text { width: 130px; text: g.name; vertical-alignment: center; font-family: Theme.list-font; font-size: 18px * Theme.ts; color: Theme.text; }
-                    Text { text: g.path != "" ? g.path : "Not found"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: g.path != "" ? Theme.muted : Theme.faint; overflow: elide; horizontal-stretch: 1; }
-                    VerticalLayout { alignment: center; Button { kind: 3; text: "Change"; enabled: App.page == 0; clicked => { App.choose-game-folder(); } } }
-                }
-            }
-            Rectangle { height: 6px; }
-            Label { text: "SAVE FOLDERS"; }
-            Note {
-                font-size: 14px * Theme.ts;
-                // Folders change only from the list of saves: a new folder can switch the game
-                // under an open save.
-                text: App.page == 0
-                    ? "Steam, GOG and disc saves are found automatically. Add saves from anywhere else here, like a phone, a Switch or another PC."
-                    : "Folders can be changed from the list of saves (the arrow, top left).";
-            }
-            if App.added-folders.length == 0: Text {
-                text: "No folders added.";
-                font-family: Theme.body-font;
-                font-size: 14px * Theme.ts;
-                color: Theme.faint;
-            }
-            Scroller {
+            // the options scroll when the window is too short for them (U-10: with Large text
+            // at the smallest window Done was pushed off the pop-up); Done stays in view
+            settings-scroll := Scroller {
                 vertical-stretch: 1;
-                content-height: App.added-folders.length * 48px;
-                VerticalLayout {
-                    for f[i] in App.added-folders: Rectangle {
-                        height: 48px;
+                content-height: settings-options.preferred-height;
+                settings-options := VerticalLayout {
+                    x: 0px; y: 0px;
+                    width: parent.width - 16px;
+                    height: self.preferred-height;
+                    spacing: 12px;
+                    Rectangle { height: 4px; }
+                    Label { text: "TEXT SIZE"; }
+                    Choice {
+                        options: ["Small", "Medium", "Large"];
+                        current: Theme.text-size;
+                        picked(i) => { Theme.text-size = i; App.settings-changed(); }
+                    }
+                    Rectangle { height: 6px; }
+                    Label { text: "APPEARANCE"; }
+                    Choice {
+                        options: ["Dark", "Light"];
+                        icons: 1;
+                        current: Theme.dark ? 0 : 1;
+                        picked(i) => { Theme.dark = i == 0; App.settings-changed(); }
+                    }
+                    Rectangle { height: 6px; }
+                    Label { text: "GAME FOLDERS"; }
+                    for g[i] in [{ name: "KotOR", path: App.k1-folder }, { name: "KotOR II", path: App.k2-folder }]: Rectangle {
+                        height: 52px;
                         Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
                         HorizontalLayout {
                             spacing: 14px;
-                            Text { text: f; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; overflow: elide; horizontal-stretch: 1; }
-                            VerticalLayout { alignment: center; Button { kind: 3; text: "Remove"; enabled: App.page == 0; clicked => { App.remove-save-folder(i); } } }
+                            Text { width: 130px; text: g.name; vertical-alignment: center; font-family: Theme.list-font; font-size: 18px * Theme.ts; color: Theme.text; }
+                            Text { text: g.path != "" ? g.path : "Not found"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: g.path != "" ? Theme.muted : Theme.faint; overflow: elide; horizontal-stretch: 1; }
+                            VerticalLayout { alignment: center; Button { kind: 3; text: "Change"; enabled: App.page == 0; clicked => { App.choose-game-folder(); } } }
                         }
                     }
+                    Rectangle { height: 6px; }
+                    Label { text: "SAVE FOLDERS"; }
+                    Note {
+                        font-size: 14px * Theme.ts;
+                        // Folders change only from the list of saves: a new folder can switch the game
+                        // under an open save.
+                        text: App.page == 0
+                            ? "Steam, GOG and disc saves are found automatically. Add saves from anywhere else here, like a phone, a Switch or another PC."
+                            : "Folders can be changed from the list of saves (the arrow, top left).";
+                    }
+                    if App.added-folders.length == 0: Text {
+                        text: "No folders added.";
+                        font-family: Theme.body-font;
+                        font-size: 14px * Theme.ts;
+                        color: Theme.faint;
+                    }
+                    VerticalLayout {
+                        for f[i] in App.added-folders: Rectangle {
+                            height: 48px;
+                            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                            HorizontalLayout {
+                                spacing: 14px;
+                                Text { text: f; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; overflow: elide; horizontal-stretch: 1; }
+                                VerticalLayout { alignment: center; Button { kind: 3; text: "Remove"; enabled: App.page == 0; clicked => { App.remove-save-folder(i); } } }
+                            }
+                        }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        Button { kind: 3; text: "Add a Save Folder"; enabled: App.page == 0; clicked => { App.add-save-folder(); } }
+                    }
+                    if App.page == 1: Rectangle { height: 6px; }
+                    if App.page == 1: Label { text: "BACKUPS"; }
+                    if App.page == 1: Note {
+                        font-size: 14px * Theme.ts;
+                        text: "Your save is backed up here when you open it: " + App.backup-path;
+                    }
+                    if App.page == 1: HorizontalLayout {
+                        alignment: start;
+                        Button { kind: 3; text: "Open Backups Folder"; clicked => { App.open-backups(); } }
+                    }
                 }
-            }
-            HorizontalLayout {
-                alignment: start;
-                Button { kind: 3; text: "Add a Save Folder"; enabled: App.page == 0; clicked => { App.add-save-folder(); } }
-            }
-            if App.page == 1: Rectangle { height: 6px; }
-            if App.page == 1: Label { text: "BACKUPS"; }
-            if App.page == 1: Note {
-                font-size: 14px * Theme.ts;
-                text: "Your save is backed up here when you open it: " + App.backup-path;
-            }
-            if App.page == 1: HorizontalLayout {
-                alignment: start;
-                Button { kind: 3; text: "Open Backups Folder"; clicked => { App.open-backups(); } }
             }
             HorizontalLayout {
                 spacing: 14px;

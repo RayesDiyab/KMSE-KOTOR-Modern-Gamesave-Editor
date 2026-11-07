@@ -299,6 +299,14 @@ fn object_footprint(data: &GameData, files: &ModuleFiles, p: &Struct) -> Vec<Vec
         .collect()
 }
 
+/// Whether a module name read from a save (LASTMODULE) or a .git (LinkedToModule) may become
+/// a path: 1 to 16 letters, digits and underscores, as the game's own are. Until 2026-11-08
+/// only '/', '\' and ".." were refused, and on Windows "C:x" made modules\C:x.mod a file in
+/// drive C:'s current folder, outside the game (2026-11-07 audit, F-8 and W-9).
+pub fn is_module_name(module: &str) -> bool {
+    (1..=16).contains(&module.len()) && module.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
 /// The area files of a module as the game finds them: a .mod (from a mod) first, then the
 /// module's .rim and _s.rim.
 pub struct ModuleFiles {
@@ -309,7 +317,8 @@ pub struct ModuleFiles {
 impl ModuleFiles {
     pub fn open(root: &Path, module: &str) -> ModuleFiles {
         // A module is a name: LASTMODULE comes from the save, and must not lead out of the game.
-        if module.contains(['/', '\\']) || module.contains("..") {
+        // Every module name from a save or a .git reaches a path through here.
+        if !is_module_name(module) {
             return ModuleFiles { rims: Vec::new(), erf: None };
         }
         let erf = find_case_insensitive(root, &format!("modules/{}.mod", module))

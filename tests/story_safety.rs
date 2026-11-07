@@ -148,7 +148,7 @@ fn removing_a_companion_updates_the_active_party_and_control() {
         let Some((mut save, work, _)) = copy_save(game, "party-removal-safety") else {
             continue;
         };
-        let members: Vec<_> = save.npcs().into_iter().take(2).collect();
+        let members: Vec<_> = save.npcs().into_iter().filter(|n| save.in_party(*n) || save.selectable(*n)).take(2).collect();
         if members.is_empty() {
             continue;
         }

@@ -87,11 +87,21 @@ pub fn data_dir() -> PathBuf {
 
 /// The real path without Windows' \\?\ prefix, so it reads as the player knows it.
 pub fn clean(path: &Path) -> PathBuf {
-    let real = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let text = real.to_string_lossy().to_string();
+    strip_verbatim(&fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+}
+
+/// A path in the form Explorer and the player know: \\?\C:\x is C:\x, and \\?\UNC\server\share
+/// is \\server\share. Until 2026-11-08 the UNC form was kept, and Explorer could not open an
+/// install on a network drive (2026-11-07 audit, W-19). Other \\?\ forms (a volume's GUID)
+/// have no shorter spelling and are kept.
+pub fn strip_verbatim(real: &Path) -> PathBuf {
+    let text = real.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", rest));
+    }
     match text.strip_prefix(r"\\?\") {
-        Some(rest) if !rest.starts_with("UNC") => PathBuf::from(rest),
-        _ => real,
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => real.to_path_buf(),
     }
 }
 
@@ -133,6 +143,14 @@ fn steam_roots() -> Vec<PathBuf> {
                 roots.push(PathBuf::from(p));
             }
         }
+        // where the installer put Steam, for every user of the PC; HKCU's SteamPath above is
+        // missing until Steam has run for this user (2026-11-07 audit, W-20)
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        for key in ["SOFTWARE\\WOW6432Node\\Valve\\Steam", "SOFTWARE\\Valve\\Steam"] {
+            if let Ok(p) = hklm.open_subkey(key).and_then(|k| k.get_value::<String, _>("InstallPath")) {
+                roots.push(PathBuf::from(p));
+            }
+        }
         for v in ["ProgramFiles(x86)", "ProgramFiles"] {
             if let Some(p) = std::env::var_os(v) {
                 roots.push(PathBuf::from(p).join("Steam"));
@@ -155,12 +173,7 @@ fn steam_libraries() -> Vec<PathBuf> {
         let vdf = root.join("steamapps").join("libraryfolders.vdf");
         let mut found = vec![root.clone()];
         if let Ok(text) = fs::read_to_string(&vdf) {
-            for line in text.lines() {
-                let parts: Vec<&str> = line.split('"').collect();
-                if parts.len() >= 4 && parts[1].eq_ignore_ascii_case("path") {
-                    found.push(PathBuf::from(parts[3].replace("\\\\", "\\")));
-                }
-            }
+            found.extend(library_paths(&text));
         }
         for f in found {
             let canonical = clean(&f);
@@ -170,6 +183,30 @@ fn steam_libraries() -> Vec<PathBuf> {
         }
     }
     libraries
+}
+
+/// The library folders a libraryfolders.vdf lists. Since 2021 each is a numbered block with a
+/// "path" line; before that each was one line, "1" "D:\\SteamLibrary", which was not read
+/// until 2026-11-08 (2026-11-07 audit, W-20). The numbers in a newer file's "apps" blocks are
+/// numbered lines too, but no path, and are left out.
+pub fn library_paths(vdf: &str) -> Vec<PathBuf> {
+    let absolute = |p: &str| {
+        let b = p.as_bytes();
+        p.starts_with('/') || p.starts_with(r"\\") || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'\\' || b[2] == b'/'))
+    };
+    let mut out = Vec::new();
+    for line in vdf.lines() {
+        let parts: Vec<&str> = line.split('"').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let (key, value) = (parts[1], parts[3].replace(r"\\", r"\"));
+        let numbered = !key.is_empty() && key.bytes().all(|b| b.is_ascii_digit());
+        if key.eq_ignore_ascii_case("path") || (numbered && absolute(&value)) {
+            out.push(PathBuf::from(value));
+        }
+    }
+    out
 }
 
 #[cfg(windows)]
@@ -253,12 +290,44 @@ pub fn is_save_folder(path: &Path) -> bool {
         })
 }
 
-fn saves_in(dir: &Path, game: Game, kind: SaveKind, out: &mut Vec<SaveFolder>) {
+/// A folder as one text however it is spelled: its real path, one kind of slash, no slash at
+/// the end, and on Windows and macOS (whose folders ignore case) in lower case. An added
+/// folder spelled otherwise than the one found (C:/..., \\?\C:\..., another case) listed the
+/// same save twice (2026-11-07 audit, W-21).
+fn folder_key(path: &Path) -> String {
+    let mut text = clean(path).to_string_lossy().to_string();
+    if cfg!(windows) {
+        text = text.replace('/', r"\");
+    }
+    while text.len() > 1 && (text.ends_with('/') || text.ends_with('\\')) {
+        text.pop();
+    }
+    if cfg!(windows) || cfg!(target_os = "macos") {
+        text = text.to_lowercase();
+    }
+    text
+}
+
+/// Lists `path` as a save of `game` if it is one and is not listed yet. A save of the other
+/// game is left out, wherever it is: a KotOR II save copied into KotOR's saves folder was
+/// listed as a KotOR save (2026-11-07 audit, W-21). One whose savenfo.res cannot be read is
+/// kept in the game's own folders, where Save::open explains it, but not in an added folder.
+fn add_save(path: PathBuf, game: Game, kind: SaveKind, seen: &mut std::collections::HashSet<String>, out: &mut Vec<SaveFolder>) {
+    let of_game = match crate::save::peek_game(&path) {
+        Some(g) => g == game,
+        None => kind != SaveKind::Added,
+    };
+    if of_game && seen.insert(folder_key(&path)) {
+        out.push(SaveFolder { game, path, kind });
+    }
+}
+
+fn saves_in(dir: &Path, game: Game, kind: SaveKind, seen: &mut std::collections::HashSet<String>, out: &mut Vec<SaveFolder>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if is_save_folder(&path) && !out.iter().any(|s| s.path == path) {
-            out.push(SaveFolder { game, path, kind });
+        if is_save_folder(&path) {
+            add_save(path, game, kind, seen, out);
         }
     }
 }
@@ -318,22 +387,20 @@ fn port_save_roots(game: Game) -> Vec<PathBuf> {
 
 pub fn find_saves(installs: &[Install], game: Game, added: &[PathBuf]) -> Vec<SaveFolder> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for install in installs.iter().filter(|i| i.game == game) {
         for (root, kind) in save_roots(install) {
-            saves_in(&root, game, kind, &mut out);
+            saves_in(&root, game, kind, &mut seen, &mut out);
         }
     }
     for root in port_save_roots(game) {
-        saves_in(&root, game, SaveKind::Local, &mut out);
+        saves_in(&root, game, SaveKind::Local, &mut seen, &mut out);
     }
     for path in added {
         if is_save_folder(path) {
-            if crate::save::peek_game(path) == Some(game) && !out.iter().any(|s| &s.path == path) {
-                out.push(SaveFolder { game, path: path.clone(), kind: SaveKind::Added });
-            }
+            add_save(path.clone(), game, SaveKind::Added, &mut seen, &mut out);
         } else {
-            saves_in(path, game, SaveKind::Added, &mut out);
-            out.retain(|s| s.kind != SaveKind::Added || crate::save::peek_game(&s.path) == Some(game));
+            saves_in(path, game, SaveKind::Added, &mut seen, &mut out);
         }
     }
     out

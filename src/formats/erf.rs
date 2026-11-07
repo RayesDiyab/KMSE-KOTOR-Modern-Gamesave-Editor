@@ -132,8 +132,9 @@ impl Erf {
         out.extend_from_slice(&self.localized);
         for (i, r) in self.resources.iter().enumerate() {
             let mut name = [0u8; 16];
-            for (j, b) in r.name.bytes().take(16).enumerate() {
-                name[j] = b;
+            // one character to a byte, as it was read (F-4)
+            for (j, c) in r.name.chars().take(16).enumerate() {
+                name[j] = super::gff::latin1(c);
             }
             out.extend_from_slice(&name);
             out.extend_from_slice(&(i as u32).to_le_bytes());

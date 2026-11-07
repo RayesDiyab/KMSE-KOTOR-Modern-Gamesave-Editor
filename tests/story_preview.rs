@@ -80,7 +80,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
         if let Some(i) = save.npcs().first().copied() {
             let mut named = save.clone();
             named.edit(Who::Npc(i), "preview.name", |c| {
-                creature::set_name(c, "Prepared companion")
+                creature::set_name(c, "Prepared companion", 0)
             });
             assert_eq!(
                 companion_name(&named, &data, i, "Fallback"),

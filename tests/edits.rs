@@ -185,7 +185,7 @@ fn kse_features_survive_a_write() {
                 save.edit(Who::Player, "up", |c| creature::set_class_level(c, index, lv, &class, &xp));
             }
             // The party and a quest.
-            let members: Vec<usize> = save.npcs().into_iter().filter(|n| save.recruited(*n)).take(2).collect();
+            let members: Vec<usize> = save.npcs().into_iter().filter(|n| save.recruited(*n) && (save.in_party(*n) || save.selectable(*n))).take(2).collect();
             save.set_party_members(&members).unwrap();
             save.set_quest("kmrp_test_quest", 10);
             save.write(&backups).unwrap();

@@ -157,7 +157,7 @@ fn game_running(game: Game) -> bool {
 
 // ---- settings, kept beside the backups ----
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Settings {
     added: Vec<PathBuf>,
     /// The install to use for each game, when the player picked one.
@@ -276,7 +276,8 @@ struct State {
     game: Game,
     games: HashMap<Game, Game_>,
     ready: Arc<Mutex<HashMap<Game, Game_>>>,
-    ready_items: Arc<Mutex<HashMap<Game, Arc<Vec<ItemTemplate>>>>>,
+    // with the install folder each list was read from (U-11)
+    ready_items: Arc<Mutex<HashMap<Game, (PathBuf, Arc<Vec<ItemTemplate>>)>>>,
     picker_tab: usize,
     inventory_tab: usize,
     /// The rows of a list pop-up that is not the item list, for its search box.
@@ -311,6 +312,9 @@ struct State {
     selected_box: Option<(&'static str, usize)>,
     /// What can be spawned at the picked spot, and where it goes and which way it faces.
     spawnable: Vec<Spawnable>,
+    /// The spawn list's templates (the area's own and every other), per game and module: read once,
+    /// where every Spawn Here read every .utc of the game again on the window's thread (W-11).
+    spawn_templates: HashMap<(Game, String), Vec<Spawnable>>,
     spawn_at: Option<([f32; 3], f32)>,
     /// The slot picked on the equip grid, whose fitting items the inventory list shows.
     equip_slot: Option<u32>,
@@ -365,6 +369,8 @@ struct State {
     back_to: Option<(i32, Option<(String, i64)>)>,
     story_plan: Option<StoryPlan>,
     story_prepared: Option<PreparedStory>,
+    /// The save's opening and edit count the story preview was worked out from (U-9).
+    story_edits: (u64, u64),
     story_result: Arc<Mutex<Option<Result<PreparedStory, String>>>>,
     status: (String, bool),
     // the backup History's Revert to This Backup asked about, until it is confirmed
@@ -409,6 +415,7 @@ impl State {
             let other = self.games.get(&game).map_or(false, |g| plain(&g.data.root) != plain(&root));
             if other {
                 self.games.remove(&game);
+                self.spawn_templates.clear();
                 self.arrivals.remove(&game);
                 self.portraits.clear();
                 self.art_asked.remove(&game);
@@ -536,7 +543,14 @@ impl State {
         let game = self.game;
         if let Some(g) = self.games.get_mut(&game) {
             if g.items.is_none() {
-                let ready = self.ready_items.lock().unwrap().remove(&game);
+                // a preloaded list only when it is of this install: the game folder changed soon
+                // after start left the old install's list to be used (2026-11-07 audit, U-11)
+                let plain = |p: &Path| {
+                    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+                    p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase()
+                };
+                let root = g.data.root.clone();
+                let ready = self.ready_items.lock().unwrap().remove(&game).filter(|(from, _)| plain(from) == plain(&root)).map(|(_, items)| items);
                 g.items = Some(ready.unwrap_or_else(|| Arc::new(catalog::item_templates(&g.data))));
             }
             return g.items.clone().unwrap();
@@ -999,7 +1013,7 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     app.set_classes(s(classes.join(" · ")));
     app.set_can_add_class(creature::classes(&c).len() < 2 && creature::level(&c) < cat.max_level());
     let xp = creature::experience(&c);
-    app.set_xp(xp as i32);
+    app.set_xp(xp.clamp(0, i32::MAX as i64) as i32); // a DWORD in the save: above i32 it showed negative (S-11, E-15)
     app.set_xp_changed(xp != creature::experience(&o));
     let level = creature::level(&c);
     let max = cat.max_level();
@@ -1417,7 +1431,7 @@ fn fill_party(ui: &AppWindow, st: &mut State) {
     let sv = st.save.as_ref().unwrap();
     app.set_party_size(sv.party_members().len() as i32);
     let xp = sv.party_int("PT_XP_POOL").unwrap_or(0);
-    app.set_party_xp(xp as i32);
+    app.set_party_xp(xp.clamp(0, i32::MAX as i64) as i32);
     app.set_party_xp_changed(st.original.as_ref().map_or(false, |o| o.party_int("PT_XP_POOL").unwrap_or(0) != xp));
 }
 
@@ -1648,17 +1662,29 @@ fn clear_story_preview(ui: &AppWindow, st: &mut State) {
     app.set_story_values(model(Vec::new()));
     app.set_story_items(model(Vec::new()));
     app.set_story_grants(model(Vec::new()));
+    app.set_story_problems(SharedString::new());
+}
+
+/// A story preview worked out on its own thread, a fault in it turned into an error to show:
+/// a panic there sent nothing back, and the pop-up said "Calculating" for good (2026-11-07
+/// audit, S-10).
+fn prepare_guarded(plan: &StoryPlan, before: &Save, data: &GameData) -> Result<PreparedStory, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| plan.prepare(before, data))).unwrap_or_else(|fault| {
+        let why = fault.downcast_ref::<String>().cloned().or_else(|| fault.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+        Err(format!("the editor hit a fault working it out{}", if why.is_empty() { String::new() } else { format!(" ({})", why) }))
+    })
 }
 
 fn request_story_preview(ui: &AppWindow, st: &mut State, back: bool) {
     clear_story_preview(ui, st);
     let (Some(plan), Some(before), Some(data)) = (current_story_plan(ui, st, back), st.save.as_ref().cloned(), st.data()) else { return };
     st.story_plan = Some(plan.clone());
+    st.story_edits = (before.session, before.edits);
     ui.global::<App>().set_story_preview_status(s("Calculating the changes..."));
     let result = st.story_result.clone();
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        *result.lock().unwrap() = Some(plan.prepare(&before, &data));
+        *result.lock().unwrap() = Some(prepare_guarded(&plan, &before, &data));
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.global::<App>().invoke_story_preview_finished();
@@ -1859,6 +1885,8 @@ fn finish_story_preview(ui: &AppWindow, st: &mut State) {
     };
     app.set_story_notes(s(if quest { done.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("\n") } else { String::new() }));
     app.set_story_game_notes(s(if quest { game.into_iter().map(line).collect::<Vec<_>>().join("\n") } else { String::new() }));
+    // Skip Ahead and Go Back: what they cannot do, before Apply as well as after (S-9)
+    app.set_story_problems(s(if quest { String::new() } else { failed_notes(&prepared.notes).join("\n") }));
     app.set_story_preview_ready(true);
     st.story_prepared = Some(prepared);
 }
@@ -1887,11 +1915,12 @@ fn request_quest_preview(ui: &AppWindow, st: &mut State) {
     }
     let (Some(plan), Some(before), Some(data)) = (current_quest_plan(ui, st), st.save.as_ref().cloned(), st.data()) else { return };
     st.story_plan = Some(plan.clone());
+    st.story_edits = (before.session, before.edits);
     app.set_story_preview_status(s("Calculating what you receive..."));
     let result = st.story_result.clone();
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        *result.lock().unwrap() = Some(plan.prepare(&before, &data));
+        *result.lock().unwrap() = Some(prepare_guarded(&plan, &before, &data));
         let _ = slint::invoke_from_event_loop(move || {
             if let Some(ui) = weak.upgrade() {
                 ui.global::<App>().invoke_story_preview_finished();
@@ -1900,8 +1929,15 @@ fn request_quest_preview(ui: &AppWindow, st: &mut State) {
     });
 }
 
+/// Whether the open save is still the one the story preview was worked out from: Apply puts
+/// in the copy the preview made, so an edit made since would be lost (2026-11-07 audit, U-9).
+/// When it changed, the preview is worked out again first.
+fn story_save_unchanged(st: &State) -> bool {
+    st.save.as_ref().map_or(false, |s| (s.session, s.edits) == st.story_edits)
+}
+
 fn take_story_preview(ui: &AppWindow, st: &mut State, back: bool) -> Option<PreparedStory> {
-    if st.story_plan != current_story_plan(ui, st, back) || !ui.global::<App>().get_story_preview_ready() {
+    if st.story_plan != current_story_plan(ui, st, back) || !ui.global::<App>().get_story_preview_ready() || !story_save_unchanged(st) {
         request_story_preview(ui, st, back);
         return None;
     }
@@ -1918,11 +1954,16 @@ fn skip_path(chapters: &[Chapter], index: i32) -> Vec<i32> {
     kse_core::questdb::skip_path(&chapter_states(chapters), index)
 }
 
+/// The notes of a story move that say what it could not do.
+fn failed_notes(notes: &[String]) -> Vec<String> {
+    const FAILED: [&str; 7] = ["not found", "not recruited", "could not", "No form taught", "no story switch", "left as they are", "is undone too"];
+    notes.iter().filter(|n| FAILED.iter().any(|f| n.contains(f))).cloned().collect()
+}
+
 /// What a skip or a return left undone, for the player to know. Reports of what went well are
 /// not shown (2026-10-25, the maintainer: no success screen).
 fn story_problems(ui: &AppWindow, notes: &[String]) {
-    const FAILED: [&str; 7] = ["not found", "not recruited", "could not", "No form taught", "no story switch", "left as they are", "is undone too"];
-    let problems: Vec<&str> = notes.iter().map(String::as_str).filter(|n| FAILED.iter().any(|f| n.contains(f))).collect();
+    let problems = failed_notes(notes);
     if !problems.is_empty() {
         message(ui, "Done, except for this", &problems.join("\n"));
     }
@@ -2789,7 +2830,10 @@ fn fill_more(ui: &AppWindow, st: &mut State) {
         if NOT_DESTINATIONS.iter().any(|g| g.0 == game && g.1.eq_ignore_ascii_case(&label)) {
             continue;
         }
-        let on = mask & (1 << i) != 0;
+        // on where both halves have the planet, as the switch writes it: the halves differ in
+        // the saves here (KotOR II on Telos: Peragus in the lower only; KotOR on the Ebon Hawk:
+        // Dantooine in the lower only), and a planet in one half showed on (2026-11-07 audit, W-8)
+        let on = mask & (1 << i) != 0 && mask & (1i64 << (i + 16)) != 0;
         let place = GLOBES.iter().find(|g| g.0 == game && g.1.eq_ignore_ascii_case(&label));
         let (x, y) = place.map_or((0.5, 0.95), |g| (g.3, g.4));
         let (globe, off) = match (place, data.as_ref()) {
@@ -2803,7 +2847,7 @@ fn fill_more(ui: &AppWindow, st: &mut State) {
             index: i as i32,
             name: s(name),
             on,
-            changed: on != (omask & (1 << i) != 0),
+            changed: on != (omask & (1 << i) != 0 && omask & (1i64 << (i + 16)) != 0),
             x,
             y,
             has_globe: globe.is_some(),
@@ -3451,7 +3495,8 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
             app.set_pick_can_spawn(here);
         }
         Some(MapPick::Object(i)) => {
-            let o = &area.objects[i];
+            // a pick from a map since read again is let go, not indexed (2026-11-07 audit, W-10)
+            let Some(o) = area.objects.get(i) else { return };
             use kse_core::map::Kind::*;
             let what = match o.kind {
                 Door => "Door",
@@ -3503,7 +3548,7 @@ fn slot_items(st: &mut State, slot: u32) -> Vec<Named> {
     };
     // A weapon for the right hand alone takes both hands, so the left is taken.
     if let Some(right) = right_hand_of(slot) {
-        if st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::in_slot(c, right)).map_or(false, |w| two_handed(&base, w)) {
+        if st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::in_slot(c, right)).map_or(false, |w| two_handed(&data, &base, w)) {
             return Vec::new();
         }
     }
@@ -3536,22 +3581,31 @@ fn right_hand_of(slot: u32) -> Option<u32> {
 /// Measured in both games' baseitems.2da: staves, rifles and heavy weapons (weaponwield 3, 5,
 /// 6) list the right hand alone, weapons that can pair list both. KotOR 1's Gamorrean
 /// Battleaxe also lists the right hand alone but is wielded in one hand (2).
-fn two_handed(base: &kse_core::formats::tables::TwoDa, item: &Struct) -> bool {
-    let row = item.int("BaseItem").unwrap_or(0) as usize;
+fn two_handed(data: &GameData, base: &kse_core::formats::tables::TwoDa, item: &Struct) -> bool {
+    // a template entry (EquippedRes alone, on a companion made from a template) has no BaseItem:
+    // it was read as row 0 (2026-11-07 audit, E-9); its template's is used, as item_name does
+    let row = item
+        .int("BaseItem")
+        .or_else(|| item.string("EquippedRes").filter(|r| !r.is_empty()).and_then(|r| data.gff(&r, "uti", kse_core::formats::erf::RES_TYPE_UTI)).and_then(|t| t.root.int("BaseItem")));
+    let Some(row) = row else { return false };
+    let row = row.max(0) as usize;
     let slots = base.int(row, "equipableslots").unwrap_or(0);
     slots & 0x10 != 0 && slots & 0x20 == 0 && matches!(base.int(row, "weaponwield"), Some(3 | 5 | 6))
 }
 
 /// The creatures the editor spawned, so the map offers to remove those and only those:
-/// one line per creature, "game|module|object id|tag", in spawned.txt beside the settings.
-/// The game keeps a creature's object id when it saves, so the record still finds it in
-/// later saves of the same game.
+/// one line per creature, "game|module|object id|tag|template", in spawned.txt beside the
+/// settings. The game keeps a creature's object id when it saves, so the record still finds it
+/// in later saves of the same game. The template (TemplateResRef) is there since 2026-11-07
+/// (audit, W-7): in another playthrough the game can give the same id to another creature of
+/// the same tag; one of another template no longer counts. Lines written before have four
+/// parts and match as they did.
 fn spawned_path() -> PathBuf {
     games::data_dir().join("spawned.txt")
 }
 
-fn spawned_key(game: Game, module: &str, id: u32, tag: &str) -> String {
-    format!("{}|{}|{}|{}", game.title(), module.to_ascii_lowercase(), id, tag.to_ascii_lowercase())
+fn spawned_key(game: Game, module: &str, id: u32, tag: &str, template: &str) -> String {
+    format!("{}|{}|{}|{}|{}", game.title(), module.to_ascii_lowercase(), id, tag.to_ascii_lowercase(), template.to_ascii_lowercase())
 }
 
 /// The object ids of the creatures spawned.txt records in `module` of `game`.
@@ -3564,8 +3618,10 @@ fn spawned_ids(game: Game, module: &str) -> Vec<u32> {
 
 fn was_spawned(game: Game, module: &str, c: &Struct) -> bool {
     let (Some(id), tag) = (c.int("ObjectId"), c.string("Tag").unwrap_or_default()) else { return false };
-    let key = spawned_key(game, module, id as u32, &tag);
-    std::fs::read_to_string(spawned_path()).map_or(false, |t| t.lines().any(|l| l == key))
+    let key = spawned_key(game, module, id as u32, &tag, &c.string("TemplateResRef").unwrap_or_default());
+    // a line from before the template was recorded: game, module, id and tag
+    let old = key.rsplitn(2, '|').nth(1).unwrap_or_default().to_string();
+    std::fs::read_to_string(spawned_path()).map_or(false, |t| t.lines().any(|l| l == key || l == old))
 }
 
 /// A spawn that was reverted before it was saved is not in any save, so its line goes: the id
@@ -3581,11 +3637,11 @@ fn forget_pending_spawns(st: &mut State) {
     }
 }
 
-fn record_spawned(game: Game, module: &str, id: u32, tag: &str) {
+fn record_spawned(game: Game, module: &str, id: u32, tag: &str, template: &str) {
     use std::io::Write;
     let _ = std::fs::create_dir_all(games::data_dir());
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(spawned_path()) {
-        let _ = writeln!(f, "{}", spawned_key(game, module, id, tag));
+        let _ = writeln!(f, "{}", spawned_key(game, module, id, tag, template));
     }
 }
 
@@ -3630,9 +3686,31 @@ fn keep_backup(old: Option<&Save>, mut new: Save) -> Save {
 fn backups_of(st: &State) -> PathBuf {
     let root = st.installs.iter().find(|i| i.game == st.game).map(|i| i.path.clone());
     match st.save.as_ref() {
-        Some(save) => save::backup_root(&save.folder, root.as_deref()),
+        Some(save) => {
+            let dir = save::backup_root(&save.folder, root.as_deref());
+            // a game folder the editor cannot write in (under Program Files, which a 64-bit
+            // program is not redirected from): the backup failed and saving was refused, though
+            // the save itself could be written (2026-11-07 audit, W-18). Then the editor's own
+            // folder keeps them.
+            if writable(&dir) {
+                dir
+            } else {
+                games::data_dir().join("backups").join(save.game.title())
+            }
+        }
         None => games::data_dir().join("backups"),
     }
+}
+
+/// Whether files can be made in `dir` (made first if it is not there).
+fn writable(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".kmse-write-test-{}", std::process::id()));
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
 }
 
 // ---- spawning ----
@@ -3686,7 +3764,22 @@ fn spawn_portrait(data: &GameData, c: &Struct) -> Option<String> {
 }
 
 /// Everything that can be spawned in the save's current area.
-fn spawnables(st: &State) -> Vec<Spawnable> {
+fn spawnables(st: &mut State) -> Vec<Spawnable> {
+    let key = match st.save.as_ref() {
+        Some(s) => (s.game, s.module_name().to_ascii_lowercase()),
+        None => return Vec::new(),
+    };
+    let mut out = area_spawnables(st);
+    if !st.spawn_templates.contains_key(&key) {
+        let made = template_spawnables(st);
+        st.spawn_templates.insert(key.clone(), made);
+    }
+    out.extend(st.spawn_templates[&key].iter().cloned());
+    out
+}
+
+/// The creatures of the area as it stands, each one to copy.
+fn area_spawnables(st: &State) -> Vec<Spawnable> {
     let Some(data) = st.data() else { return Vec::new() };
     let Some(save) = st.save.as_ref() else { return Vec::new() };
     let mut out = Vec::new();
@@ -3704,6 +3797,14 @@ fn spawnables(st: &State) -> Vec<Spawnable> {
             });
         }
     }
+    out
+}
+
+/// The creatures the game's templates make: the area's own, then every other.
+fn template_spawnables(st: &State) -> Vec<Spawnable> {
+    let Some(data) = st.data() else { return Vec::new() };
+    let Some(save) = st.save.as_ref() else { return Vec::new() };
+    let mut out = Vec::new();
     let mut add = |source: SpawnSource, resref: &str, utc: &Struct, from: &str| {
         let name = creature_label(&data, utc);
         let (group, faction) = faction_group(&data, utc.int("FactionID").unwrap_or(0));
@@ -4326,6 +4427,7 @@ fn main() {
         global_filter: (String::new(), false),
         selected_box: None,
         spawnable: Vec::new(),
+        spawn_templates: HashMap::new(),
         spawn_at: None,
         equip_slot: None,
         weapon_set: 0,
@@ -4355,6 +4457,7 @@ fn main() {
         back_to: None,
         story_plan: None,
         story_prepared: None,
+        story_edits: (0, 0),
         story_result: Arc::new(Mutex::new(None)),
         status: (String::new(), false),
     }));
@@ -4372,7 +4475,7 @@ fn main() {
             for (game, path) in jobs {
                 if game == current {
                     let data = GameData::open(game, &path);
-                    ready_items.lock().unwrap().insert(game, Arc::new(catalog::item_templates(&data)));
+                    ready_items.lock().unwrap().insert(game, (path.clone(), Arc::new(catalog::item_templates(&data))));
                 } else {
                     let built = build_game(game, &path, true);
                     ready.lock().unwrap().insert(game, built);
@@ -4428,6 +4531,19 @@ fn main() {
         let Some(folder) = pick_folder(&u, "Pick the game's folder (the one with chitin.key)") else { return };
         match games::identify(&folder) {
             Some(game) => {
+                // a folder the install list leaves out (game files but no program the editor
+                // knows, as the Mac and Linux ports have) was stored and then ignored with no word
+                // (2026-11-07 audit, W-15): said, and not stored
+                let mut trial = st.settings.clone();
+                match game {
+                    Game::K1 => trial.k1_dir = Some(folder.clone()),
+                    Game::K2 => trial.k2_dir = Some(folder.clone()),
+                }
+                let same = |p: &Path| std::fs::canonicalize(p).ok() == std::fs::canonicalize(&folder).ok();
+                if !installs_for(&trial).iter().any(|i| i.game == game && same(&i.path)) {
+                    message(&u, "That folder could not be used", &format!("It has {}'s files, but not the game's program for Windows, so the editor cannot tell which game it is or read it the game's way. Pick the folder with swkotor{}.exe.", game.title(), if game == Game::K2 { "2" } else { "" }));
+                    return;
+                }
                 match game {
                     Game::K1 => st.settings.k1_dir = Some(folder),
                     Game::K2 => st.settings.k2_dir = Some(folder),
@@ -4435,6 +4551,7 @@ fn main() {
                 st.settings.store();
                 st.installs = installs_for(&st.settings);
                 st.games.remove(&game);
+                st.spawn_templates.clear();
                 st.ready.lock().unwrap().remove(&game);
                 st.ready_items.lock().unwrap().remove(&game);
                 st.portraits.clear();
@@ -4515,8 +4632,9 @@ fn main() {
         }
         let t = text.to_string();
         let who = st.who();
+        let language = st.data().map_or(0, |d| d.language());
         if let Some(save) = st.save.as_mut() {
-            save.edit(who, "name", |c| creature::set_name(c, &t));
+            save.edit(who, "name", |c| creature::set_name(c, &t, language));
             let bytes = kse_core::text::encode(&t);
             if who == Who::Player && save.party.root.get("PT_PCNAME").is_some() {
                 save.edit_party_table("name", |p| p.set("PT_PCNAME", Value::String(bytes.clone())));
@@ -4539,6 +4657,11 @@ fn main() {
     on!(ui, state, on_set_xp, |u, st, xp: i32| {
         let xp = xp.max(0) as i64;
         edit_who(&u, st, "xp", |c| creature::set_experience(c, xp));
+        // below what the level needs: said, not refused (2026-11-07 audit, E-15)
+        let level = st.save.as_ref().and_then(|s| s.creature(st.who())).map(creature::level).unwrap_or(1);
+        if let Some(need) = st.catalog().and_then(|cat| cat.xp_for(level)).filter(|need| xp < *need) {
+            message(&u, "Less XP than the level needs", &format!("Level {} needs {} XP. The level stays as it is; the game gives the next level only at the XP that level needs.", level, thousands(need)));
+        }
     });
     on!(ui, state, on_xp_to_next, |u, st| {
         let Some(cat) = st.catalog() else { return };
@@ -4607,12 +4730,20 @@ fn main() {
         let current_id = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| c.int("PortraitId")).unwrap_or(-1);
         let current = cat.portrait_for(current_id).cloned();
         u.global::<App>().set_overlay(0);
+        let gender = |st: &State| st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| c.int("Gender"));
+        let before = gender(st);
         if p.for_pc && p.bodies[1] > 0 {
             edit_who(&u, st, "look", |c| creature::set_look(c, &p, current.as_ref()));
         } else {
             edit_who(&u, st, "look", |c| creature::set_portrait(c, p.id));
         }
         fill_editor(&u, st);
+        // a portrait of the other sex changes the gender with the body: said, as the Gender list
+        // says it (2026-11-07 audit, E-14: it changed with no word; in KotOR II it decides the
+        // Handmaiden or the Disciple)
+        if gender(st) != before {
+            message(&u, "The gender changed with the look", "This portrait is of the other sex, so the character's gender changed too. Conversations and romances use it, and in KotOR II it decides whether the Handmaiden or the Disciple joins.");
+        }
     });
     on!(ui, state, on_open_add_class, |u, st| {
         if needs_game(&u, st) {
@@ -4687,6 +4818,21 @@ fn main() {
         edit_who(&u, st, &format!("feat{}", id), |c| {
             creature::add_feat(c, id as i64);
         });
+        // the game's prerequisites (feat.2da prereqfeat1 and 2) are said, not enforced: a save
+        // editor adds what it is asked (2026-11-07 audit, E-10: added with no word)
+        let (Some(data), Some(cat)) = (st.data(), st.catalog()) else { return };
+        let Some(c) = st.save.as_ref().and_then(|s| s.creature(st.who())) else { return };
+        let has = creature::feats(c);
+        let table = data.table("feat");
+        let missing: Vec<String> = ["prereqfeat1", "prereqfeat2"]
+            .iter()
+            .filter_map(|col| table.int(id.max(0) as usize, col))
+            .filter(|need| *need >= 0 && !has.contains(need))
+            .map(|need| cat.feat_name(need))
+            .collect();
+        if !missing.is_empty() {
+            message(&u, "Added without what it needs", &format!("In the game {} needs {} first. It is added all the same.", cat.feat_name(id as i64), missing.join(" and ")));
+        }
     });
     on!(ui, state, on_remove_feat, |u, st, id: i32| {
         let game = st.game;
@@ -4731,10 +4877,15 @@ fn main() {
     });
     on!(ui, state, on_set_stack, |u, st, row: i32, v: i32| {
         let row = row.max(0) as usize;
+        // at most what the item stacks to (baseitems stacking, or what it holds already), here as
+        // well as in the Stepper (2026-11-07 audit, E-15)
+        let item = st.save.as_ref().and_then(|s| s.inventory().get(row).cloned());
+        let top = item.map_or(i64::MAX, |it| st.item_kind(&it).1.max(it.int("StackSize").unwrap_or(1)));
+        let v = (v.max(1) as i64).min(top.max(1));
         if let Some(save) = st.save.as_mut() {
             save.edit_inventory(&format!("stack{}", row), |items| {
                 if let Some(it) = items.get_mut(row) {
-                    it.set_int("StackSize", v.max(1) as i64, Value::Word(1));
+                    it.set_int("StackSize", v, Value::Word(1));
                 }
             });
         }
@@ -4911,10 +5062,18 @@ fn main() {
     });
     on!(ui, state, on_set_box_stack, |u, st, row: i32, stack: i32| {
         let Some((list, index)) = st.selected_box else { return };
+        // at most what the item stacks to, as in the inventory (E-15)
+        let item = st
+            .save
+            .as_ref()
+            .and_then(|s| s.area_git())
+            .and_then(|g| area::container(&g.root, list, index).and_then(|c| c.list("ItemList")).and_then(|l| l.get(row.max(0) as usize)).cloned());
+        let top = item.map_or(i64::MAX, |it| st.item_kind(&it).1.max(it.int("StackSize").unwrap_or(1)));
+        let stack = (stack.max(1) as i64).min(top.max(1));
         if let Some(save) = st.save.as_mut() {
             save.edit_area(&format!("box{}{}.{}", list, index, row), |git| {
                 if let Some(item) = area::container_mut(git, list, index).and_then(|c| c.list_mut("ItemList")).and_then(|l| l.get_mut(row.max(0) as usize)) {
-                    item.set_int("StackSize", stack.max(1) as i64, Value::Word(1));
+                    item.set_int("StackSize", stack, Value::Word(1));
                 }
             });
         }
@@ -4962,6 +5121,10 @@ fn main() {
                     let bit = (1i64 << i) | (1i64 << (i + 16));
                     let mask = if on { mask | bit } else { mask & !bit };
                     map.set_int("GlxyMapPlntMsk", mask, Value::Dword(0));
+                    // the planet the map has selected, turned off: nothing selected (W-8)
+                    if !on && map.int("GlxyMapSelPnt") == Some(i as i64) {
+                        map.set_int("GlxyMapSelPnt", -1, Value::Int(0));
+                    }
                 }
             });
         }
@@ -5027,7 +5190,7 @@ fn main() {
         }
         let Some(tag) = st.quest_pick.clone() else { return };
         let plan = current_quest_plan(&u, st);
-        if plan.is_none() || st.story_plan != plan || !u.global::<App>().get_story_preview_ready() {
+        if plan.is_none() || st.story_plan != plan || !u.global::<App>().get_story_preview_ready() || !story_save_unchanged(st) {
             request_quest_preview(&u, st);
             return;
         }
@@ -5214,7 +5377,7 @@ fn main() {
             .filter(|k| kse_core::questdb::class_offered(game, k.id, player, &others, level))
             .map(|k| row(k.id, &k.name, format!("{} Health{} a level{}", k.hit_die, if k.force_die > 0 { format!(" and {} Force", k.force_die) } else { String::new() }, prestige_side(k.id))))
             .collect();
-        open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "Replaces the class at the same level. Health and Force follow the new class. Leaving a Force class removes its powers.", rows);
+        open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "Replaces the class at the same level. Health, Force and the class's own feats follow the new class. Leaving a Force class removes its powers.", rows);
     });
     on!(ui, state, on_remove_class, |u, st, index: i32| {
         if needs_game(&u, st) {
@@ -5257,7 +5420,7 @@ fn main() {
         }
         // Two hands on one weapon: what the left hand holds goes to the inventory first.
         let left = match slot { 0x10 => Some(0x20), 0x40000 => Some(0x80000), _ => None };
-        let both = st.data().map(|d| d.table("baseitems")).zip(st.save.as_ref().and_then(|s| s.inventory().get(index.max(0) as usize).cloned())).map_or(false, |(b, it)| two_handed(&b, &it));
+        let both = st.data().map(|d| d.table("baseitems")).zip(st.save.as_ref().and_then(|s| s.inventory().get(index.max(0) as usize).cloned())).map_or(false, |(b, it)| st.data().map_or(false, |d| two_handed(&d, &b, &it)));
         if let (Some(left), true) = (left, both) {
             if !whole_item_in_slot(&u, st, who, left) {
                 return;
@@ -5379,7 +5542,21 @@ fn main() {
         if std::env::var("KMRP_MAP_DEBUG").is_ok() {
             eprintln!("map click {} {} -> {} {}", fx, fy, x, y);
         }
-        let z = st.save.as_ref().and_then(|s| s.player()).map(|p| area::position(p)[2]).unwrap_or(0.0);
+        // the storey: the player's height in the area they are in; on another area's map the
+        // height of the marker nearest the click there, where the player's height in this area
+        // could pick the wrong storey (2026-11-07 audit, W-12)
+        let here = st.save.as_ref().map_or(false, |s| s.module_name().eq_ignore_ascii_case(&area.module));
+        let z = if here {
+            st.save.as_ref().and_then(|s| s.player()).map(|p| area::position(p)[2]).unwrap_or(0.0)
+        } else {
+            area.objects
+                .iter()
+                .min_by(|a, b| {
+                    let d = |o: &kse_core::map::Object| (o.pos[0] - x).powi(2) + (o.pos[1] - y).powi(2);
+                    d(a).partial_cmp(&d(b)).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map_or(0.0, |o| o.pos[2])
+        };
         // the nearest walkable floor that keeps out of the area's ways out and its objects (W-4)
         match area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_spot(px, py)) {
             Some(spot) => st.map_pick = Some(MapPick::Floor(spot)),
@@ -5399,7 +5576,7 @@ fn main() {
         let (spot, look_at) = match st.map_pick.clone() {
             Some(MapPick::Floor(p)) => (p, None),
             Some(MapPick::Object(i)) => {
-                let o = &area.objects[i];
+                let Some(o) = area.objects.get(i) else { return };
                 let Some(p) = o.spots.get(which.max(0) as usize).copied() else { return };
                 (p, Some(o.pos))
             }
@@ -5450,7 +5627,7 @@ fn main() {
     });
     on!(ui, state, on_remove_pick, |u, st| {
         let Some(MapPick::Object(i)) = st.map_pick.clone() else { return };
-        let Some(o) = st.map.as_ref().map(|a| a.objects[i].clone()) else { return };
+        let Some(o) = st.map.as_ref().and_then(|a| a.objects.get(i).cloned()) else { return };
         if o.list != area::CREATURES {
             return;
         }
@@ -5638,7 +5815,7 @@ fn main() {
     });
     on!(ui, state, on_unlock_pick, |u, st| {
         let Some(MapPick::Object(i)) = st.map_pick.clone() else { return };
-        let Some(o) = st.map.as_ref().map(|a| a.objects[i].clone()) else { return };
+        let Some(o) = st.map.as_ref().and_then(|a| a.objects.get(i).cloned()) else { return };
         let module = st.map.as_ref().map(|a| a.module.clone()).unwrap_or_default();
         if let Some(save) = st.save.as_mut() {
             save.edit_module_git(&module, &format!("unlock{}{}", o.list, o.index), |git| {
@@ -5655,7 +5832,7 @@ fn main() {
     });
     on!(ui, state, on_follow_exit, |u, st| {
         let Some(MapPick::Object(i)) = st.map_pick.clone() else { return };
-        let Some(m) = st.map.as_ref().map(|a| a.objects[i].leads_to.clone()) else { return };
+        let Some(m) = st.map.as_ref().and_then(|a| a.objects.get(i).map(|o| o.leads_to.clone())) else { return };
         load_map(st, Some(m));
         fill_map(&u, st);
     });
@@ -5810,11 +5987,19 @@ fn main() {
         let made = when(std::fs::metadata(&backup).ok().and_then(|m| m.created().or_else(|_| m.modified()).ok()));
         match save::restore(&folder, &backup, &backups_of(st), game) {
             Ok(r) => {
-                if let (Ok(mut sv), Ok(orig)) = (Save::open(&folder), Save::open(&folder)) {
-                    // the save is now this backup, checked byte for byte: the next save checks it
-                    sv.backup = Some(backup.clone());
-                    st.save = Some(sv);
-                    st.original = Some(orig);
+                match (Save::open(&folder), Save::open(&folder)) {
+                    (Ok(mut sv), Ok(orig)) => {
+                        // the save is now this backup, checked byte for byte: the next save checks it
+                        sv.backup = Some(backup.clone());
+                        st.save = Some(sv);
+                        st.original = Some(orig);
+                    }
+                    // reverted on disk but not readable now: said, and the old save is not
+                    // shown as if it were the reverted one (U-8: it said "Reverted")
+                    (Err(e), _) | (_, Err(e)) => {
+                        message(&u, "Reverted, but the save could not be read again", &format!("The save on disk is the backup of {} now. {} Go back to the saves and open it again.", made, e));
+                        return;
+                    }
                 }
                 st.quest_xp.clear();
                 st.stage_pick = None;
@@ -5912,6 +6097,8 @@ fn main() {
         // The saves page has no save open, so the folder decides, as it does for Save Changes.
         let root = st.installs.iter().find(|i| i.game == st.game).map(|i| i.path.clone());
         let backups = save::backup_root(&folder, root.as_deref());
+        // the editor's own folder where the game's cannot be written, as backups_of (W-18)
+        let backups = if writable(&backups) { backups } else { games::data_dir().join("backups").join(st.game.title()) };
         let result = Save::open(&folder).and_then(|mut s| {
             s.rename(&name);
             s.write(&backups).map(|_| ())
@@ -5971,20 +6158,39 @@ fn main() {
         u.global::<App>().set_page(1);
         fill_editor(&u, st);
     });
+    // Revert asks first (2026-11-07 audit, U-8: it sat beside Save Changes and asked nothing)
     on!(ui, state, on_revert, |u, st| {
+        let changes = st.save.as_ref().map_or(0, |s| s.changes.len());
+        if changes == 0 {
+            return;
+        }
+        let app = u.global::<App>();
+        app.set_message_title(s("Undo the changes?"));
+        app.set_message_body(s(format!(
+            "The {} not saved go{}, and the save is as it is on disk again. The save on disk is not touched.",
+            if changes == 1 { "change".to_string() } else { format!("{} changes", changes) },
+            if changes == 1 { "es" } else { "" }
+        )));
+        app.set_overlay(19);
+    });
+    on!(ui, state, on_confirm_revert_changes, |u, st| {
+        u.global::<App>().set_overlay(0);
         if let Some(folder) = st.save.as_ref().map(|s| s.folder.clone()) {
             // read again first: a save that no longer opens (moved, locked, damaged) left no
             // save open and every tab out of date (2026-11-07 audit, U-8); now the changes
             // stay and it says why
-            let (fresh, orig) = match (Save::open(&folder), Save::open(&folder)) {
+            let (mut fresh, orig) = match (Save::open(&folder), Save::open(&folder)) {
                 (Ok(a), Ok(b)) => (a, b),
                 (Err(e), _) | (_, Err(e)) => {
                     message(&u, "The save could not be read again", &format!("{} The changes are still here.", e));
                     return;
                 }
             };
+            // the backup made at opening still covers the save on disk: History keeps its mark
+            fresh.backup = st.save.as_ref().and_then(|s| s.backup.clone());
             st.save = Some(fresh);
             st.original = Some(orig);
+            st.route_plan.clear();
             st.quest_xp.clear();
             st.status = (String::new(), false);
             st.map = None;
@@ -6033,11 +6239,12 @@ fn main() {
                 };
                 area::place_creature(&mut c, spot, facing);
                 let tag = c.string("Tag").unwrap_or_default();
+                let template = c.string("TemplateResRef").unwrap_or_default();
                 let game = st.game;
                 if let Some(save) = st.save.as_mut() {
                     let id = save.spawn_creature(c);
-                    record_spawned(game, save.module_name(), id, &tag);
-                    st.pending_spawns.push(spawned_key(game, save.module_name(), id, &tag));
+                    record_spawned(game, save.module_name(), id, &tag, &template);
+                    st.pending_spawns.push(spawned_key(game, save.module_name(), id, &tag, &template));
                 }
                 st.target = Target::None;
                 u.global::<App>().set_overlay(0);
@@ -6132,7 +6339,13 @@ fn main() {
                 let Some((old_id, _)) = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| creature::classes(c).get(index).copied()) else { return };
                 let (Some(old), Some(new)) = (cat.class(old_id).cloned(), cat.class(id as i64).cloned()) else { return };
                 st.target = Target::None;
-                edit_who(&u, st, &format!("class{}", index), move |c| creature::change_class(c, index, &old, &new));
+                let other_cat = cat.clone();
+                edit_who(&u, st, &format!("class{}", index), move |c| {
+                    creature::change_class(c, index, &old, &new);
+                    // the classes' own feats swapped too (E-11)
+                    let keep = creature::other_class_feats(c, index, &|k| other_cat.class(k).cloned());
+                    creature::swap_class_feats(c, index, &old, &new, &keep);
+                });
                 fill_editor(&u, st);
                 u.global::<App>().set_overlay(6);
             }

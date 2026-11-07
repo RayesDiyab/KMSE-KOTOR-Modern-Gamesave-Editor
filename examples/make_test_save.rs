@@ -25,7 +25,7 @@ fn main() {
     let data = GameData::open(game, &game_dir);
     let cat = Catalog::build(&data);
     let mut save = Save::open(&to).unwrap();
-    save.edit(Who::Player, "name", |c| creature::set_name(c, "Kmrp Tester"));
+    save.edit(Who::Player, "name", |c| creature::set_name(c, "Kmrp Tester", 0));
     save.edit(Who::Player, "Str", |c| creature::set_attribute(c, "Str", 24));
     save.edit(Who::Player, "Cha", |c| creature::set_attribute(c, "Cha", 16));
     save.edit(Who::Player, "skill0", |c| creature::set_skill(c, 0, 14));

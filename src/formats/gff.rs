@@ -236,6 +236,18 @@ struct Reader<'a> {
     copied: std::cell::Cell<usize>,
 }
 
+/// A label or resource name is read one byte to a character, so it is written back one
+/// character to a byte, and a read then a write gives the same bytes. Written as UTF-8 until
+/// 2026-11-08, an é took two bytes and a 16-letter label lost its last (2026-11-07 audit, F-4).
+/// A character no byte can hold (only an edit could add one) is written as '?'.
+pub(crate) fn latin1(c: char) -> u8 {
+    if (c as u32) <= 0xFF {
+        c as u8
+    } else {
+        b'?'
+    }
+}
+
 fn u32_at(data: &[u8], at: usize) -> Result<u32, GffError> {
     data.get(at..at + 4)
         .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
@@ -339,11 +351,19 @@ impl<'a> Reader<'a> {
             }
             12 => {
                 let head = self.field_data(data, 12)?;
+                let size = u32::from_le_bytes(head[0..4].try_into().unwrap()) as usize;
                 let strref = u32::from_le_bytes(head[4..8].try_into().unwrap());
                 let count = u32::from_le_bytes(head[8..12].try_into().unwrap()) as usize;
+                // each substring takes 8 bytes or more of the field's size, after its strref and
+                // count: a count that cannot fit is a damaged field, and refused. Until
+                // 2026-11-08 a count over 64 was read as 64, and the rest lost without a word
+                // (2026-11-07 audit, F-5).
+                if count > size.saturating_sub(8) / 8 {
+                    return err(format!("{} has more localized strings than its size holds", label));
+                }
                 let mut strings = Vec::new();
                 let mut pos = data + 12;
-                for _ in 0..count.min(64) {
+                for _ in 0..count {
                     let entry = self.field_data(pos, 8)?;
                     let id = u32::from_le_bytes(entry[0..4].try_into().unwrap());
                     let len = u32::from_le_bytes(entry[4..8].try_into().unwrap());
@@ -472,8 +492,8 @@ impl Gff {
         }
         for label in &w.labels {
             let mut raw = [0u8; 16];
-            for (i, b) in label.bytes().take(16).enumerate() {
-                raw[i] = b;
+            for (i, c) in label.chars().take(16).enumerate() {
+                raw[i] = latin1(c);
             }
             out.extend_from_slice(&raw);
         }

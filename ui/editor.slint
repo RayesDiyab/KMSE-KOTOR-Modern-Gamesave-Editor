@@ -861,8 +861,11 @@ component PartyTab inherits Rectangle {
             for n in App.npcs: Rectangle {
                 height: 76px;
                 Rectangle { x: 0; y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                // KotOR II's row (influence too) measured about 70 px wider than the 1280 layout
+                // has room for, so Replace / Bring In was cut (2026-11-07 audit, U-10): tighter
+                // columns and gaps
                 HorizontalLayout {
-                    spacing: 16px;
+                    spacing: 12px;
                     padding-top: 8px;
                     padding-bottom: 8px;
                     Rectangle {
@@ -876,7 +879,7 @@ component PartyTab inherits Rectangle {
                     }
                     VerticalLayout {
                         alignment: center;
-                        width: 160px;
+                        width: 150px;
                         Text { text: n.name; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: n.changed ? Theme.changed : Theme.text; }
                         Text {
                             text: n.in-party ? "In the party" : n.has-creature ? (n.recruited ? "Recruited" : "Not recruited") : "Not met in this save";
@@ -886,19 +889,21 @@ component PartyTab inherits Rectangle {
                     HorizontalLayout {
                         spacing: 10px;
                         alignment: start;
-                        width: 140px;
+                        width: 128px;
                         VerticalLayout { alignment: center; Switch { on: n.recruited; enabled: n.has-creature; toggled(v) => { App.set-recruited(n.index, v); } } }
                         Text { text: "Recruited"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: n.has-creature ? Theme.muted : Theme.faint; }
                     }
                     HorizontalLayout {
                         spacing: 10px;
                         alignment: start;
-                        width: 130px;
+                        width: 114px;
                         VerticalLayout {
                             alignment: center;
                             Switch {
                                 on: n.in-party;
-                                enabled: n.has-creature && (n.in-party || App.party-size < 2);
+                                // a member the story keeps out ("Can be picked" off) is not put
+                                // in the party here either (E-7)
+                                enabled: n.has-creature && (n.in-party || (App.party-size < 2 && n.selectable));
                                 toggled(v) => { App.set-in-party(n.index, v); }
                             }
                         }
@@ -907,17 +912,17 @@ component PartyTab inherits Rectangle {
                     HorizontalLayout {
                         spacing: 10px;
                         alignment: start;
-                        width: 160px;
+                        width: 148px;
                         VerticalLayout { alignment: center; Switch { on: n.selectable; toggled(v) => { App.set-selectable(n.index, v); } } }
                         Text { text: "Can be picked"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
                     }
                     if n.has-influence: HorizontalLayout {
                         spacing: 10px;
-                        width: 210px;
+                        width: 196px;
                         Text { text: "Influence"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
                         VerticalLayout {
                             alignment: center;
-                            Stepper { width: 140px; height: 36px; value: n.influence; minimum: 0; maximum: 100; font-size: 17px * Theme.ts; set(v) => { App.set-influence(n.index, v); } }
+                            Stepper { width: 126px; height: 36px; value: n.influence; minimum: 0; maximum: 100; font-size: 17px * Theme.ts; set(v) => { App.set-influence(n.index, v); } }
                         }
                     }
                     Rectangle { horizontal-stretch: 1; }

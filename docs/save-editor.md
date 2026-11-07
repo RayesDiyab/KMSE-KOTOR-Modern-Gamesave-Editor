@@ -576,6 +576,18 @@ spacing then shrink together and keep their places; at the design size or larger
 factor is used, and a change of it (another monitor) is followed. The window can be made as
 small as half the design size. Run on this PC at 1100 by 680 and 860 by 530.
 
+**The audit's smaller findings (2026-11-08).** Each is listed with its reason in
+`docs/audits/WINDOWS_FULL_AUDIT.md` (section H) and checked by `tests/audit_p3.rs` and
+`tests/audit_p3_formats.rs` where a test can reach it. What a player notices: Revert asks first;
+Skip Ahead and Go Back show what they cannot do before Apply, and are worked out again when the
+save was edited since; a member the story keeps out of the party cannot be put in it; Change
+Class swaps the classes' own feats; a feat added without its prerequisites, XP below the level's
+need and a portrait that changes the gender are said, not refused; KotOR's star map quest names
+the map found last, as the game does; a planet shows on only when the galaxy map has both of its
+bits; a game folder the editor cannot use is refused with the reason, and backups go to the
+editor's own folder when the game's cannot be written; a module name from a save must be a plain
+name before it becomes a path.
+
 **Advanced, Creatures asks before removing (2026-11-07).** Removing a creature from the area
 asks first, naming it and saying what removing does; a party member's own copy is still
 refused. An edit of a party member no longer changes a copy of them the editor spawned

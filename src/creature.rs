@@ -42,14 +42,20 @@ pub fn stored_name(c: &Struct) -> String {
 }
 
 /// The player's name lives in FirstName (and Mod_FirstName); the last name is cleared,
-/// as character creation leaves it.
-pub fn set_name(c: &mut Struct, text: &str) {
+/// as character creation leaves it. A name that came from the game's text (a companion made
+/// from a template) has no text of its own: it is written for `language`, the game's own
+/// (dialog.tlk), and English, where only English was written and a German or French game could
+/// find none for itself (2026-11-07 audit, E-13).
+pub fn set_name(c: &mut Struct, text: &str, language: u32) {
     let bytes = crate::text::encode(text);
     for label in ["FirstName", "Mod_FirstName"] {
         if let Some(Value::LocString(l)) = c.get_mut(label) {
             l.strref = u32::MAX;
             if l.strings.is_empty() {
                 l.strings.push((0, bytes.clone()));
+                if language != 0 {
+                    l.strings.push((language * 2, bytes.clone()));
+                }
             } else {
                 for s in l.strings.iter_mut() {
                     s.1 = bytes.clone();
@@ -1098,6 +1104,14 @@ pub fn validate_rewind_prefix(c: &Struct, wanted: i64, cat: &crate::catalog::Cat
             return Err(format!("The saved level history has no usable record for level {}. Earlier levels cannot be reconstructed safely.", i + 1));
         }
     }
+    // the class list is made from the classes these records name: more than the game's two (a
+    // history another editor left) would have written three (2026-11-07 audit, E-12)
+    let mut kinds: Vec<i64> = records.iter().take(keep).filter_map(|r| r.int("LvlStatClass")).collect();
+    kinds.sort();
+    kinds.dedup();
+    if kinds.len() > 2 {
+        return Err("The saved level history names more than two classes. Earlier levels cannot be reconstructed safely.".to_string());
+    }
     Ok(keep)
 }
 
@@ -1186,6 +1200,23 @@ fn undo_record(c: &mut Struct, record: &Struct) {
 /// KotOR 2's has none even for a Jedi); powers go when the new class has no Force, and a
 /// Force class gets an empty power list. What was missing of Health and Force stays
 /// missing.
+/// After Change Class: the feats the old class gives by itself up to the class's level go,
+/// unless the new class or `keep` (the other class's) gives them too, and the new class's come
+/// (classes.2da's feat table, `granted`). Change Class kept Jedi Defense and lightsaber
+/// proficiency on a Jedi made a Soldier and gave the Soldier's own nothing (2026-11-07 audit,
+/// E-11). A feat the old class grants that was also picked by hand cannot be told apart.
+pub fn swap_class_feats(c: &mut Struct, index: usize, old: &crate::catalog::Class, new: &crate::catalog::Class, keep: &[i64]) {
+    let Some(level) = classes(c).get(index).map(|(_, l)| *l) else { return };
+    let upto = |k: &crate::catalog::Class| -> Vec<i64> { k.grants.granted.iter().filter(|(_, l)| *l <= level).map(|(f, _)| *f).collect() };
+    let (gone, come) = (upto(old), upto(new));
+    for f in gone.iter().filter(|f| !come.contains(f) && !keep.contains(f)) {
+        remove_feat(c, *f);
+    }
+    for f in &come {
+        add_feat(c, *f);
+    }
+}
+
 pub fn change_class(c: &mut Struct, index: usize, old: &crate::catalog::Class, new: &crate::catalog::Class) {
     let Some(entry) = c.list("ClassList").and_then(|l| l.get(index)).cloned() else { return };
     if c.list("ClassList").unwrap().iter().any(|e| e.int("Class") == Some(new.id)) {
@@ -1242,9 +1273,19 @@ pub fn remove_class_keeping(c: &mut Struct, index: usize, class: &crate::catalog
         return;
     }
     let before = pools(c, class.game);
-    change_levels(c, index, 1, class, keep);
-    lower_one(c, index, class, keep);
+    // a class KotOR 2's AddMultiClass left at level 0 has no levels to take back: raising it to
+    // 1 first and lowering it again took feats the companion already had (2026-11-07 audit, E-5)
+    let level = classes(c).get(index).map_or(0, |(_, l)| *l);
+    if level > 0 {
+        change_levels(c, index, 1, class, keep);
+        lower_one(c, index, class, keep);
+    }
     c.list_mut("ClassList").unwrap().remove(index);
+    // the class to level up in next (written by add_multiclass) pointed at the class removed
+    let left = c.list("ClassList").map_or(1, |l| l.len()) as i64;
+    if c.int("MClassLevUpIn").map_or(false, |m| m >= left || m == index as i64) {
+        c.set_int("MClassLevUpIn", 0, Value::Byte(0));
+    }
     settle(c, class.game, before, false);
     fit_experience(c, xp_for);
 }

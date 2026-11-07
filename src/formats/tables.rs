@@ -28,9 +28,15 @@ struct Bif {
     entries: Vec<(u32, u32)>,
 }
 
-/// `size` bytes at `offset` of a file.
+/// `size` bytes at `offset` of a file. The offset and size come from the file's own table
+/// (RIM, ERF, BIF), so the file is checked to be that large before anything is set aside: a
+/// damaged table asked for up to 4 GB, and failing to get it ends the program (2026-11-07
+/// audit, F-3).
 pub fn read_at(path: &Path, offset: u64, size: usize) -> Option<Vec<u8>> {
     let mut file = fs::File::open(path).ok()?;
+    if offset.checked_add(size as u64)? > file.metadata().ok()?.len() {
+        return None;
+    }
     file.seek(SeekFrom::Start(offset)).ok()?;
     let mut out = vec![0u8; size];
     file.read_exact(&mut out).ok()?;
@@ -89,6 +95,10 @@ impl Key {
         }
         let count = u32_at(&head, 8)? as usize;
         let table = u32_at(&head, 16)? as u64;
+        // sixteen bytes an entry: a damaged count cannot ask for more than the file holds (F-3)
+        if table + count as u64 * 16 > file.metadata().ok()?.len() {
+            return None;
+        }
         let mut raw = vec![0u8; count * 16];
         file.seek(SeekFrom::Start(table)).ok()?;
         file.read_exact(&mut raw).ok()?;

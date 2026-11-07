@@ -92,6 +92,33 @@ CHANGELOG.
     clicked on 2,186 placeables, 2,125 would have put the player inside one.
   - Advanced, Creatures asks before removing a creature. Editing a party member no longer
     changes a copy of them the editor spawned.
+  - The audit's smaller findings (2026-11-08):
+    - Revert asks first. Skip Ahead and Go Back show what they cannot do before Apply, and a
+      fault while working one out is shown instead of "Calculating" forever. A story move is
+      worked out again when the save was edited after it was asked for.
+    - KotOR's star map quest names the map found last, as the game's script sets it, and a
+      quest stage the game may lower is lowered.
+    - The party: a member who stays keeps the leader flag, and a member the story keeps out
+      is not put in the party. Change Class swaps the classes' own feats. Removing a class
+      KotOR II added at level 0 no longer takes feats. Unequip refuses when the inventory
+      did not load, where the item was lost.
+    - Said, not refused: a feat added without its prerequisites, XP below what the level
+      needs, and a portrait that changes the gender.
+    - A renamed companion's name is written for the game's own language too.
+    - A move to a stored area keeps the game's clock going on. Planets show on only when the
+      galaxy map has both of their bits; turning off the selected planet clears the
+      selection. Another area's map picks the floor by its own markers' height.
+    - A game folder the editor cannot use is refused with the reason. Backups go to the
+      editor's own folder when the game folder cannot be written.
+    - Long pop-up messages scroll, Settings scrolls with Done in view, and KotOR II's Party
+      row is tighter.
+    - Game files: a damaged table no longer makes the editor set aside gigabytes, labels
+      and names are written back byte for byte, a name with more than 64 translations
+      keeps them all, and a damaged Screen.tga is bounded. A module name from a save must be
+      a plain name, so it cannot lead out of the game folder.
+    - Saves and installs: a network install opens in Explorer, older Steam library lists
+      and Steam's install path in the registry are read, a save is listed once however its
+      folder is spelled, and a KotOR II save in KotOR's folder is no longer listed there.
   - Every row of the story pop-ups' change table has an icon. The new ones are the game's own,
     read from the open game: Health the Cure power's, Force KotOR II's gain and loss icons
     (KotOR's Force Sensitivity icon), influence KotOR II's gain and loss icons, and class,

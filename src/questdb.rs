@@ -614,9 +614,12 @@ pub fn apply(save: &mut Save, data: &GameData, step: &Step, key: &str) -> Vec<St
             "journal" => {
                 if let Some((tag, s)) = pair(arg) {
                     let s = s.as_i64().unwrap_or(0);
-                    // The game only moves a quest forward.
+                    // The game moves a quest forward only, except where the script allows a
+                    // lower stage (AddJournalQuestEntry's bAllowOverrideHigher): KotOR's star
+                    // map quest names the map found last, so a skip in another order left it
+                    // at the higher stage (2026-11-07 audit, S-11)
                     let now = save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&tag)).map(|(_, v)| v).unwrap_or(-1);
-                    if s > now {
+                    if s > now || (s != now && lowered_stages(save.game, &tag).iter().any(|(st, _)| *st == s)) {
                         save.set_quest(&tag, s);
                     }
                 }
@@ -1976,6 +1979,17 @@ fn count_star_maps(save: &mut Save, data: &GameData, m: &serde_json::Value) -> V
             .filter(|g| flags.iter().any(|f| f.eq_ignore_ascii_case(&g.name)) && g.value == crate::globals::GlobalValue::Bool(true))
             .count() as i64;
         let count = sm.get("base").and_then(|v| v.as_i64()).unwrap_or(10) + sm.get("per_planet").and_then(|v| v.as_i64()).unwrap_or(10) * found;
+        // KotOR's star map script sets the star map quest to this planet's own stage, lower ones
+        // allowed (bAllowOverrideHigher, the data's journal_note: 10 Korriban, 20 Tatooine, 30
+        // Kashyyyk, 40 Manaan), so the journal names the map found last; the count below raises
+        // it to 50 with the fourth. A skip in another order left the highest stage (2026-11-07
+        // audit, S-11).
+        if save.game == Game::K1 {
+            let own = [("korriban", 10), ("tatooine", 20), ("kashyyyk", 30), ("manaan", 40)].iter().find(|(p, _)| *p == planet).map(|(_, s)| *s);
+            if let Some(stage) = own {
+                save.set_quest("k_starforge", stage);
+            }
+        }
         let mut does = Vec::new();
         if let Some(counter) = sm.get("counter").and_then(|v| v.as_str()) {
             does.push(serde_json::json!({ "set_global_number": [counter, count] }));
@@ -2741,7 +2755,9 @@ fn apply_script_line(save: &mut Save, text: &str, key: &str) -> bool {
         let mut done = false;
         save.edit_globals(key, |root| {
             if let (Some(g), Some(v)) = (number(root, &name), plan(root)) {
-                crate::globals::set_number(root, g.index, v.clamp(0, 255));
+                // the game keeps a global number in one signed byte, -128 to 127, as
+                // set_number does; this clamped to 0..255 first (2026-11-07 audit, S-11)
+                crate::globals::set_number(root, g.index, v);
                 done = true;
             }
         });

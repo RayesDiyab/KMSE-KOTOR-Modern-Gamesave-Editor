@@ -441,6 +441,8 @@ export global App {
     // new ending or side asks again
     in property <string> story-notes;
     in property <string> story-game-notes;
+    // Skip Ahead's and Go Back's notes of what they cannot do, shown in the preview (S-9)
+    in property <string> story-problems;
     in property <bool> quest-side-matters;
     // per ending in quest-endings: 1 a light side ending, -1 a dark side one, 0 neither
     in property <[int]> quest-ending-sides;
@@ -498,6 +500,8 @@ export global App {
     in property <bool> status-bad;
     callback save-changes();
     callback revert();
+    // the changes undone, after Revert asked (U-8)
+    callback confirm-revert-changes();
     callback open-backups();
 
     // ---- pop-ups: 0 none, 1 items and lists, 2 look, 3 another save, 4 message, 5 class, 6 classes, 7 settings ----
