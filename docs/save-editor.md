@@ -568,10 +568,11 @@ one scroll, so a reward's items no longer hide the last changes.
 "this looks amazing ... for finishing the quests, and the timeline as well"): Finish Quest,
 the timeline's travel pop-up and Go Back are drawn as a screen of KotOR's own menus (DESIGN.md,
 Story Dialog): a framed dialog, a gold title, framed panels with lit section headings, and a
-change table with an icon on each row. The icons follow the games' notification icons (XP,
-credits, level, party, alignment, the journal, an item received or taken) and are drawn by the
-program, in KotOR's colours for a KotOR save and KotOR II's for a KotOR II one; nothing is
-read from the game for them. "What only the game does" is now **Happens in the Game** (the
+change table with an icon on each row. The icons are the games' notification icons traced
+into vector outlines (XP, credits, level, the journal, an item received or taken, KotOR II's
+party; alignment is the dark side's icon and the light side's, half each), drawn sharp at any
+size in the open game's colours; nothing is read from the game for them. The pop-ups are sized
+for a window of 1600 by 900 and grow in step with a larger one. "What only the game does" is now **Happens in the Game** (the
 maintainer found it unclear): what the game does itself when it gets there. Looked at in the
 program in both games at 1600 by 900 and in KotOR at 1280 by 780.
 
@@ -664,8 +665,15 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
    with older edits.
 3. **A backup first.** The whole save folder is copied to
    `Save Editor Backup/<save folder>/<date time>/` in the game's folder, beside the saves,
-   before anything is written. A save outside the game keeps its backups in the folder that
-   holds it.
+   when the save is opened, and the copy is read back and compared with the save (where the
+   newest backup already holds exactly these files, that one is kept instead of a second
+   copy). Before anything is written, a read-only health check compares that backup with the
+   save on disk, byte for byte; where it is missing, damaged or out of date (a second save in
+   one session), a new backup is made and checked the same way, and the write stops if that
+   fails. *Changed 2026-11-07, the maintainer:* until then the backup was made at saving.
+   A save outside the game keeps its backups in the folder that holds it. The History button,
+   between Copy and Settings, lists the open save's backups oldest first, the one the next
+   save checks marked, each with Show in Folder.
    *Corrected 2026-11-02:* backups were in the folder that holds the save until then, and for a
    KotOR 2 Steam Cloud save in the game's `saves` folder. Steam Cloud syncs all of KotOR 1's
    `Saves`, backups too (`remotecache.vdf` listed them), so they moved out. Backups made before

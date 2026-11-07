@@ -2872,14 +2872,22 @@ export component EditorPage inherits Rectangle {
     // Copy, between Settings and the save buttons (2026-10-24, the maintainer): a copy of the
     // save as it is on disk, the changes not in it.
     CopyButton {
-        x: parent.width - 60px - 50px - 14px - self.width;
+        x: parent.width - 60px - 2 * (50px + 14px) - self.width;
         y: 52px;
         clicked => { App.copy-save(); }
+    }
+    // History, between Copy and Settings (2026-11-07, the maintainer): the save's backups,
+    // oldest first. A clock with an arrow turning back round it.
+    CopyButton {
+        x: parent.width - 60px - 50px - 14px - self.width;
+        y: 52px;
+        icon: "M 3.6 12 A 8.4 8.4 0 1 0 6.1 6 M 6.1 6 L 3.6 8.4 M 3.6 4.1 L 3.6 8.4 L 7.9 8.4 M 12 7.6 L 12 12 L 15.2 14";
+        clicked => { App.show-history(); }
     }
     // Revert and Save Changes, top right beside the settings button (2026-10-22, the
     // maintainer: the bottom bar's place goes to the tabs; the backup moved to Settings).
     HorizontalLayout {
-        x: parent.width - 60px - 2 * (50px + 14px) - self.width;
+        x: parent.width - 60px - 3 * (50px + 14px) - self.width;
         y: 52px;
         width: 150px + 12px + 318px;
         height: 50px;

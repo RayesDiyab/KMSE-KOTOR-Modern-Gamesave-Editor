@@ -138,6 +138,8 @@ pub struct Save {
     on_disk: Vec<(String, u64, Option<std::time::SystemTime>)>,
     // the next object id new_object_id hands out where the module has no counter
     handed_out: u32,
+    /// The backup made (or found the same) when the save was opened, see `back_up`.
+    pub backup: Option<PathBuf>,
 }
 
 /// Every file of the save folder: name, size and time, in name order.
@@ -225,6 +227,7 @@ impl Save {
             changes: BTreeSet::new(),
             on_disk,
             handed_out: 0,
+            backup: None,
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -1120,8 +1123,25 @@ impl Save {
 
     // ---- writing ----
 
-    /// Copies the whole save folder into `backups`, then writes every changed file.
-    /// Returns the backup folder.
+    /// Backs the save up as it is on disk, into `backups`, when it is opened (2026-11-07, the
+    /// maintainer: the backup is made on opening, and saving checks it). The copy is read back
+    /// and compared with the save. Where the newest backup of this save already holds exactly
+    /// these files, that one is kept instead of a second copy. Returns the backup folder.
+    pub fn back_up(&mut self, backups: &Path) -> Result<PathBuf> {
+        let newest = backup_list(backups, &self.folder).pop();
+        let backup = match newest {
+            Some(b) if same_files(&self.folder, &b) => b,
+            _ => make_backup(backups, self.game, &self.folder)?,
+        };
+        self.backup = Some(backup.clone());
+        Ok(backup)
+    }
+
+    /// Writes every changed file, never without a backup of exactly the files it replaces:
+    /// first a read-only health check of the backup made on opening (every file there, byte
+    /// for byte the save on disk), and where it fails (no backup, a damaged one, or the save
+    /// already written since) a new backup, made and checked the same way, before anything is
+    /// written. Stops if that copy fails. Returns the backup folder.
     pub fn write(&mut self, backups: &Path) -> Result<PathBuf> {
         if player_outside_archive(&self.folder) {
             return Err(PLAYER_OUTSIDE_ARCHIVE.into());
@@ -1129,8 +1149,11 @@ impl Save {
         if files_on_disk(&self.folder) != self.on_disk {
             return Err(CHANGED_ON_DISK.into());
         }
-        let backup = backup_folder(backups, self.game, &self.folder);
-        copy_dir(&self.folder, &backup).map_err(|e| format!("the backup could not be made: {}", e))?;
+        let backup = match self.backup.clone() {
+            Some(b) if same_files(&self.folder, &b) => b,
+            _ => make_backup(backups, self.game, &self.folder)?,
+        };
+        self.backup = Some(backup.clone());
         self.write_files()?;
         Ok(backup)
     }
@@ -1415,6 +1438,53 @@ pub fn civil(days: i64) -> (i64, i64, i64) {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + (m <= 2) as i64, m, d)
+}
+
+/// A new backup of the save folder `folder` in `backups`, read back and compared with the
+/// save; an error if the copy fails or does not read back the same.
+fn make_backup(backups: &Path, game: Game, folder: &Path) -> Result<PathBuf> {
+    let backup = backup_folder(backups, game, folder);
+    copy_dir(folder, &backup).map_err(|e| format!("the backup could not be made: {}", e))?;
+    if !same_files(folder, &backup) {
+        return Err(format!("the backup could not be made: the copy in {} does not read back the same as the save", backup.display()));
+    }
+    Ok(backup)
+}
+
+/// The backups of the save folder `folder` in `backups`, oldest first (their folder names are
+/// the times they were made).
+pub fn backup_list(backups: &Path, folder: &Path) -> Vec<PathBuf> {
+    let dir = backups.join(backup_name(folder));
+    let mut list: Vec<PathBuf> = fs::read_dir(&dir)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default();
+    list.sort();
+    list
+}
+
+/// Whether folder `b` holds exactly the files of folder `a`, the same names and the same bytes,
+/// subfolders too. Only reads.
+pub fn same_files(a: &Path, b: &Path) -> bool {
+    let names = |p: &Path| -> Option<Vec<(std::ffi::OsString, bool)>> {
+        let mut v: Vec<_> = fs::read_dir(p).ok()?.filter_map(|e| e.ok()).map(|e| (e.file_name(), e.path().is_dir())).collect();
+        v.sort();
+        Some(v)
+    };
+    let (Some(na), Some(nb)) = (names(a), names(b)) else { return false };
+    if na != nb {
+        return false;
+    }
+    na.iter().all(|(n, dir)| {
+        let (pa, pb) = (a.join(n), b.join(n));
+        if *dir {
+            same_files(&pa, &pb)
+        } else {
+            match (fs::read(&pa), fs::read(&pb)) {
+                (Ok(x), Ok(y)) => x == y,
+                _ => false,
+            }
+        }
+    })
 }
 
 fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {

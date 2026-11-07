@@ -746,6 +746,10 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
         (Ok(sv), Ok(orig)) => {
             st.read_only = read_only_reason(&folder.path).is_some() || sv.module_problem().is_some();
             st.save = Some(sv);
+            // backed up as it is on disk now, on opening (2026-11-07, the maintainer); saving
+            // checks this backup, read only, and makes a new one if it is not good
+            let backups = backups_of(st);
+            let backed_up = st.save.as_mut().unwrap().back_up(&backups);
             st.original = Some(orig);
             st.quest_xp.clear();
             st.who = 0;
@@ -757,7 +761,10 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.story = 3;
             st.compare = None;
             st.selected_box = None;
-            st.status = (String::new(), false);
+            st.status = match backed_up {
+                Ok(_) => (String::new(), false),
+                Err(e) => (format!("No backup was made on opening ({}). Save Changes makes one before it writes.", e), true),
+            };
             st.global_filter = (String::new(), false);
             st.map = None;
             st.map_pick = None;
@@ -1349,37 +1356,14 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
                 .cloned()
                 .or_else(|| st.data().map(|d| kse_core::map::module_title(&d, &next)))
                 .unwrap_or(next);
-            let rewards = kse_core::questdb::rewards_of(st.game, planet);
-            let xp = rewards.as_ref().and_then(|r| r.get("xp_at_end")).and_then(|v| v.as_i64());
-            let items = rewards.as_ref().map_or(0, |r| {
-                r.get("drops").and_then(|d| d.as_array()).map_or(0, |d| d.len())
-                    + r.get("containers").and_then(|c| c.as_array()).map_or(0, |c| c.len())
-            });
             let title = m
                 .get("chapter_title")
                 .and_then(|v| v.as_str())
                 .map(|t| t.to_string())
                 .unwrap_or_else(|| format!("The end of the {}", planet));
-            let mut parts = vec!["its quests finished".to_string()];
-            if xp.is_some() {
-                // filled in below, once the route's order is known
-                parts.push("{XP} XP in all".to_string());
-            }
-            if items > 0 {
-                parts.push("the loot of a full run".to_string());
-            }
-            let credits = |side: &str| rewards.as_ref().and_then(|r| r.get("credits")).and_then(|c| c.get(side)).and_then(|c| c.get("credits")).and_then(|v| v.as_i64());
-            match (credits("light"), credits("dark")) {
-                (Some(l), Some(d)) if l == d && l != 0 => parts.push(format!("{} credits", l)),
-                (Some(l), Some(d)) if l != d => parts.push(format!("{} credits on the light side, {} on the dark", l, d)),
-                _ => {}
-            }
-            let summary = format!(
-                "The save becomes as if {} was played to its end: {}. Then, when the save loads, the game takes you on to {} the way the story does, with its cutscenes.",
-                planet,
-                parts.join(", "),
-                place
-            );
+            // short (2026-11-07, the maintainer): the XP, credits and loot it listed are in the
+            // change table under it, measured on a copy
+            let summary = format!("{} is played to its end, then the game takes you on to {} with the story's cutscenes.", planet, place);
             let side = m.get("side_chapter").and_then(|v| v.as_bool()).unwrap_or(false);
             Chapter { index: i as i32, order, side, planet: planet.to_string(), title, summary, played, begun: false }
         })
@@ -1397,20 +1381,6 @@ fn skip_chapters(st: &State) -> Vec<Chapter> {
         }
     }
     out.sort_by_key(|c| c.order);
-    // the XP a skip to each chapter ends with: the chapters played and those the skip plays
-    // on the route, each counted once (the files' totals follow the timeline's order)
-    let states = chapter_states(&out);
-    let all = kse_core::questdb::milestones_ref(st.game);
-    let played: Vec<String> = out.iter().filter(|c| c.played).map(|c| c.planet.clone()).collect();
-    for k in 0..out.len() {
-        if !out[k].summary.contains("{XP}") {
-            continue;
-        }
-        let mut run = played.clone();
-        run.extend(kse_core::questdb::skip_path(&states, out[k].index).into_iter().filter_map(|i| all.get(i as usize).map(|(p, _)| p.to_string())));
-        let xp = kse_core::questdb::xp_after(st.game, &run);
-        out[k].summary = out[k].summary.replace("{XP}", &thousands(xp));
-    }
     out
 }
 
@@ -1462,15 +1432,15 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
         let text = q.as_ref().and_then(|q| q.stage(stage)).map(|x| x.text.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         title = format!("Skip to: {}", name);
         summary = format!(
-            "{}\n\nIn {}: this quest up to here as if played (its story values, journal, the people's own flags, its XP, items and credits), the main-story steps it needs, and the companions who join on the way. The chapter's other quests stay open; then the game takes you to where this happens.",
+            "{}\n\nThis quest is played up to here, with the main-story steps it needs; {}'s other quests stay open.",
             if text.is_empty() { format!("Stage {}", stage) } else { text },
             c.planet
         );
     }
-    summary.push_str("\n\nWorked out from the game's files. None of this data has been checked by playing it.");
-    if path.len() > 1 {
-        let names: Vec<String> = path.iter().filter(|k| st.skip_stage.is_none() || **k != i).filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
-        summary.push_str(&format!("\n\nEvery chapter before it on your route that this save has not played comes first, in the route's order: {}.", names.join(", ")));
+    // the chapters on the route this save has not played, played first in the route's order
+    let names: Vec<String> = path.iter().filter(|k| **k != i).filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
+    if !names.is_empty() {
+        summary.push_str(&format!(" First: {}.", names.join(", ")));
     }
     let app = u.global::<App>();
     app.set_skip_asked(i);
@@ -3452,6 +3422,17 @@ fn update_party_portraits(st: &mut State) {
 }
 
 /// The open save's backups folder (save::backup_root).
+/// A prepared save (a skip, a return, a finished quest) put in the open one's place keeps the
+/// backup made when that was opened; saving checks it as before.
+fn keep_backup(old: Option<&Save>, mut new: Save) -> Save {
+    if let Some(o) = old.filter(|o| o.folder == new.folder) {
+        if new.backup.is_none() {
+            new.backup = o.backup.clone();
+        }
+    }
+    new
+}
+
 fn backups_of(st: &State) -> PathBuf {
     let root = st.installs.iter().find(|i| i.game == st.game).map(|i| i.path.clone());
     match st.save.as_ref() {
@@ -4819,7 +4800,7 @@ fn main() {
         let Some(prepared) = st.story_prepared.take() else { return };
         clear_story_preview(&u, st);
         let party = st.save.as_ref().map(|s| s.party_members());
-        st.save = Some(prepared.save);
+        st.save = Some(keep_backup(st.save.as_ref(), prepared.save));
         if st.save.as_ref().map(|s| s.party_members()) != party {
             update_party_portraits(st);
         }
@@ -5306,7 +5287,7 @@ fn main() {
         // the story's XP is the skip's or the return's now: stage clicks start counting again
         st.quest_xp.clear();
         let party = st.save.as_ref().map(|s| s.party_members());
-        st.save = Some(prepared.save);
+        st.save = Some(keep_backup(st.save.as_ref(), prepared.save));
         if st.save.as_ref().map(|s| s.party_members()) != party {
             update_party_portraits(st);
         }
@@ -5328,7 +5309,7 @@ fn main() {
         // the story's XP is the skip's or the return's now: stage clicks start counting again
         st.quest_xp.clear();
         let party = st.save.as_ref().map(|s| s.party_members());
-        st.save = Some(prepared.save);
+        st.save = Some(keep_backup(st.save.as_ref(), prepared.save));
         if st.save.as_ref().map(|s| s.party_members()) != party {
             update_party_portraits(st);
         }
@@ -5451,6 +5432,35 @@ fn main() {
     // Copy: the name asked (filled with "<the save's name> - Copy"), then the save as it is on
     // disk copied into the next free slot under it, the changes not in it; the save open stays
     // open, changes and all (2026-10-24, the maintainer).
+    // History: every backup of the open save, oldest first (2026-11-07, the maintainer); the
+    // one this session's saving checks marked.
+    on!(ui, state, on_show_history, |u, st| {
+        let Some(save) = st.save.as_ref() else { return };
+        let rows: Vec<BackupRow> = save::backup_list(&backups_of(st), &save.folder)
+            .into_iter()
+            .map(|p| {
+                let made = std::fs::metadata(&p).ok().and_then(|m| m.created().or_else(|_| m.modified()).ok());
+                let detail = save::summary(&p).map(|x| {
+                    let mut parts = Vec::new();
+                    if !x.area.trim().is_empty() {
+                        parts.push(x.area.trim().to_string());
+                    }
+                    parts.push(format!("{} played", played(x.seconds)));
+                    parts.join(" · ")
+                });
+                BackupRow { when: s(when(made)), detail: s(detail.unwrap_or_else(|| "Not a save that can be read".into())), current: save.backup.as_deref() == Some(p.as_path()) }
+            })
+            .collect();
+        let app = u.global::<App>();
+        app.set_backup_rows(model(rows));
+        app.set_overlay(16);
+    });
+    on!(ui, state, on_show_backup, |_u, st, i: i32| {
+        let Some(save) = st.save.as_ref() else { return };
+        if let Some(p) = save::backup_list(&backups_of(st), &save.folder).get(i.max(0) as usize) {
+            open_path(p);
+        }
+    });
     on!(ui, state, on_copy_save, |u, st| {
         let Some(folder) = copy_source(&u, st).map(|(_, f)| f) else { return };
         let name = save::summary(&folder).map(|x| x.name).unwrap_or_default();

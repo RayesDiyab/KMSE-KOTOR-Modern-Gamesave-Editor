@@ -40,10 +40,14 @@ only about patching the game.
 
 The one thing this program must never do is damage a player's save.
 
-- Never write to a save without the backup the code makes. `Save::write` in
-  `src/save.rs` copies the whole save folder to `Save Editor Backup/<save>/<date time>/`
-  before it writes anything, and stops if the copy fails. Do not add a write path that
-  goes around it, and do not weaken it.
+- Never write to a save without the backup the code makes. Opening a save copies the whole
+  save folder to `Save Editor Backup/<save>/<date time>/` (`Save::back_up` in
+  `src/save.rs`, since 2026-11-07, the maintainer's choice). Before it writes anything,
+  `Save::write` checks that backup, read only, against the save on disk, byte for byte.
+  Where it is missing, damaged or out of date, `Save::write` makes and checks a new one,
+  and stops if that fails. Every write therefore has a checked copy of exactly the files it
+  replaces (`tests/backup_on_open.rs`). Do not add a write path that goes around this, and
+  do not weaken it.
 - Keep the checks that stop a write: an original Xbox save (`SaveMeta.xbx` or
   `SaveImage.xbx` in the folder) is read only, because the Xbox checks a signature; and
   nothing is written while `swkotor.exe` or `swkotor2.exe` runs (`game_running` in

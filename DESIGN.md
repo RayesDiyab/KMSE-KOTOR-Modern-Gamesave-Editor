@@ -311,11 +311,13 @@ Engraved-caption buttons in the Menu Medium cut, never animated.
   lost (a journal quest, a companion, a feat) in framed rows of its own; items as framed
   cards with their picture and "+ Added" or "- Removed". The buttons are the program's own.
   It is the one place with a lit frame: everywhere else the Tone Not Shadow Rule holds.
-- **Change icons** (`ChangeIcon`): drawn by the program after the games' notification icons
-  (the maintainer: "draw them ourselves"), in the open game's icon colours: XP in a ring, the
-  credit sign in a ring, the level arrow into an L, the party's three figures, alignment as
-  one figure on a disc half dark side and half light side, the journal's book in a ring, plus
-  and minus in a ring for what is gained and lost.
+- **Change icons** (`ChangeIcon`): the games' notification icons traced into vector outlines
+  (2026-11-07, the maintainer: vectors, drawn sharp at any size, matching the game's), an
+  even-odd layer per colour on a 32-unit box. The shapes are KotOR's lbl_iplotxp,
+  lbl_icredits, lbl_levelup, lbl_iquest, lbl_ireceive and lbl_itaken, KotOR II's
+  lbl_icn_prty2 for the party, and alignment as lbl_idside's left half beside lbl_ilside's
+  right half; the colours are the open game's icon tokens. Nothing is read from the game for
+  them.
 
 ### Named Rules
 **The Rounded Gradient Rule** (2026-11-07). The software renderer rounds only a solid fill; a

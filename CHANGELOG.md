@@ -6,6 +6,22 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The backup is made when a save is opened, and checked before saving** (2026-11-07, the
+  maintainer). Opening a save copies it to its backup folder and reads the copy back; an
+  unchanged save keeps its newest backup instead of piling up copies. Save Changes first
+  checks that backup against the save on disk, byte for byte and without writing, and makes
+  a new one where it is missing, damaged or out of date, so every write still has a checked
+  copy of exactly what it replaces. The pop-ups say "a backup was made when the save was
+  opened". A History button between Copy and Settings lists the save's backups oldest first.
+- **The story pop-ups grow with the window, and a skip's description is short** (2026-11-07,
+  the maintainer). Finish Quest, travelling on the timeline and Go Back are drawn for a window
+  of 1600 by 900 and now grow in step with a larger one instead of sitting small in its middle.
+  A skip's description says in a line where it ends and which chapters are played first; the
+  XP, credits and loot it repeated are in the change table under it, and the line saying it was
+  worked out from the game's files is gone. In the travel pop-up the inventory changes follow
+  the change table in the same scroll, with no gap. The change table's icons
+  are the games' own notification icons traced into vector outlines, so they match the
+  game's and stay sharp at any size, in each game's colours.
 - **The story pop-ups look like the game's own menus, and filled buttons have round corners**
   (2026-11-07, the maintainer). Finish Quest, travelling on the timeline and Go Back sit in a
   framed dialog with a gold title, framed panels and lit section headings; the changes are a

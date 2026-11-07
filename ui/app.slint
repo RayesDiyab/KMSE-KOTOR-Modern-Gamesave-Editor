@@ -16,12 +16,12 @@
 // the verdict, and DESIGN.md
 
 import { Theme } from "theme.slint";
-import { App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem } from "state.slint";
+import { App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem, BackupRow } from "state.slint";
 import { Button, Field, Note, Scroller, Brand, Link, Sign, Stepper, Label, Choice, SettingsButton, Switch, AlignmentChoice, RoundFill, ChangeIcon } from "widgets.slint";
 import { SavesPage } from "saves.slint";
 import { EditorPage } from "editor.slint";
 
-export { Theme, App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem }
+export { Theme, App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem, BackupRow }
 
 component Overlay inherits Rectangle {
     in property <length> panel-width: 760px;
@@ -89,8 +89,10 @@ component GameDialog inherits Rectangle {
         panel := Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: min(root.panel-width, parent.width - 60px);
-            height: min(root.panel-height, parent.height - 50px);
+            // the sizes are for a window of 1600 by 900; a larger window makes the pop-up larger
+            // in step (2026-11-07, the maintainer: at 1600 by 1290 it sat small in the middle)
+            width: min(root.panel-width * max(1, parent.width / 1600px), parent.width - 60px);
+            height: min(root.panel-height * max(1, parent.height / 900px), parent.height - 50px);
             // the soft light around the frame
             Rectangle {
                 x: -4px; y: -4px;
@@ -197,6 +199,7 @@ component Section inherits Rectangle {
 // What a story change does to the save, measured on a copy: the values before and after, and
 // what is gained and lost (companions, feats, powers, quests). Shared by Skip Ahead, Go Back and
 // Finish Quest (2026-11-06), a table with the games' icons since 2026-11-07.
+
 component StoryValues inherits VerticalLayout {
     in property <bool> compact;
     spacing: 10px;
@@ -234,7 +237,7 @@ component StoryValues inherits VerticalLayout {
         // what goes down red, the value after the change gold, what stays the same plain.
         for r in App.story-values: Rectangle {
             height: root.compact ? 34px * Theme.ts : 36px * Theme.ts;
-            if r.kind != "": ChangeIcon { x: 7px; kind: r.kind; width: min(30px, parent.height - 6px); }
+            if r.kind != "": ChangeIcon { x: 6px; kind: r.kind; width: min(32px, parent.height - 4px); }
             Text {
                 x: root.lead; width: root.at-current - root.lead - 10px; height: parent.height;
                 text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide;
@@ -271,7 +274,7 @@ component StoryValues inherits VerticalLayout {
                 border-color: Theme.frame-dim;
                 ChangeIcon {
                     x: 8px;
-                    width: min(26px, parent.height - 8px);
+                    width: min(28px, parent.height - 8px);
                     kind: r.note == "Quest finished" || r.note == "Quest moves on" || r.note == "Quest begins" ? "quest"
                         : r.note == "Companion" ? "party" : r.id > 0 ? "gain" : "loss";
                 }
@@ -313,7 +316,7 @@ component ItemCard inherits Rectangle {
         HorizontalLayout {
             spacing: 6px;
             alignment: start;
-            ChangeIcon { kind: root.entry.gained ? "gain" : "loss"; width: 16px * Theme.ts; }
+            ChangeIcon { kind: root.entry.gained ? "gain" : "loss"; width: 18px * Theme.ts; }
             Text { text: root.entry.gained ? "Added" : "Removed"; font-size: 12px * Theme.ts; color: root.entry.gained ? Theme.gain : Theme.danger; vertical-alignment: center; }
         }
     }
@@ -414,16 +417,10 @@ component StoryPreviewDetails inherits Rectangle {
                     committed => { App.refresh-story-preview(); }
                 }
                 StoryValues { compact: root.back; }
+                // in the same scroll, right under the changes, as in Finish Quest (2026-11-07):
+                // in a box of its own at the column's foot, a tall window left a gap between them
+                StoryItems { }
             }
-        }
-        StoryItems {
-            // only the room it needs: stretched, an empty list took half the column and cut the
-            // changes above off at its middle
-            vertical-stretch: 0;
-            // two rows, one where the skip asks two questions or more, so the totals above
-            // keep their room (at 1600 by 900 with Large text the skip's choices and a taller
-            // box left the totals out of view); it scrolls
-            rows: root.back ? 2 : ((App.skip-jedi ? 1 : 0) + (App.skip-side ? 1 : 0) + (App.skip-prestige ? 1 : 0) + (App.skip-train ? 1 : 0)) >= 2 ? 1 : 2;
         }
     }
 }
@@ -723,6 +720,84 @@ export component AppWindow inherits Window {
         }
     }
 
+    // History (2026-11-07, the maintainer): every backup of the open save, oldest first.
+    if App.overlay == 16: GameDialog {
+        panel-width: 860px;
+        panel-height: 680px;
+        title: "Backups of This Save";
+        status: App.backup-rows.length == 1 ? "1 BACKUP" : App.backup-rows.length + " BACKUPS";
+        note: "Made when the save was opened, and before a save that had changed since. Each is the whole save folder as it was then; copy one's files over the save folder to have it back.";
+        VerticalLayout {
+            spacing: 18px;
+            Frame {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 14px;
+                    padding-right: 8px;
+                    spacing: 12px;
+                    Section { text: "OLDEST FIRST"; }
+                    if App.backup-rows.length == 0: Note { text: "This save has no backups yet."; font-size: 14px * Theme.ts; color: Theme.muted; }
+                    Scroller {
+                        vertical-stretch: 1;
+                        content-height: list.preferred-height;
+                        list := VerticalLayout {
+                            x: 0px; y: 0px;
+                            width: parent.width - 16px;
+                            height: self.preferred-height;
+                            spacing: 8px;
+                            for b[i] in App.backup-rows: Rectangle {
+                                height: 58px * Theme.ts;
+                                border-radius: 8px;
+                                background: b.current ? Theme.selected : Theme.field;
+                                border-width: b.current ? 2px : 1px;
+                                border-color: b.current ? Theme.accent : Theme.frame-dim;
+                                Rectangle {
+                                    x: 14px;
+                                    width: 28px * Theme.ts; height: self.width;
+                                    border-radius: self.width / 2;
+                                    border-width: 1.5px;
+                                    border-color: b.current ? Theme.accent : Theme.frame-line;
+                                    Text { text: i + 1; font-family: Theme.label-font; font-size: 11px * Theme.ts; color: b.current ? Theme.accent : Theme.soft; }
+                                }
+                                VerticalLayout {
+                                    x: 14px + 28px * Theme.ts + 14px;
+                                    width: parent.width - self.x - show.preferred-width - 32px - (b.current ? tag.preferred-width + 24px : 0px);
+                                    alignment: center;
+                                    spacing: 3px;
+                                    Text { text: b.when; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: b.current ? Theme.gold : Theme.text; overflow: elide; }
+                                    Text { text: b.detail; font-size: 12.5px * Theme.ts; color: Theme.muted; overflow: elide; }
+                                }
+                                tag := Text {
+                                    visible: b.current;
+                                    x: show.x - self.preferred-width - 24px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    text: "CHECKED BEFORE SAVING";
+                                    font-family: Theme.label-font;
+                                    font-size: 9.5px * Theme.ts;
+                                    letter-spacing: 1.5px;
+                                    color: Theme.accent;
+                                }
+                                show := Link {
+                                    x: parent.width - self.preferred-width - 16px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    font-size: 13.5px * Theme.ts;
+                                    text: "Show in Folder";
+                                    clicked => { App.show-backup(i); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            HorizontalLayout {
+                alignment: end;
+                Button { width: 170px; kind: 0; text: "Close"; clicked => { App.close-overlay(); } }
+            }
+        }
+    }
+
     // A save clicked on the timeline: which one opens, and that this one closes, with Cancel.
     if App.overlay == 15: Overlay {
         panel-width: 640px;
@@ -780,7 +855,7 @@ export component AppWindow inherits Window {
                 current: App.skip-train-pick;
                 picked(k) => { App.skip-train-pick = k; App.refresh-story-preview(); }
             }
-            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup of the save is made first."; }
+            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -984,7 +1059,7 @@ export component AppWindow inherits Window {
             }
             HorizontalLayout {
                 spacing: 14px;
-                Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup is made first."; }
+                Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
                 Button { width: 150px; text: "Cancel"; clicked => { App.close-overlay(); } }
                 Button {
                     kind: 0;
@@ -1015,7 +1090,7 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup of the save is made first."; }
+            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -1034,7 +1109,7 @@ export component AppWindow inherits Window {
         panel-height: 860px;
         property <int> chosen: App.finish-pick;
         title: "Finish " + App.quest-title;
-        note: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup is made first.";
+        note: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup was made when the save was opened.";
         VerticalLayout {
             spacing: 18px;
             HorizontalLayout {

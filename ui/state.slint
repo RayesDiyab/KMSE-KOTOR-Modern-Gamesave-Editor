@@ -19,6 +19,9 @@ export struct ClassRow { index: int, name: string, level: int, maximum: int, can
 // kind: the row's icon (xp, credits, level, party, align), or none
 export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool, kind: string }
 export struct StoryItem { name: string, icon: image, has-icon: bool, difference: string, gained: bool }
+// One backup of the open save in the history pop-up: when it was made, where the save stood
+// then, and whether it is the one this session's saving checks.
+export struct BackupRow { when: string, detail: string, current: bool }
 // A quest's stage: 0 behind where the quest is, 1 where it is, 2 ahead.
 export struct StageRow { id: int, text: string, xp: int, end: bool, place: int }
 // One effect of finishing a quest as if played: for which ending, in plain words, whether
@@ -283,6 +286,11 @@ export global App {
     // save as it is on disk copied into the next free slot under that name, nothing else changed
     in-out property <bool> save-as-copy;
     callback copy-save();
+    // History (between Copy and Settings, 2026-11-07, the maintainer): every backup of the
+    // open save, oldest first, in a pop-up (overlay 16); a row's folder shown on request
+    in property <[BackupRow]> backup-rows;
+    callback show-history();
+    callback show-backup(int);
     // The saves page's pen: the selected save renamed on the game's Load screen
     callback rename-save(string);
     callback do-copy-save(string);
