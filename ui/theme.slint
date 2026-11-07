@@ -58,6 +58,21 @@ export global Theme {
     // dark panel and deepened on a light one so a small tag stays readable
     out property <color> light-side: dark ? #5ea8f0 : #1f64b0;
     out property <color> dark-side: dark ? #e0606a : #a3242e;
+    // The story pop-ups' frames, as the game's own menus draw theirs (2026-11-07, the
+    // maintainer approved the mock-up): a quieter line than the accent, a dimmer inner one, the
+    // dialog a shade deeper than a panel and its framed panels a shade lighter.
+    out property <color> frame-line: dark ? (k2 ? #1f8a68 : #2678aa) : (k2 ? #7fbfa6 : #7fb0cf);
+    out property <color> frame-dim: dark ? (k2 ? #135440 : #184868) : (k2 ? #bcdccf : #b8d2e3);
+    out property <color> frame-deep: dark ? (k2 ? #040b08 : #050a12) : (k2 ? #eef5f1 : #eef3f8);
+    out property <color> frame-panel: dark ? (k2 ? #08140f : #09111e) : (k2 ? #f8fcfa : #f8fafd);
+    out property <color> frame-head: dark ? (k2 ? #0b1f18 : #0c1a2a) : (k2 ? #e4f1eb : #e2ecf5);
+    // The change icons, drawn by the program in each game's own notification colours: KotOR's
+    // blue, green, red and gold; KotOR II's teal, red and orange, its party icon stone-grey.
+    out property <color> icon-blue: k2 ? #18b090 : #5070f8;
+    out property <color> icon-green: k2 ? #18b090 : #00d818;
+    out property <color> icon-red: #f00000;
+    out property <color> icon-level: k2 ? #f0a848 : #d4a417;
+    out property <color> icon-party: k2 ? #b0b098 : #5070f8;
     out property <color> grey-top: dark ? #566272 : #c9d2dc;
     out property <color> grey-bottom: dark ? #424d5c : #b6c0cb;
     out property <color> scrim: dark ? #03060cbc : #1a2a3a66;

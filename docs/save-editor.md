@@ -564,6 +564,17 @@ neither. In the list of changes, what goes up is green, what goes down red and t
 gold, as everywhere a change is shown (DESIGN.md, the Change Colours Rule); the right side is
 one scroll, so a reward's items no longer hide the last changes.
 
+**The story pop-ups in the game's look** (2026-11-07, the maintainer, approving the mock-up:
+"this looks amazing ... for finishing the quests, and the timeline as well"): Finish Quest,
+the timeline's travel pop-up and Go Back are drawn as a screen of KotOR's own menus (DESIGN.md,
+Story Dialog): a framed dialog, a gold title, framed panels with lit section headings, and a
+change table with an icon on each row. The icons follow the games' notification icons (XP,
+credits, level, party, alignment, the journal, an item received or taken) and are drawn by the
+program, in KotOR's colours for a KotOR save and KotOR II's for a KotOR II one; nothing is
+read from the game for them. "What only the game does" is now **Happens in the Game** (the
+maintainer found it unclear): what the game does itself when it gets there. Looked at in the
+program in both games at 1600 by 900 and in KotOR at 1280 by 780.
+
 **The quest view, restyled 2026-11-06** (the maintainer: it "looks a bit like not a part of the
 rest of the program"; reviewed with the Impeccable design rules): spaced section labels
 (JOURNAL ENTRY, STAGE 2 OF 6) over plain text on the panel, as the other tabs have, where the

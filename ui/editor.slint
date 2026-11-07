@@ -6,7 +6,7 @@ import { Theme } from "theme.slint";
 // written by build.rs: Yavin Station, made from the player's game
 import { TimelineArt } from "timeline-art.slint";
 import { App, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, Toggle, MapMark, AreaRow, SlotRow, TimelineNode, TimelineSave, TimelineGroup, GalaxyStop, GalaxyLane, StageRow } from "state.slint";
-import { Button, Stepper, Field, Switch, Label, Note, Scroller, Cross, Sign, BackArrow, Choice, Link, CopyButton } from "widgets.slint";
+import { Button, Stepper, Field, Switch, Label, Note, Scroller, Cross, Sign, BackArrow, Choice, Link, CopyButton, RoundFill } from "widgets.slint";
 
 component Line inherits Rectangle {
     height: 56px;
@@ -247,8 +247,7 @@ component CharacterTab inherits Rectangle {
         Rectangle {
             x: 0; y: 404px;
             height: 14px;
-            border-radius: 7px;
-            background: @linear-gradient(90deg, #b8333a 0%, #6a6a6a 50%, #3b8fe0 100%);
+            RoundFill { r: 7px; across: true; from: #b8333a; mid: #6a6a6a; to: #3b8fe0; has-mid: true; }
             Rectangle {
                 x: parent.width * App.alignment / 100 - 2px;
                 y: -6px;
@@ -2897,9 +2896,14 @@ export component EditorPage inherits Rectangle {
                 property <bool> on: App.change-count > 0;
                 width: 48px;
                 border-radius: 5px;
-                border-width: on && arrow.has-hover ? 2px : on ? 0px : 1px;
-                border-color: on ? Theme.hover-edge : Theme.edge;
-                background: !on ? Theme.selected : @linear-gradient(180deg, arrow.has-hover ? Theme.fill-hover : Theme.fill-top 0%, Theme.fill-bottom 100%);
+                background: !on ? Theme.selected : transparent;
+                if on: RoundFill { from: arrow.has-hover ? Theme.fill-hover : Theme.fill-top; to: Theme.fill-bottom; }
+                // the edge, over the fill
+                Rectangle {
+                    border-radius: 5px;
+                    border-width: parent.on && arrow.has-hover ? 2px : parent.on ? 0px : 1px;
+                    border-color: parent.on ? Theme.hover-edge : Theme.edge;
+                }
                 // the line between the two halves
                 Rectangle { x: 0; width: 2px; height: parent.height - 14px; background: parent.on ? Theme.ink.with-alpha(0.45) : Theme.edge; }
                 Path {

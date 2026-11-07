@@ -17,7 +17,7 @@
 
 import { Theme } from "theme.slint";
 import { App, SaveRow, Member, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, PortraitRow, Toggle, StoryValue, StoryItem } from "state.slint";
-import { Button, Field, Note, Scroller, Brand, Link, Sign, Stepper, Label, Choice, SettingsButton, Switch, AlignmentChoice } from "widgets.slint";
+import { Button, Field, Note, Scroller, Brand, Link, Sign, Stepper, Label, Choice, SettingsButton, Switch, AlignmentChoice, RoundFill, ChangeIcon } from "widgets.slint";
 import { SavesPage } from "saves.slint";
 import { EditorPage } from "editor.slint";
 
@@ -61,100 +61,291 @@ component Overlay inherits Rectangle {
     }
 }
 
-// What a story change does to the save, measured on a copy: the values before and after, and
-// what is gained and lost (companions, feats, powers). Shared by Skip Ahead, Go Back and
-// Finish Quest (2026-11-06).
-component StoryValues inherits VerticalLayout {
-    in property <bool> compact;
-    spacing: 10px;
-    if !App.story-preview-ready: Note { text: App.story-preview-status; font-size: 14px * Theme.ts; }
-    if App.story-preview-ready: VerticalLayout {
-        spacing: 4px;
-        alignment: start;
-        Label { text: "CHANGES TO YOUR SAVE"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
-        HorizontalLayout {
-            height: 26px;
-            Text { width: parent.width * 0.34; text: "CHANGE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
-            Text { width: parent.width * 0.43; text: "CURRENT  →  AFTER"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
-            Text { text: "DIFFERENCE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+// The story pop-ups (Finish Quest, and travelling on the timeline) drawn as a screen of the
+// game's own menus (2026-11-07, the maintainer approved the mock-up: "this looks amazing"): a
+// framed dialog with a double line and a soft light around it, a notched rail along its top, a
+// gold title over a line that fades out, framed panels with lit section headings, a change table
+// with the games' notification icons. The buttons are the program's own.
+component GameDialog inherits Rectangle {
+    in property <length> panel-width: 1300px;
+    in property <length> panel-height: 860px;
+    in property <string> title;
+    // small print on the title's line, right (the timeline's stop and where it stands)
+    in property <string> status;
+    in property <string> note;
+    callback escape;
+    escape => { App.close-overlay(); }
+    background: Theme.scrim;
+    keys := FocusScope {
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.text == Key.Escape) {
+                root.escape();
+                return accept;
+            }
+            return reject;
         }
-        // One colour language everywhere (2026-11-06, the maintainer): what goes up is green,
-        // what goes down red, the value after the change gold, what stays the same plain.
-        for r in App.story-values: Rectangle {
-            height: root.compact ? 34px : 40px;
-            HorizontalLayout {
+        TouchArea { }
+        panel := Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: min(root.panel-width, parent.width - 60px);
+            height: min(root.panel-height, parent.height - 50px);
+            // the soft light around the frame
+            Rectangle {
+                x: -4px; y: -4px;
+                width: parent.width + 8px; height: parent.height + 8px;
+                border-radius: 22px;
+                border-width: 3px;
+                border-color: Theme.frame-line.with-alpha(0.25);
+            }
+            Rectangle {
+                border-radius: 18px;
+                background: Theme.frame-deep;
+                border-width: 2px;
+                border-color: Theme.frame-line;
+            }
+            // the frame's inner line
+            Rectangle {
+                x: 7px; y: 7px;
+                width: parent.width - 14px; height: parent.height - 14px;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.frame-dim;
+            }
+            // a notched rail along the top edge, as the game's screens have
+            Path {
+                x: parent.width * 0.3; y: 7px;
+                width: parent.width * 0.4; height: 14px;
+                viewbox-width: self.width / 1px;
+                viewbox-height: 14;
+                stroke: Theme.frame-dim;
+                stroke-width: 2px;
+                commands: "M 0 0 L 30 13 L " + (self.width / 1px - 30) + " 13 L " + (self.width / 1px) + " 0";
+            }
+            VerticalLayout {
+                x: 32px; y: 28px;
+                width: parent.width - 64px;
+                height: parent.height - 52px;
                 spacing: 0px;
-                Text { width: parent.width * 0.34; text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; }
                 HorizontalLayout {
-                    width: parent.width * 0.43;
-                    spacing: 8px;
-                    alignment: start;
-                    Text { text: r.before; font-size: 13.5px * Theme.ts; color: r.changed ? Theme.muted : Theme.text; vertical-alignment: center; overflow: elide; }
-                    if r.changed: Text { text: "→"; font-size: 13.5px * Theme.ts; color: Theme.faint; vertical-alignment: center; }
-                    if r.changed: Text { text: r.after; font-size: 13.5px * Theme.ts; color: Theme.gold; vertical-alignment: center; overflow: elide; }
+                    spacing: 16px;
+                    Text {
+                        text: root.title;
+                        font-family: Theme.title-font;
+                        font-size: 28px * Theme.ts;
+                        color: Theme.gold;
+                        wrap: word-wrap;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if root.status != "": Text {
+                        text: root.status;
+                        font-family: Theme.label-font;
+                        font-size: 11px * Theme.ts;
+                        letter-spacing: 2px;
+                        color: Theme.soft;
+                        vertical-alignment: center;
+                    }
                 }
-                Text { text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center; }
+                Rectangle { height: 10px; }
+                // the title's line, fading out to the right
+                Rectangle { height: 2px; background: @linear-gradient(90deg, Theme.accent 0%, Theme.accent.with-alpha(0) 100%); }
+                Rectangle { height: 12px; }
+                if root.note != "": Note { text: root.note; font-size: 13.5px * Theme.ts; color: Theme.muted; }
+                if root.note != "": Rectangle { height: 16px; }
+                Rectangle {
+                    vertical-stretch: 1;
+                    @children
+                }
             }
-            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-        }
-        for r in App.story-grants: Rectangle {
-            height: 38px;
-            HorizontalLayout {
-                spacing: 10px;
-                Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
-                Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                Text { text: r.note; font-size: 11px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
-            }
-            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
         }
     }
 }
 
-// The inventory changes of a story change, in a box that scrolls: `rows` rows of items high.
+// A framed panel inside a GameDialog.
+component Frame inherits Rectangle {
+    border-radius: 14px;
+    border-width: 2px;
+    border-color: Theme.frame-line;
+    background: Theme.frame-panel;
+}
+
+// A section's heading: a light band that fades out to the right, with rounded corners, a bright
+// mark at its start and a hairline under it that fades too, as the game lights a highlighted row.
+component Section inherits Rectangle {
+    in property <string> text;
+    height: max(30px, name.preferred-height + 14px);
+    RoundFill { r: 6px; across: true; from: Theme.accent.with-alpha(0.17); to: Theme.accent.with-alpha(0); }
+    Rectangle { x: 0px; y: 4px; width: 3px; height: parent.height - 8px; border-radius: 1.5px; background: Theme.accent; }
+    Rectangle {
+        x: 6px; y: parent.height - 1px;
+        width: parent.width - 6px; height: 1px;
+        background: @linear-gradient(90deg, Theme.accent.with-alpha(0.8) 0%, Theme.accent.with-alpha(0) 100%);
+    }
+    name := Label {
+        x: 16px;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.text;
+        font-size: 13px * Theme.ts;
+        letter-spacing: 3px;
+        vertical-alignment: center;
+    }
+}
+
+// What a story change does to the save, measured on a copy: the values before and after, and
+// what is gained and lost (companions, feats, powers, quests). Shared by Skip Ahead, Go Back and
+// Finish Quest (2026-11-06), a table with the games' icons since 2026-11-07.
+component StoryValues inherits VerticalLayout {
+    in property <bool> compact;
+    spacing: 10px;
+    // the columns: the icon's, the change's, current, the arrow's, after, difference
+    property <length> lead: 44px;
+    property <length> rest: self.width - self.lead - 40px;
+    property <length> at-current: self.lead + self.rest * 0.4;
+    property <length> at-after: self.at-current + self.rest * 0.2 + 40px;
+    property <length> at-difference: self.at-after + self.rest * 0.2;
+    Section { text: "CHANGES TO YOUR SAVE"; }
+    if !App.story-preview-ready: Note { text: App.story-preview-status; font-size: 14px * Theme.ts; }
+    if App.story-preview-ready: VerticalLayout {
+        spacing: 0px;
+        alignment: start;
+        // the column heads on a band of their own
+        Rectangle {
+            height: 30px * Theme.ts;
+            border-radius: 6px;
+            background: Theme.frame-head;
+            border-width: 1px;
+            border-color: Theme.frame-dim;
+            for h[k] in ["CHANGE", "CURRENT", "AFTER", "DIFFERENCE"]: Text {
+                x: k == 0 ? root.lead : k == 1 ? root.at-current : k == 2 ? root.at-after : root.at-difference;
+                height: parent.height;
+                text: h;
+                font-family: Theme.label-font;
+                font-size: 9.5px * Theme.ts;
+                letter-spacing: 2px;
+                color: Theme.soft;
+                vertical-alignment: center;
+            }
+        }
+        Rectangle { height: 4px; }
+        // One colour language everywhere (2026-11-06, the maintainer): what goes up is green,
+        // what goes down red, the value after the change gold, what stays the same plain.
+        for r in App.story-values: Rectangle {
+            height: root.compact ? 34px * Theme.ts : 36px * Theme.ts;
+            if r.kind != "": ChangeIcon { x: 7px; kind: r.kind; width: min(30px, parent.height - 6px); }
+            Text {
+                x: root.lead; width: root.at-current - root.lead - 10px; height: parent.height;
+                text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide;
+            }
+            Text {
+                x: root.at-current; width: root.rest * 0.2; height: parent.height;
+                text: r.before; font-size: 13.5px * Theme.ts; color: r.changed ? Theme.muted : Theme.text; vertical-alignment: center; overflow: elide;
+            }
+            if r.changed: Path {
+                x: root.at-after - 36px; y: (parent.height - self.height) / 2;
+                width: 22px; height: 10px;
+                viewbox-width: 22; viewbox-height: 10;
+                stroke: Theme.faint; stroke-width: 2px;
+                commands: "M 0 5 L 21 5 M 15 0 L 21 5 L 15 10";
+            }
+            if r.changed: Text {
+                x: root.at-after; width: root.at-difference - root.at-after - 8px; height: parent.height;
+                text: r.after; font-size: 13.5px * Theme.ts; color: Theme.gold; vertical-alignment: center; overflow: elide;
+            }
+            Text {
+                x: root.at-difference; width: parent.width - root.at-difference; height: parent.height;
+                text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center;
+            }
+            Rectangle { x: root.lead - 6px; y: parent.height - 1px; width: parent.width - self.x; height: 1px; background: Theme.row-line; }
+        }
+        // what is gained and lost, each in a framed row: a quest's journal, a companion, a feat
+        for r in App.story-grants: Rectangle {
+            height: 38px * Theme.ts + 8px;
+            Rectangle {
+                y: 8px; height: parent.height - 8px;
+                border-radius: 6px;
+                background: Theme.field;
+                border-width: 1px;
+                border-color: Theme.frame-dim;
+                ChangeIcon {
+                    x: 8px;
+                    width: min(26px, parent.height - 8px);
+                    kind: r.note == "Quest finished" || r.note == "Quest moves on" || r.note == "Quest begins" ? "quest"
+                        : r.note == "Companion" ? "party" : r.id > 0 ? "gain" : "loss";
+                }
+                Text {
+                    x: root.lead; width: parent.width - root.lead - note.preferred-width - 28px; height: parent.height;
+                    text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide;
+                }
+                note := Text {
+                    x: parent.width - self.preferred-width - 14px; height: parent.height;
+                    text: r.id > 0 ? r.note : r.note + " lost";
+                    font-size: 12.5px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center;
+                }
+            }
+        }
+    }
+}
+
+// One item a story change adds or takes, framed, with its icon.
+component ItemCard inherits Rectangle {
+    in property <StoryItem> entry;
+    height: 62px;
+    border-radius: 8px;
+    background: Theme.field;
+    border-width: 1px;
+    border-color: Theme.frame-line;
+    Rectangle {
+        x: 8px; y: 7px; width: 48px; height: 48px;
+        border-radius: 5px;
+        background: Theme.frame-deep;
+        border-width: 1px;
+        border-color: Theme.frame-line;
+        if root.entry.has-icon: Image { x: 2px; y: 2px; width: 44px; height: 44px; source: root.entry.icon; image-fit: contain; }
+    }
+    VerticalLayout {
+        x: 70px; width: parent.width - 150px;
+        alignment: center;
+        spacing: 4px;
+        Text { text: root.entry.name; font-family: Theme.list-font; font-size: 15px * Theme.ts; color: Theme.text; overflow: elide; }
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+            ChangeIcon { kind: root.entry.gained ? "gain" : "loss"; width: 16px * Theme.ts; }
+            Text { text: root.entry.gained ? "Added" : "Removed"; font-size: 12px * Theme.ts; color: root.entry.gained ? Theme.gain : Theme.danger; vertical-alignment: center; }
+        }
+    }
+    Text {
+        x: parent.width - 80px; width: 64px; height: parent.height;
+        text: root.entry.difference; font-size: 13.5px * Theme.ts;
+        color: root.entry.gained ? Theme.gain : Theme.danger;
+        vertical-alignment: center; horizontal-alignment: right;
+    }
+}
+
+// The inventory changes of a story change, one framed card each: all of them in the scroll they
+// sit in (rows 0), or in a box `rows` cards high that scrolls on its own.
 component StoryItems inherits VerticalLayout {
-    in property <int> rows: 2;
+    in property <int> rows: 0;
     spacing: 10px;
     // the heading on its box, whatever room the pop-up gives
     alignment: start;
-    if App.story-preview-ready: Label { text: "INVENTORY CHANGES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+    if App.story-preview-ready: Section { text: "INVENTORY CHANGES"; }
     if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
-    if App.story-preview-ready && App.story-items.length > 0: Rectangle {
-        height: root.rows * 76px + 10px;
-        border-width: 1px; border-color: Theme.edge; border-radius: 5px;
-        Scroller {
-            x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
-            content-height: Math.ceil(App.story-items.length / 2) * 76px;
-            Rectangle {
-                x: 0px; y: 0px;
-                width: parent.width - 12px;
-                height: Math.ceil(App.story-items.length / 2) * 76px;
-                for r[i] in App.story-items: Rectangle {
-                    x: Math.mod(i, 2) * self.width;
-                    y: Math.floor(i / 2) * 76px;
-                    width: parent.width / 2;
-                    height: 76px;
-                    Rectangle {
-                        x: 8px; y: 14px; width: 48px; height: 48px;
-                        background: Theme.field; border-width: 1px; border-color: Theme.edge; border-radius: 3px;
-                        if r.has-icon: Image { source: r.icon; image-fit: contain; }
-                    }
-                    VerticalLayout {
-                        x: 66px; width: parent.width - 154px;
-                        alignment: center;
-                        spacing: 2px;
-                        Text { text: r.name; font-size: 13px * Theme.ts; color: Theme.text; wrap: word-wrap; overflow: elide; max-height: 2.6 * 13px * Theme.ts; }
-                        Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: r.gained ? Theme.gain : Theme.danger; }
-                    }
-                    Text {
-                        x: parent.width - 80px; width: 72px; height: parent.height;
-                        text: r.difference; font-size: 13px * Theme.ts;
-                        color: r.gained ? Theme.gain : Theme.danger;
-                        vertical-alignment: center; horizontal-alignment: right;
-                    }
-                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                    if Math.mod(i, 2) == 1: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.row-line; }
-                }
-            }
+    if App.story-preview-ready && App.story-items.length > 0 && root.rows == 0: VerticalLayout {
+        spacing: 8px;
+        for r in App.story-items: ItemCard { entry: r; }
+    }
+    if App.story-preview-ready && App.story-items.length > 0 && root.rows > 0: Scroller {
+        height: min(root.rows, App.story-items.length) * 70px;
+        content-height: App.story-items.length * 70px - 8px;
+        VerticalLayout {
+            x: 0px; y: 0px;
+            width: parent.width - 16px;
+            spacing: 8px;
+            for r in App.story-items: ItemCard { entry: r; }
         }
     }
 }
@@ -169,7 +360,9 @@ component StoryPreviewDetails inherits Rectangle {
             content-height: details.preferred-height;
             details := VerticalLayout {
                 x: 0px; y: 0px;
-                width: parent.width - 12px;
+                width: parent.width - 16px;
+                // its own height: as tall as the scroll it squeezed the change table to a line
+                height: self.preferred-height;
                 spacing: 10px;
                 Text {
                     text: App.pop-action == 0 && App.overlay == 12 ? "Choose a subchapter" : App.pop-detail;
@@ -224,6 +417,9 @@ component StoryPreviewDetails inherits Rectangle {
             }
         }
         StoryItems {
+            // only the room it needs: stretched, an empty list took half the column and cut the
+            // changes above off at its middle
+            vertical-stretch: 0;
             // two rows, one where the skip asks two questions or more, so the totals above
             // keep their room (at 1600 by 900 with Large text the skip's choices and a taller
             // box left the totals out of view); it scrolls
@@ -695,20 +891,28 @@ export component AppWindow inherits Window {
     }
     // Chapter navigation stays on the left. Selection details and the prepared save's
     // measured changes stay on the right, with a separate two-column inventory scroller.
-    if App.overlay == 12: Overlay {
+    // Travelling on the timeline, in the story pop-ups' look (2026-11-07): the chapter's points
+    // in a framed panel on the left, what the one picked does to the save on the right.
+    if App.overlay == 12: GameDialog {
         panel-width: 1440px;
         panel-height: 900px;
+        title: App.pop-title;
+        status: App.pop-kicker;
+        note: App.pop-note;
         VerticalLayout {
-            spacing: 10px;
-            Label { text: App.pop-kicker; font-size: 13px * Theme.ts; }
-            Text { text: App.pop-title; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; }
-            Note { text: App.pop-note; }
-            Rectangle { height: 1px; background: Theme.row-line; }
+            spacing: 18px;
             HorizontalLayout {
                 vertical-stretch: 1;
-                spacing: 24px;
-                Scroller {
+                spacing: 20px;
+                Frame {
                     width: min(480px, parent.width * 0.37);
+                    VerticalLayout {
+                        padding: 14px;
+                        padding-right: 8px;
+                        spacing: 12px;
+                        Section { text: "WHERE TO"; }
+                Scroller {
+                    vertical-stretch: 1;
                     content-height: App.skip-height;
                     VerticalLayout {
                         for r[ri] in App.skip-rows: row := Rectangle {
@@ -771,13 +975,15 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-                Rectangle { width: 1px; background: Theme.edge; }
-                StoryPreviewDetails { horizontal-stretch: 1; }
+                    }
+                }
+                Frame {
+                    horizontal-stretch: 1;
+                    StoryPreviewDetails { x: 16px; y: 14px; width: parent.width - 24px; height: parent.height - 28px; }
+                }
             }
-            Rectangle { height: 1px; background: Theme.row-line; }
             HorizontalLayout {
                 spacing: 14px;
-                padding-top: 4px;
                 Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup is made first."; }
                 Button { width: 150px; text: "Cancel"; clicked => { App.close-overlay(); } }
                 Button {
@@ -790,13 +996,25 @@ export component AppWindow inherits Window {
         }
     }
     // Going back on the timeline: the story's inventory and credits, without a policy choice.
-    if App.overlay == 11: Overlay {
-        panel-width: 760px;
-        panel-height: 560px;
+    if App.overlay == 11: GameDialog {
+        panel-width: 820px;
+        panel-height: 600px;
+        title: App.back-title;
         VerticalLayout {
             spacing: 14px;
-            Text { text: App.back-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note { text: App.back-summary; font-size: 14px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            Frame {
+                vertical-stretch: 1;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+                    Section { text: "WHAT GOING BACK DOES"; }
+                    Scroller {
+                        vertical-stretch: 1;
+                        content-height: back-text.preferred-height;
+                        back-text := Note { x: 0px; y: 0px; width: parent.width; text: App.back-summary; font-size: 14px * Theme.ts; color: Theme.muted; }
+                    }
+                }
+            }
             Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup of the save is made first."; }
             HorizontalLayout {
                 spacing: 14px;
@@ -811,47 +1029,47 @@ export component AppWindow inherits Window {
     // stands. The ending (and, where it changes anything, the side) on the left; on the right
     // what the save receives, measured on a copy, and what only the game does. Finish takes
     // exactly what is shown.
-    if App.overlay == 8: Overlay {
-        panel-width: 1300px;
+    if App.overlay == 8: GameDialog {
+        panel-width: 1320px;
         panel-height: 860px;
         property <int> chosen: App.finish-pick;
+        title: "Finish " + App.quest-title;
+        note: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup is made first.";
         VerticalLayout {
-            spacing: 10px;
-            Text { text: "Finish " + App.quest-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
-            Note {
-                font-size: 14px * Theme.ts;
-                text: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup is made first.";
-            }
-            Rectangle { height: 1px; background: Theme.row-line; }
+            spacing: 18px;
             HorizontalLayout {
                 vertical-stretch: 1;
-                spacing: 24px;
+                spacing: 20px;
                 // the ending, and the side where it matters
+                Frame {
+                    width: min(470px, parent.width * 0.37);
                 VerticalLayout {
-                    width: min(460px, parent.width * 0.38);
-                    spacing: 10px;
-                    Label { text: App.quest-endings.length > 1 ? "HOW IT ENDS" : "HOW IT ENDS (ONE ENDING)"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                    padding: 14px;
+                    padding-right: 8px;
+                    spacing: 12px;
+                    Section { text: App.quest-endings.length > 1 ? "HOW IT ENDS" : "HOW IT ENDS (ONE ENDING)"; }
                     Scroller {
                         vertical-stretch: 1;
                         content-height: ends.preferred-height;
                         ends := VerticalLayout {
                             x: 0px; y: 0px;
-                            width: parent.width - 12px;
-                            spacing: 8px;
+                            // inside the scroll's own width, left of its bar
+                            width: parent.width - 16px;
+                            spacing: 10px;
                             for x[i] in App.quest-endings: card := Rectangle {
                                 // as tall as its words: a long ending was cut and began
                                 // mid-sentence in a box of 88 px
-                                height: max(64px, et.preferred-height + 28px);
-                                border-radius: 8px;
-                                border-width: i == chosen ? 2px : 1px;
-                                border-color: i == chosen ? Theme.accent : xt.has-hover ? Theme.soft : Theme.edge;
+                                height: max(58px, et.preferred-height + 28px);
+                                border-radius: 10px;
+                                border-width: 2px;
+                                border-color: i == chosen ? Theme.accent : xt.has-hover ? Theme.hover-edge : Theme.frame-dim;
                                 background: i == chosen ? Theme.selected : Theme.field;
                                 Rectangle {
                                     x: 14px; y: (parent.height - self.height) / 2;
                                     width: 18px; height: 18px;
                                     border-radius: 9px;
                                     border-width: 2px;
-                                    border-color: i == chosen ? Theme.accent : Theme.edge;
+                                    border-color: i == chosen ? Theme.accent : Theme.frame-line;
                                     if i == chosen: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
                                 }
                                 // light or dark, where the ending is one (2026-11-06, the maintainer)
@@ -895,7 +1113,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if App.quest-side-matters: Label { text: "YOUR PATH"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                    if App.quest-side-matters: Section { text: "YOUR PATH"; }
                     if App.quest-side-matters: Choice {
                         height: 40px;
                         font-size: 14px * Theme.ts;
@@ -904,35 +1122,37 @@ export component AppWindow inherits Window {
                         picked(k) => { App.quest-dark = k; App.refresh-quest-preview(); }
                     }
                 }
-                Rectangle { width: 1px; background: Theme.edge; }
+                }
                 // what the save receives
-                VerticalLayout {
+                Frame {
                     horizontal-stretch: 1;
-                    spacing: 12px;
                     Scroller {
-                        vertical-stretch: 1;
-                        min-height: 120px;
+                        x: 14px; y: 14px;
+                        width: parent.width - 22px;
+                        height: parent.height - 28px;
                         content-height: receive.preferred-height;
                         receive := VerticalLayout {
                             x: 0px; y: 0px;
-                            width: parent.width - 12px;
+                            // inside the scroll's own width, left of its bar
+                            width: parent.width - 16px;
                             // its own height: as tall as the scroller it spread its rows apart
                             height: self.preferred-height;
-                            spacing: 14px;
+                            spacing: 18px;
                             StoryValues { }
+                            // what the game does itself when it gets there ("what only the game
+                            // does" until 2026-11-07: the maintainer found it unclear)
                             if App.story-preview-ready && App.story-notes != "": VerticalLayout {
-                                spacing: 6px;
-                                Label { text: "WHAT ONLY THE GAME DOES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
-                                Note { text: App.story-notes; font-size: 13px * Theme.ts; }
+                                spacing: 10px;
+                                Section { text: "HAPPENS IN THE GAME"; }
+                                Note { text: App.story-notes; font-size: 13px * Theme.ts; color: Theme.muted; }
                             }
                             // in the same scroll as the rest: beside it, a reward's items took
                             // the room and hid the last rows of the changes
-                            StoryItems { rows: 2; }
+                            StoryItems { }
                         }
                     }
                 }
             }
-            Rectangle { height: 1px; background: Theme.row-line; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;

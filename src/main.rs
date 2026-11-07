@@ -1601,10 +1601,21 @@ fn request_story_preview(ui: &AppWindow, st: &mut State, back: bool) {
 fn number_preview(rows: &mut Vec<StoryValue>, label: &str, before: i64, after: i64, always: bool) {
     if !always && before == after { return; }
     let difference = after - before;
+    // the row's icon in the preview: the games' notification icons, drawn by the program
+    let kind = match label {
+        "Experience" | "Party experience" => "xp",
+        "Credits" => "credits",
+        "Level" => "level",
+        "Companions" => "party",
+        "Alignment" => "align",
+        _ if label.ends_with(": experience") => "xp",
+        _ if label.ends_with(": level") => "level",
+        _ => "",
+    };
     rows.push(StoryValue {
         label: s(label), before: s(thousands(before)), after: s(thousands(after)),
         difference: s(if difference == 0 { String::new() } else { format!("{}{}", if difference > 0 { "+" } else { "" }, thousands(difference)) }),
-        change: difference.signum() as i32, changed: difference != 0,
+        change: difference.signum() as i32, changed: difference != 0, kind: s(kind),
     });
 }
 

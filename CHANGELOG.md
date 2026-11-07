@@ -6,6 +6,15 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **The story pop-ups look like the game's own menus, and filled buttons have round corners**
+  (2026-11-07, the maintainer). Finish Quest, travelling on the timeline and Go Back sit in a
+  framed dialog with a gold title, framed panels and lit section headings; the changes are a
+  table with an icon on each row (XP, credits, level, party, alignment, the journal, items),
+  drawn by the program in each game's own colours. "What only the game does" reads "Happens in
+  the Game". Every button, switch and bar filled with a gradient had square corners inside its
+  rounded edge (the renderer does not round a gradient); now they are round, and the selected
+  half of a switch no longer shows a fuzzy rim where its fill met the outline. Looked at in the
+  program in both games at 1600 by 900, and in KotOR at 1280 by 780.
 - **Light and dark endings are marked, and changes have one colour language** (2026-11-06,
   the maintainer). Finish Quest tags an ending LIGHT SIDE or DARK SIDE where its own stage
   moves alignment that way. Wherever a change is shown before it happens (Finish Quest, Skip

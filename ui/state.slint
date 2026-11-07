@@ -16,7 +16,8 @@ export struct DoorRow { index: int, tag: string, note: string, locked: bool, ope
 export struct BoxRow { index: int, name: string, note: string }
 export struct PortraitRow { id: int, image: image, female: bool, current: bool }
 export struct ClassRow { index: int, name: string, level: int, maximum: int, can-remove: bool }
-export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool }
+// kind: the row's icon (xp, credits, level, party, align), or none
+export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool, kind: string }
 export struct StoryItem { name: string, icon: image, has-icon: bool, difference: string, gained: bool }
 // A quest's stage: 0 behind where the quest is, 1 where it is, 2 ahead.
 export struct StageRow { id: int, text: string, xp: int, end: bool, place: int }

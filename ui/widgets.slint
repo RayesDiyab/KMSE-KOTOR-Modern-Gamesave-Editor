@@ -5,6 +5,58 @@ import { Theme } from "theme.slint";
 
 // kind: 0 cyan fill (the main action), 1 outline, 2 grey fill (Revert), 3 small outline,
 // 4 red fill (taking something out of the save)
+// A rounded fill with a gradient. The software renderer rounds only a solid fill: a gradient
+// one kept square corners, so every filled button showed square corners inside its rounded edge
+// (2026-11-07, the maintainer: Finish Quest's corners). So the corners are drawn as solid caps in
+// the gradient's end colours, and only the straight middle carries the gradient; the pieces meet
+// without overlapping, so a see-through fill is not doubled where they meet. `across` runs the
+// gradient left to right, `mid` adds a middle stop.
+export component RoundFill inherits Rectangle {
+    in property <color> from;
+    in property <color> to;
+    in property <color> mid;
+    in property <bool> has-mid;
+    in property <bool> across;
+    in property <length> r: 5px;
+    in property <length> r-tl: r;
+    in property <length> r-tr: r;
+    in property <length> r-bl: r;
+    in property <length> r-br: r;
+    property <length> cap: max(r-tl, r-tr, r-bl, r-br);
+    if !across: Rectangle {
+        y: 0; height: root.cap;
+        background: root.from;
+        border-top-left-radius: root.r-tl;
+        border-top-right-radius: root.r-tr;
+    }
+    if !across: Rectangle {
+        y: root.cap; height: root.height - 2 * root.cap;
+        background: root.has-mid ? @linear-gradient(180deg, root.from 0%, root.mid 50%, root.to 100%) : @linear-gradient(180deg, root.from 0%, root.to 100%);
+    }
+    if !across: Rectangle {
+        y: root.height - root.cap; height: root.cap;
+        background: root.to;
+        border-bottom-left-radius: root.r-bl;
+        border-bottom-right-radius: root.r-br;
+    }
+    if across: Rectangle {
+        x: 0; width: root.cap;
+        background: root.from;
+        border-top-left-radius: root.r-tl;
+        border-bottom-left-radius: root.r-bl;
+    }
+    if across: Rectangle {
+        x: root.cap; width: root.width - 2 * root.cap;
+        background: root.has-mid ? @linear-gradient(90deg, root.from 0%, root.mid 50%, root.to 100%) : @linear-gradient(90deg, root.from 0%, root.to 100%);
+    }
+    if across: Rectangle {
+        x: root.width - root.cap; width: root.cap;
+        background: root.to;
+        border-top-right-radius: root.r-tr;
+        border-bottom-right-radius: root.r-br;
+    }
+}
+
 export component Button inherits Rectangle {
     in property <string> text;
     in property <int> kind: 1;
@@ -16,15 +68,29 @@ export component Button inherits Rectangle {
     min-height: kind == 3 || compact ? 38px : 50px;
     min-width: label.preferred-width + (kind == 3 ? 32px : 48px);
     border-radius: 5px;
-    // an edge at rest on every kind but the filled ones, whose fill is their edge (Revert's grey
-    // and a greyed-out Save Changes had none, 2026-11-06)
-    border-width: touch.has-hover && enabled ? 2px : kind == 1 || kind == 2 || kind == 3 || !enabled ? 1px : 0px;
-    border-color: touch.has-hover && enabled ? Theme.hover-edge : Theme.edge;
+    property <bool> graded: enabled && (kind == 0 || kind == 2);
     background: !enabled ? (kind == 0 ? Theme.selected : Theme.field)
-        : kind == 0 ? @linear-gradient(180deg, touch.has-hover ? Theme.fill-hover : Theme.fill-top 0%, Theme.fill-bottom 100%)
-        : kind == 2 ? @linear-gradient(180deg, Theme.grey-top 0%, Theme.grey-bottom 100%)
+        : graded ? transparent
         : kind == 4 ? (touch.has-hover ? Theme.danger.brighter(0.15) : Theme.danger)
         : (touch.has-hover ? Theme.hover : Theme.field);
+    // the filled kinds' gradient, with its corners rounded as the edge is
+    // (the grey one, which has an edge, inside it, so the two arcs do not mix into a fuzzy rim)
+    property <length> inset: kind == 2 ? 1px : 0px;
+    if graded: RoundFill {
+        x: root.inset; y: root.inset;
+        width: root.width - 2 * root.inset;
+        height: root.height - 2 * root.inset;
+        r: 5px - root.inset;
+        from: kind == 0 ? (touch.has-hover ? Theme.fill-hover : Theme.fill-top) : Theme.grey-top;
+        to: kind == 0 ? Theme.fill-bottom : Theme.grey-bottom;
+    }
+    // the edge, over the fill: an edge at rest on every kind but the filled ones, whose fill is
+    // their edge (Revert's grey and a greyed-out Save Changes had none, 2026-11-06)
+    Rectangle {
+        border-radius: 5px;
+        border-width: touch.has-hover && enabled ? 2px : kind == 1 || kind == 2 || kind == 3 || !enabled ? 1px : 0px;
+        border-color: touch.has-hover && enabled ? Theme.hover-edge : Theme.edge;
+    }
     label := Text {
         text: root.text;
         font-family: Theme.list-font;
@@ -250,6 +316,96 @@ export component Scroller inherits Rectangle {
     }
 }
 
+// A change's icon in a story preview, drawn by the program after the games' own notification
+// icons (2026-11-07, the maintainer: "draw them ourselves"), in the open game's colours: xp,
+// credits, level, party, align (half dark side, half light side), quest, gain, loss. Any size;
+// everything scales with the width.
+export component ChangeIcon inherits Rectangle {
+    in property <string> kind;
+    width: 30px;
+    height: self.width;
+    property <float> u: self.width / 32px;
+    property <bool> ringed: kind == "xp" || kind == "credits" || kind == "quest" || kind == "gain" || kind == "loss";
+    property <color> c: kind == "credits" || kind == "quest" ? Theme.icon-green : kind == "loss" ? Theme.icon-red : Theme.icon-blue;
+    // a ring on black, as the game's round icons are
+    if ringed: Rectangle {
+        x: 1px * root.u; y: 1px * root.u;
+        width: 30px * root.u; height: self.width;
+        border-radius: self.width / 2;
+        border-width: 2.6px * root.u;
+        border-color: root.c;
+        background: #000000;
+    }
+    // XP in bold strokes (the font's letters came out thin, and a text stroke hollow)
+    if kind == "xp": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        stroke: root.c; stroke-width: 3.2px * root.u;
+        commands: "M 6.5 10.5 L 14 21.5 M 14 10.5 L 6.5 21.5 M 18 22 L 18 10.5 L 22 10.5 Q 26 10.5 26 14 Q 26 17.5 22 17.5 L 18 17.5";
+    }
+    // the credit sign: two uprights crossed by a bar, and a stroke turning down from it
+    if kind == "credits": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        stroke: root.c; stroke-width: 2.6px * root.u;
+        commands: "M 10 8.5 L 10 17 M 14 8.5 L 14 17 M 7.5 12.5 L 16.5 12.5 M 12.5 9.5 L 24.5 9.5 L 16 24";
+    }
+    // the journal: an open book
+    if kind == "quest": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: root.c;
+        commands: "M 8.5 10 L 15.3 12 L 15.3 23.5 L 8.5 21.5 Z M 16.7 12 L 23.5 10 L 23.5 21.5 L 16.7 23.5 Z";
+    }
+    if kind == "gain" || kind == "loss": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        stroke: root.c; stroke-width: 3px * root.u;
+        commands: kind == "gain" ? "M 10 16 L 22 16 M 16 10 L 16 22" : "M 10 16 L 22 16";
+    }
+    // level: an arrow up into an L
+    if kind == "level": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: Theme.icon-level;
+        stroke: #000000; stroke-width: 1px * root.u;
+        commands: "M 16 2 L 23.5 10 L 19.5 10 L 19.5 23 L 26 23 L 26 29.5 L 12.5 29.5 L 12.5 10 L 8.5 10 Z";
+    }
+    // the party: two behind, one in front, the front one edged so the three stay apart
+    if kind == "party": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: Theme.icon-party;
+        commands: "M 5.5 11.5 A 3.6 3.6 0 1 1 12.7 11.5 A 3.6 3.6 0 1 1 5.5 11.5 Z M 19.3 11.5 A 3.6 3.6 0 1 1 26.5 11.5 A 3.6 3.6 0 1 1 19.3 11.5 Z M 1.5 25 Q 1.5 17 9.1 17 Q 16.7 17 16.7 25 Z M 15.3 25 Q 15.3 17 22.9 17 Q 30.5 17 30.5 25 Z";
+    }
+    if kind == "party": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: Theme.icon-party;
+        stroke: #000000; stroke-width: 1.4px * root.u;
+        commands: "M 11.2 10.5 A 4.8 4.8 0 1 1 20.8 10.5 A 4.8 4.8 0 1 1 11.2 10.5 Z M 6.5 29.5 Q 6.5 18.5 16 18.5 Q 25.5 18.5 25.5 29.5 Z";
+    }
+    // alignment: the dark side's half on the left, the light side's on the right, one figure
+    if kind == "align": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: Theme.icon-red;
+        commands: "M 16 1.5 A 14.5 14.5 0 0 0 16 30.5 Z";
+    }
+    if kind == "align": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: Theme.icon-blue;
+        commands: "M 16 1.5 A 14.5 14.5 0 0 1 16 30.5 Z";
+    }
+    if kind == "align": Path {
+        width: root.width; height: root.height;
+        viewbox-width: 32; viewbox-height: 32;
+        fill: #000000;
+        commands: "M 10.8 11.5 A 5.2 5.2 0 1 1 21.2 11.5 A 5.2 5.2 0 1 1 10.8 11.5 Z M 7.6 26.8 Q 8.5 18.6 16 18.6 Q 23.5 18.6 24.4 26.8 Q 20.6 30.3 16 30.3 Q 11.4 30.3 7.6 26.8 Z";
+    }
+}
+
 // The moon and the sun of the Appearance choice in Settings.
 export component Moon inherits Path {
     in property <color> colour;
@@ -399,7 +555,22 @@ export component Choice inherits Rectangle {
             property <bool> first: i == 0;
             property <bool> last: i == options.length - 1;
             width: root.width / options.length;
-            background: on ? @linear-gradient(180deg, Theme.fill-top 0%, Theme.fill-bottom 100%) : ct.has-hover ? Theme.hover : Theme.field;
+            background: on ? transparent : ct.has-hover ? Theme.hover : Theme.field;
+            // the fill inside the outline, its corners one pixel tighter: on the outline's own
+            // arc the two smoothed edges mixed into a fuzzy grey rim (2026-11-07, the maintainer)
+            if on: RoundFill {
+                x: parent.first ? 1px : 0px;
+                y: 1px;
+                width: parent.width - (parent.first ? 1px : 0px) - (parent.last ? 1px : 0px);
+                height: parent.height - 2px;
+                from: Theme.fill-top;
+                to: Theme.fill-bottom;
+                r: root.r - 1px;
+                r-tl: parent.first ? root.r - 1px : 0px;
+                r-bl: parent.first ? root.r - 1px : 0px;
+                r-tr: parent.last ? root.r - 1px : 0px;
+                r-br: parent.last ? root.r - 1px : 0px;
+            }
             border-width: ct.has-hover && !on ? 2px : 0px;
             border-color: Theme.hover-edge;
             border-top-left-radius: self.first ? root.r : 0px;
@@ -542,13 +713,13 @@ export component AlignmentChoice inherits Rectangle {
             if e.text == Key.End { root.set(100); root.committed(); return accept; }
             reject
         }
-        Rectangle {
-            y: 14px; height: 7px; border-radius: 4px;
-            background: @linear-gradient(90deg, #ff405d33 0%, #c6d5e322 50%, #20d8ff33 100%);
+        RoundFill {
+            y: 14px; height: 7px; r: 3.5px; across: true;
+            from: #ff405d33; mid: #c6d5e322; to: #20d8ff33; has-mid: true;
         }
-        Rectangle {
-            y: 16px; height: 3px; border-radius: 2px;
-            background: @linear-gradient(90deg, #ff405d 0%, #d2dae5 50%, #20d8ff 100%);
+        RoundFill {
+            y: 16px; height: 3px; r: 1.5px; across: true;
+            from: #ff405d; mid: #d2dae5; to: #20d8ff; has-mid: true;
         }
         Rectangle {
             x: parent.width * root.value / 100 - 10px; y: 7px; width: 20px; height: 20px;

@@ -198,6 +198,15 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 - **Text, Muted, Soft, Faint**: four text steps. Text for values and names, Muted for area lines and secondary values, Soft for inactive tabs and switch knobs, Faint for notes, dates, placeholders and disabled labels.
 - **Revert Grey** (top, bottom): the gradient of the Revert button only.
 - **Scrim**: the translucent cover behind a dialog.
+- **Frame Line, Frame Dim, Frame Deep, Frame Panel, Frame Head** (`Theme.frame-*`): the story
+  pop-ups' frames only (see Story Dialog below): a line quieter than the accent, a dimmer
+  inner line, the dialog a shade deeper than a panel, its framed panels a shade lighter, and
+  the band behind a change table's column heads. Each game and mode has its own.
+- **Icon colours** (`Theme.icon-blue`, `icon-green`, `icon-red`, `icon-level`, `icon-party`):
+  the change icons' colours, taken from each game's own notification icons. KotOR: blue
+  #5070f8 (XP, items, the light side), green (credits, the journal), red (the dark side), gold
+  (level). KotOR II: teal #18b090 for all of those, orange for level, stone grey for the party.
+  Fixed per game, not per mode: they are the game's own.
 
 ### Named Rules
 **The Orange Means Unsaved Rule.** Orange appears only on something changed since the last save (or a warning about the save itself). If nothing is pending, no orange is on screen.
@@ -288,6 +297,33 @@ Engraved-caption buttons in the Menu Medium cut, never animated.
 ### Panels and Dialogs
 - **Panel:** panel tone, 1px panel edge, 10px corners, content inset 22 to 26px.
 - **Dialog:** centred on the scrim, panel tone, 1px edge, 12px corners, 32px by 28px inset; headline title, note, content, and right-aligned buttons.
+- **Story Dialog** (2026-11-07, the maintainer approved the mock-up: "this looks amazing"):
+  Finish Quest, the timeline's travel pop-up and Go Back are drawn as a screen of the game's
+  own menus. A deep dialog with 18px corners, a 2px Frame Line, a 1px Frame Dim line 7px
+  inside it and a soft 3px light around it at a quarter strength; a notched rail along the
+  top. The title in Crest Gold over a 2px accent line that fades out to the right, the note in
+  Muted. Content sits in framed panels (Frame Panel, 2px Frame Line, 14px corners); each
+  section starts with a **section heading**: a band of the accent at 17% that fades to nothing
+  on the right, 6px corners, a 3px accent mark at its start, a hairline under it fading the
+  same way, the name in the spaced label cut. A **change table**: column heads on a Frame Head
+  band (6px corners, Frame Dim edge); each row the change's icon, the name, the current value,
+  a drawn arrow, the value after in gold and the difference green or red; what is gained or
+  lost (a journal quest, a companion, a feat) in framed rows of its own; items as framed
+  cards with their picture and "+ Added" or "- Removed". The buttons are the program's own.
+  It is the one place with a lit frame: everywhere else the Tone Not Shadow Rule holds.
+- **Change icons** (`ChangeIcon`): drawn by the program after the games' notification icons
+  (the maintainer: "draw them ourselves"), in the open game's icon colours: XP in a ring, the
+  credit sign in a ring, the level arrow into an L, the party's three figures, alignment as
+  one figure on a disc half dark side and half light side, the journal's book in a ring, plus
+  and minus in a ring for what is gained and lost.
+
+### Named Rules
+**The Rounded Gradient Rule** (2026-11-07). The software renderer rounds only a solid fill; a
+gradient keeps square corners. A rounded shape with a gradient is drawn with `RoundFill`:
+solid caps in the gradient's end colours carry the corners, the straight middle carries the
+gradient. Where an outline sits over a fill, the fill sits one pixel inside it with corners a
+pixel tighter: on the outline's own arc the two smoothed edges mixed into a fuzzy grey rim
+(the maintainer saw both on the selected tab of Active, Completed, Not Started).
 
 ### Signature: the save bar
 (Corrected 2026-11-02: the audit found this bottom bar gone from the program. The text is kept as the record of the idea.)

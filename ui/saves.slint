@@ -4,7 +4,7 @@
 
 import { Theme } from "theme.slint";
 import { App, SaveRow } from "state.slint";
-import { Button, Label, Note, Scroller, Field, IconButton } from "widgets.slint";
+import { Button, Label, Note, Scroller, Field, IconButton, RoundFill } from "widgets.slint";
 
 component SaveLine inherits Rectangle {
     in property <SaveRow> save;
@@ -74,18 +74,35 @@ export component SavesPage inherits Rectangle {
         y: 52px;
         width: 290px;
         height: 50px;
-        border-radius: 6px;
-        border-width: 1px;
-        border-color: Theme.edge;
-        clip: true;
         HorizontalLayout {
             for game[i] in ["KotOR", "KotOR II"]: Rectangle {
                 property <bool> on: (i == 1) == App.showing-k2;
-                background: on ? @linear-gradient(180deg, Theme.fill-top 0%, Theme.fill-bottom 100%) : Theme.field;
+                // only the switch's outer corners round, the gradient drawn so they do
+                background: on ? transparent : Theme.field;
+                border-top-left-radius: i == 0 ? 6px : 0px;
+                border-bottom-left-radius: i == 0 ? 6px : 0px;
+                border-top-right-radius: i == 1 ? 6px : 0px;
+                border-bottom-right-radius: i == 1 ? 6px : 0px;
+                // inside the outline, its corners a pixel tighter, so the arcs do not mix
+                if on: RoundFill {
+                    x: i == 0 ? 1px : 0px;
+                    y: 1px;
+                    width: parent.width - 1px;
+                    height: parent.height - 2px;
+                    from: Theme.fill-top;
+                    to: Theme.fill-bottom;
+                    r: 5px;
+                    r-tl: i == 0 ? 5px : 0px;
+                    r-bl: i == 0 ? 5px : 0px;
+                    r-tr: i == 1 ? 5px : 0px;
+                    r-br: i == 1 ? 5px : 0px;
+                }
                 Text { text: game; font-family: Theme.list-font; font-size: 19px * Theme.ts; color: on ? Theme.ink : Theme.soft; }
                 TouchArea { mouse-cursor: pointer; clicked => { App.switch-game(i == 1); } }
             }
         }
+        // the outline, over the halves
+        Rectangle { border-radius: 6px; border-width: 1px; border-color: Theme.edge; }
     }
 
     property <length> list-width: (self.width - 120px - 24px) * 0.47;
