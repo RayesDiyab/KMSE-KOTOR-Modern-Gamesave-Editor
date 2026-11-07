@@ -574,10 +574,12 @@ is set, else after the others; endings last. By number, Carth's quest at 3 repla
 `tests/finish_quest_audit.rs`.
 
 **Party XP from quests (2026-11-07).** Journal and step XP go to the player and `PT_XP_POOL`;
-companions are not given theirs directly. In KotOR the game raises each companion to 80% of
-the pool as the save loads (Carth brought from Taris: 69,389 of 86,735, the maintainer, in the
-game). KotOR II's companions in three saves on this PC stand at 80% of the pool too (Atton
-26,790 of 33,400), but whether the game raises them on load is not checked in the game.
+companions are not given theirs directly. They need not be: both games raise each companion
+to 80% of the pool as the save loads, as the maintainer saw in the game. In KotOR, Carth
+brought from Taris showed 69,389 of a pool of 86,735. In KotOR II, a Telos save with the fuel
+quest finished (the pool 1,100 higher, the companions left as they were in the file) showed
+Atton and Kreia at 28,993, 80% of the new pool of 36,240 rounded up, where the file held
+28,258 and 28,257.
 
 **Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
 through one conversation line or script as its own step (a reply chosen, a condition met, an

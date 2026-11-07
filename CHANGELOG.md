@@ -84,6 +84,8 @@ CHANGELOG.
     of ordinary enemies); KotOR II's Tech Specialist, Bao-Dur's class, to party members only;
     a prestige class only to a player with one Jedi class at level 15 or above, as Kreia
     offers it, with its side in the note. Party members get no prestige class.
+  - Checked in KotOR II: quest XP Finish Quest puts in the party's pool reaches the
+    companions, as in KotOR. The game raises them to 80% of the pool when the save loads.
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

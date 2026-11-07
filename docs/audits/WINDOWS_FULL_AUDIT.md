@@ -108,7 +108,7 @@ No row is VERIFIED for gameplay: nothing was loaded in a game (section E).
 | Equipment | PARTIAL | PARTIAL | `audit_fixes.rs`; E-8, E-9 remain |
 | Party, recruit, import | PARTIAL | PARTIAL | `audit_fixes.rs`, `audit_2026_11_07.rs`; E-6, E-7 remain |
 | Influence, components | NOT TESTED | PARTIAL | `edits.rs` (influence) |
-| Finish Quest | PARTIAL | PARTIAL | `finish_quest.rs` (84 + K2 finishes prepared), `finish_quest_audit.rs`; S-4 and S-7 fixed later; S-6 open for KotOR II |
+| Finish Quest | PARTIAL | PARTIAL | `finish_quest.rs` (84 + K2 finishes prepared), `finish_quest_audit.rs`; S-4 and S-7 fixed later; S-6 answered in both games |
 | Skip Ahead, Go Back | PARTIAL | PARTIAL | `story_safety.rs`, `star_maps.rs`, `galaxy_route.rs`, `audit_fixes.rs`; S-8 remains |
 | Map, travel, spawn | PARTIAL | PARTIAL | `audit_round2.rs`, `exits.rs`; W-1, W-3, W-4, W-5 remain |
 | Pazaak, destinations | PARTIAL | PARTIAL | code read; W-8 remains |
@@ -116,7 +116,7 @@ No row is VERIFIED for gameplay: nothing was loaded in a game (section E).
 | Window at 1600x900 and 1280x780, 100% | PARTIAL | PARTIAL | seen in the program this session (Finish Quest, travel, History) |
 | Window at 150% scaling on 1920x1080 | FAILED | FAILED | U-6: minimum height 780 logical px, more than the 720 the screen has (by reading `app.slint`; not run) |
 | 1920x1080, 2560x1440, 3840x2160, 125%, 200% | NOT TESTED | NOT TESTED | not run this session |
-| Loading edited saves in the game | PARTIAL | NOT TESTED | section E: two Finish Quest saves loaded and played in KotOR; nine more made for the maintainer |
+| Loading edited saves in the game | PARTIAL | PARTIAL | section E: two Finish Quest saves loaded and played in KotOR; nine more made for the maintainer; in KotOR II one Finish Quest save loaded by the maintainer (S-6) |
 
 ## D. Save integrity
 
@@ -192,11 +192,17 @@ Manaan; game-written, but level 40 with 99,919,498 credits). They are in the rea
 "KMSE ..." slots: Finish Quest (Attack on the Endar Spire; Missing Selkath), Skip Ahead to
 Dantooine, Go Back from it, level 10, a lightsaber added, travel to the Dantooine Enclave,
 Carth from a Taris save, and a revert. Each was read back by the editor's code: values as
-intended. Loading them in the game is the maintainer's. KotOR II was not run.
+intended. Loading them in the game is the maintainer's.
+
+For S-6 two KotOR II saves were made the same way from the maintainer's Game3 (Telos, level
+8), in `cloudsaves` as "KMSE S-6 copy" (unchanged) and "KMSE S-6 fuel" (the fuel quest
+finished), their backups in the game folder. The maintainer loaded the fuel save: Atton and
+Kreia at 28,993, 80% of the pool rounded up, against 28,258 and 28,257 in the file; the
+player at 34,738, as written. The copy, for a companion outside the party (T3-M4, 23,781 in
+the file), was not loaded.
 
 These remain unverified in the game:
 - whether the path Finish Quest takes, where the save cannot decide, is one a player can reach;
-- how journal XP reaches the party (S-6);
 - what the engine does with the state Skip Ahead and Go Back write in KotOR II (the maintainer's notes say KotOR II's story was never played through);
 - whether the game reads the values Finish Quest sets when it first builds an area.
 
@@ -246,7 +252,7 @@ Not fixed. Each was checked against the code, and none is P0 or P1.
 | ID | Sev | Game | What | Why left |
 | --- | --- | --- | --- | --- |
 | S-4 | P2 | both | ~~Stage order is taken as number order in Finish Quest and Skip to stage~~ | **fixed**: `questdb::story_order`, shared with the Quests tab. Only stages set in a later chapter than every stage numbered above them are out of order (K1: Carth's 3, Bastila's 1 and 2; the flag alone also marked all of RebuildHK47, which the tab then showed as passed). `finishing_carths_quest_from_the_leviathan_skips_his_talks`, `only_stages_set_in_a_later_chapter_are_out_of_order` |
-| S-6 | P2 | both | Journal and plot XP go to the player and `PT_XP_POOL` only; the game hands them out (`DistributeExperience`) to the party, scaled. Other quests' stages reached also give journal XP | partly answered in the game: KotOR raises a companion's XP to 80% of `PT_XP_POOL` when the save loads (Carth brought from Taris, 69,389 of a pool of 86,735), so what goes to the pool reaches the companions. KotOR II: in three saves on this PC its companions stand at 80% of the pool too (Atton 26,790 of 33,400); whether the game raises them on load is unchecked. The journal XP's way to `DistributeExperience` (0x005FE0C0, 13 callers) was not traced: REA timed out on swkotor2.exe |
+| S-6 | P2 | both | Journal and plot XP go to the player and `PT_XP_POOL` only; the game hands them out (`DistributeExperience`) to the party, scaled. Other quests' stages reached also give journal XP | **the party half answered in both games: not a defect.** Each game raises a companion's XP to 80% of `PT_XP_POOL` when the save loads, so what goes to the pool reaches the companions. KotOR: Carth brought from Taris, 69,389 of a pool of 86,735. KotOR II (the maintainer, 2026-11-07): "KMSE S-6 fuel", Game3 with the fuel quest finished (player and pool +1,100, companions left at 28,258 and 28,257 in the file), showed Atton and Kreia at 28,993 of a pool of 36,240 and the player at 34,738. Left: the other quests' stages a finish reaches giving journal XP too, not checked in the game |
 | S-7 | P2 | both | ~~"Happens in the game" lists events the game may never run once the journal is past them~~ | **fixed**: the pop-up lists what the editor did ("Also done") apart from the steps "Left to the game", and says the game may skip those |
 | S-8 | P2 | both | Go Back takes back the chapters' items up to the number they give, bought ones of the same kind among them; companions' XP is not rewound | the save cannot tell a bought item from a found one; **the pop-up now says so, and offers "Keep my items and credits"** (off by default; on, nothing is taken back and what departing companions wear goes to the party inventory) (it claimed bought items were not undone, and that XP went back for all). The Endar Spire save's leftover AVAILNPCn of a companion not yet met is left: the game keeps such files itself (BOS_SAVE keeps Bastila's while she is not recruited) |
 | S-9, S-10, S-11 | P3 | both | Skip/back previews show no notes; a panic in the preview worker leaves "Calculating"; script line clamp 0..255 against globals' -128..127 | small; listed |
@@ -278,8 +284,8 @@ What supports it:
 - The full test suite, 126 tests, passes (section J).
 
 What stops a release candidate:
-- No edited save was loaded in either game.
-- Story features carry a P2 defect that changes gameplay state: KotOR II's party XP from quests (S-6) is unchecked in the game. S-4, S-7, E-3 and E-4 are fixed; S-8 is answered by a switch that keeps the items.
+- Few edited saves were loaded in the game: Finish Quest, Skip Ahead, travel and companion saves in KotOR (section E), one Finish Quest save in KotOR II.
+- No P2 story defect is left unanswered: S-4, S-7, E-3 and E-4 are fixed, S-6 is not a defect (both games raise companions on load), and S-8 is answered by a switch that keeps the items. Story moves (Skip Ahead, Go Back) are still unplayed in KotOR II.
 - The window does not fit a common laptop at 150% scaling (U-6).
 
 A beta should load edited saves in both games, above all Finish Quest, Skip Ahead, Go Back, companion import and travel, and report back.

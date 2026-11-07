@@ -45,9 +45,10 @@ fn main() {
     let name = &a[5];
     let edit = a[6].as_str();
     let arg = |i: usize| a.get(7 + i).cloned().unwrap_or_default();
-    let backups = saves_dir.parent().unwrap().join("Save Editor Backup");
-
     let target = next_slot(&saves_dir);
+    // where the editor puts them: in the game folder, never inside KotOR II's cloudsaves,
+    // which Steam syncs (the parent of a cloud save's folder is still inside it)
+    let backups = save::backup_root(&target, Some(Path::new(&a[2])));
     fs::create_dir_all(&target).unwrap();
     for e in fs::read_dir(&source).unwrap().filter_map(|e| e.ok()) {
         if e.path().is_file() {
