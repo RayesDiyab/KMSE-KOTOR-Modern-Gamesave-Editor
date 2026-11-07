@@ -691,7 +691,7 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
    KotOR 2 Steam Cloud save in the game's `saves` folder. Steam Cloud syncs all of KotOR 1's
    `Saves`, backups too (`remotecache.vdf` listed them), so they moved out. Backups made before
    that date stay where they are and are not moved.
-   After a save the editor says "Saved! Backup of the unedited save is in" and the folder.
+   After a save the editor says "Saved. The backup is in" and the folder.
    *Corrected 2026-10-22:* backups were kept in `<data>/KMRP/Save Editor/backups/` until the
    maintainer asked for them beside the saves. **Untested**: whether the game's Load screen
    ignores the `Save Editor Backup` folder (it holds no `savenfo.res` of its own).

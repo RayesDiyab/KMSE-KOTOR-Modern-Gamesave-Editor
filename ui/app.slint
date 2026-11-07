@@ -679,7 +679,7 @@ export component AppWindow inherits Window {
             Text { text: "Classes"; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; }
             Note {
                 font-size: 15px * Theme.ts;
-                text: "A level up adds the class's Health and Force; a level down takes back what that level gave (feats, powers, skill ranks). Experience follows the new level. The game knows two classes at most.";
+                text: "Level up adds the class's Health and Force. Level down removes what that level gave. XP follows the level. Two classes at most.";
             }
             for c in App.class-rows: Rectangle {
                 height: 60px;
@@ -726,7 +726,7 @@ export component AppWindow inherits Window {
         panel-height: 680px;
         title: "Backups of This Save";
         status: App.backup-rows.length == 1 ? "1 BACKUP" : App.backup-rows.length + " BACKUPS";
-        note: "Made when the save was opened, and before a save that had changed since. Each is the whole save folder as it was then: pick one and Revert to This Backup to have it back. The save as it is is backed up first, so a revert can be undone here too.";
+        note: "A backup is made when you open the save. Pick one and press Revert to go back to it. Your current save is backed up first, so you can undo it.";
         VerticalLayout {
             spacing: 18px;
             Frame {
@@ -776,7 +776,7 @@ export component AppWindow inherits Window {
                                     x: show.x - self.preferred-width - 24px;
                                     height: parent.height;
                                     vertical-alignment: center;
-                                    text: "CHECKED BEFORE SAVING";
+                                    text: "CURRENT BACKUP";
                                     font-family: Theme.label-font;
                                     font-size: 9.5px * Theme.ts;
                                     letter-spacing: 1.5px;
@@ -887,7 +887,7 @@ export component AppWindow inherits Window {
                 current: App.skip-train-pick;
                 picked(k) => { App.skip-train-pick = k; App.refresh-story-preview(); }
             }
-            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
+            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes. Your save was backed up when you opened it."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -907,8 +907,8 @@ export component AppWindow inherits Window {
                 font-size: 14px * Theme.ts;
                 color: Theme.muted;
                 text: App.save-as-copy
-                    ? "A copy of the save as it is on disk goes into the next free slot, under this name on the game's Load screen. Changes not saved yet are not in it, and they stay open here."
-                    : "Your changes go into a new save in the next free slot, under this name on the game's Load screen. The save you opened stays exactly as it was.";
+                    ? "Copies the save into a new slot with this name. Unsaved changes are not included."
+                    : "Saves your changes as a new save with this name. The original stays as it is.";
             }
             save-as-field := Field {
                 // Pressing Cancel takes the focus; that must not count as Enter.
@@ -1091,7 +1091,7 @@ export component AppWindow inherits Window {
             }
             HorizontalLayout {
                 spacing: 14px;
-                Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
+                Note { horizontal-stretch: 1; height: 50px; vertical-alignment: center; font-size: 12.5px * Theme.ts; text: "Nothing is written until Save Changes. Your save was backed up when you opened it."; }
                 Button { width: 150px; text: "Cancel"; clicked => { App.close-overlay(); } }
                 Button {
                     kind: 0;
@@ -1122,7 +1122,7 @@ export component AppWindow inherits Window {
                     }
                 }
             }
-            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes, and a backup was made when the save was opened."; }
+            Note { font-size: 13px * Theme.ts; text: "Nothing is written until Save Changes. Your save was backed up when you opened it."; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -1141,7 +1141,7 @@ export component AppWindow inherits Window {
         panel-height: 860px;
         property <int> chosen: App.finish-pick;
         title: "Finish " + App.quest-title;
-        note: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup was made when the save was opened.";
+        note: "Plays the quest to the ending you pick, as the game would, with its XP. Nothing is written until Save Changes. Your save was backed up when you opened it.";
         VerticalLayout {
             spacing: 18px;
             HorizontalLayout {
@@ -1314,7 +1314,7 @@ export component AppWindow inherits Window {
                 // Folders change only from the list of saves: a new folder can switch the game
                 // under an open save.
                 text: App.page == 0
-                    ? "Saves in Steam, Steam Cloud, GOG and disc installs are found by themselves. Add saves from anywhere else: a phone, a Switch, another PC."
+                    ? "Steam, GOG and disc saves are found automatically. Add saves from anywhere else here, like a phone, a Switch or another PC."
                     : "Folders can be changed from the list of saves (the arrow, top left).";
             }
             if App.added-folders.length == 0: Text {
@@ -1346,7 +1346,7 @@ export component AppWindow inherits Window {
             if App.page == 1: Label { text: "BACKUPS"; }
             if App.page == 1: Note {
                 font-size: 14px * Theme.ts;
-                text: "Before every save the whole save folder is copied here: " + App.backup-path;
+                text: "Your save is backed up here when you open it: " + App.backup-path;
             }
             if App.page == 1: HorizontalLayout {
                 alignment: start;

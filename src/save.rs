@@ -144,7 +144,7 @@ pub struct Save {
 
 /// Every file of the save folder: name, size and time, in name order.
 /// Why a save is refused when a write into it was cut off (interrupted_write).
-pub const INTERRUPTED: &str = "The editor was stopped while it wrote this save, so its files may be part old and part new. Nothing was changed by opening it. Copy the files of its latest backup (Save Editor Backup, in the game's folder) over this save folder, then open it again. Files left from the write:";
+pub const INTERRUPTED: &str = "The editor stopped while writing this save, so it may be half written. To fix it, copy the files of its newest backup (Save Editor Backup, in the game's folder) over this save folder. Files left over:";
 
 /// The files a write leaves only while it runs: `*.kmrp-new`, a new file not yet in place, and
 /// `*.kmrp-old`, an old one waiting to be removed. A write cut off part way (the program ended,
@@ -189,7 +189,7 @@ fn files_on_disk(folder: &Path) -> Vec<(String, u64, Option<std::time::SystemTim
 pub const HALF_WRITTEN: &str = "The save may be half written";
 
 /// Why a write was refused: the files are not the ones the changes were made on.
-pub const CHANGED_ON_DISK: &str = "This save changed on disk after it was opened, so writing now would mix two points in the game. Press Revert to read it again, then make the changes again.";
+pub const CHANGED_ON_DISK: &str = "The save changed on disk after you opened it. Press Revert to reload it, then make your changes again.";
 
 impl Save {
     pub fn open(folder: &Path) -> Result<Save> {
@@ -442,7 +442,7 @@ impl Save {
     /// the game reads the player from that area.
     pub fn module_problem(&self) -> Option<&'static str> {
         let held = self.archive.find(&self.module_name, RES_TYPE_SAV).is_some();
-        (held && self.ifo.is_none()).then_some("The area this save is in could not be read, so its player could not be changed where the game reads it. It can be looked at but not changed.")
+        (held && self.ifo.is_none()).then_some("The save's current area couldn't be read. You can look at this save, but not change it.")
     }
 
     pub fn player(&self) -> Option<&Struct> {
@@ -1339,7 +1339,7 @@ pub fn player_outside_archive(folder: &Path) -> bool {
 }
 
 /// Why an external player-state file makes a save read only.
-pub const PLAYER_OUTSIDE_ARCHIVE: &str = "This save has player state in pifo.ifo, which the editor does not write. It can be looked at but not changed. Save again in a normal slot in the game, then open that save.";
+pub const PLAYER_OUTSIDE_ARCHIVE: &str = "This save keeps its player in pifo.ifo, which the editor can't write. You can look at it, but not change it. Save to a normal slot in the game, then open that.";
 
 /// The folder for a new save beside `folder`: the next number after the highest in its saves
 /// folder, in the game's own pattern ("000135 - Game134"). The game reads only the number, but
@@ -1612,7 +1612,7 @@ pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Resu
         }
     }
     if !same_files(folder, backup) || Save::open(folder).is_err() {
-        return Err(format!("{}. The restored save does not read back as the backup. Copy the files of {} over the save folder.", HALF_WRITTEN, before.display()));
+        return Err(format!("{}. The reverted save doesn't match the backup. Copy the files of {} over the save folder to put it back.", HALF_WRITTEN, before.display()));
     }
     Ok(Restored { before })
 }

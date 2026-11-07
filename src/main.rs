@@ -599,12 +599,12 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     if !installed && st.installs.is_empty() {
         app.set_empty_title(s("No KotOR game found"));
         app.set_empty_note(s(
-            "The editor looks in every Steam library, GOG and disc install. If the game is somewhere else, use Add a Save Folder below and pick the game's folder or a saves folder.",
+            "Steam, GOG and disc installs are searched. If your game is somewhere else, use Add a Save Folder below.",
         ));
     } else {
         app.set_empty_title(s(format!("No {} saves found", st.game.title())));
         app.set_empty_note(s(
-            "Saves made in the game appear here. Saves kept somewhere else (copied from a phone, a Switch or another PC) can be added with Add a Save Folder below.",
+            "Your saves appear here. To add saves from elsewhere, like a phone or another PC, use Add a Save Folder below.",
         ));
     }
     if st.selected >= n {
@@ -667,7 +667,7 @@ fn is_xbox_save(path: &Path) -> bool {
 /// Why the save in `path` can be looked at but not changed, if it cannot.
 fn read_only_reason(path: &Path) -> Option<&'static str> {
     if is_xbox_save(path) {
-        Some("It is an original Xbox save; the Xbox would call it damaged.")
+        Some("It's an original Xbox save. The Xbox would reject it if changed.")
     } else if save::player_outside_archive(path) {
         Some(save::PLAYER_OUTSIDE_ARCHIVE)
     } else {
@@ -731,11 +731,11 @@ fn fill_preview(ui: &AppWindow, st: &mut State) {
     let outside = save::player_outside_archive(&folder.path);
     app.set_preview_read_only(xbox || outside);
     app.set_preview_warning(s(if xbox {
-        "An original Xbox save: it can be looked at but not changed, as the Xbox checks a signature on every save."
+        "An original Xbox save. You can look at it, but not change it: the Xbox would reject it."
     } else if outside {
-        "Its player is kept in pifo.ifo, outside the save's archive, which the editor does not write: it can be looked at but not changed. Save again in a normal slot in the game."
+        "This save keeps its player in pifo.ifo, which the editor can't write. You can look at it, but not change it. Save to a normal slot in the game first."
     } else if folder.kind == SaveKind::Cloud {
-        "A Steam Cloud save: close the game and let Steam finish syncing before changing it. Steam sends the changed save to the cloud the next time the game starts."
+        "A Steam Cloud save. Close the game and let Steam finish syncing first. Steam uploads your changes the next time the game starts."
     } else {
         ""
     }));
@@ -765,7 +765,7 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.selected_box = None;
             st.status = match backed_up {
                 Ok(_) => (String::new(), false),
-                Err(e) => (format!("No backup was made on opening ({}). Save Changes makes one before it writes.", e), true),
+                Err(e) => (format!("The save couldn't be backed up on opening ({}). Save Changes will try again before writing.", e), true),
             };
             st.global_filter = (String::new(), false);
             st.map = None;
@@ -935,12 +935,12 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     let next = cat.xp_for(level + 1);
     let note = match next {
         Some(need) if level < max && xp >= need => format!(
-            "Level {}. This is enough XP for level {}: the game offers the level-up itself, with its own choices of skills, feats and powers.",
+            "Level {}. This is enough XP for level {}: the game will offer the level-up, with its own choices.",
             level,
             cat.level_for(xp).min(max)
         ),
         Some(need) if level < max => format!(
-            "Level {}. Level {} needs {} XP. Give more XP and the game offers the level-up itself, with its own choices of skills, feats and powers.",
+            "Level {}. Level {} needs {} XP. Add XP and the game will offer the level-up, with its own choices.",
             level,
             level + 1,
             thousands(need)
@@ -1036,7 +1036,7 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
     app.set_records_warning(s(if creature::level_records_match(&c) {
         ""
     } else {
-        "Another editor left the level records out of step with the classes: a class change may not undo exactly."
+        "Another editor left the level records out of step with the classes, so a class change may not undo exactly."
     }));
 
     let portrait = st.portrait_of(&c);
@@ -1434,7 +1434,7 @@ fn ask_skip(u: &AppWindow, st: &mut State, i: i32) {
         let text = q.as_ref().and_then(|q| q.stage(stage)).map(|x| x.text.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default();
         title = format!("Skip to: {}", name);
         summary = format!(
-            "{}\n\nThis quest is played up to here, with the main-story steps it needs; {}'s other quests stay open.",
+            "{}\n\nPlays this quest up to here, with the main story it needs. {}'s other quests stay open.",
             if text.is_empty() { format!("Stage {}", stage) } else { text },
             c.planet
         );
@@ -1496,10 +1496,10 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let plan = kse_core::questdb::return_to(&chapter_states(&chapters), i);
     let later: Vec<String> = plan.undo.iter().filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
     let summary = format!(
-        "{}These chapters are taken back out of the save, newest first: {}.\n\nTheir story values return to what the chapters before left, their quests leave the journal, the companions they brought leave and the ones they took away return, their areas are built fresh by the game, and the XP returns to the end of the chapter before, the levels gained since taken off newest first.{}\n\nWhat the save cannot tell: things you did outside the mapped quests, what you bought, sold or used since.",
+        "{}Undoes these chapters, newest first: {}.\n\nTheir quests, companions, story values and XP go back to how they were before. Their areas reset.{}\n\nNot undone: things outside the main quests, and items bought, sold or used since.",
         stage_text,
         later.join(", "),
-        if stage.is_some() { " Then the chapter plays up to the picked stage again, as Skip to Here does." } else { "" }
+        if stage.is_some() { " Then the chapter plays up to the picked stage again." } else { "" }
     );
     st.back_to = Some((i, stage));
     let app = u.global::<App>();
@@ -2155,11 +2155,11 @@ fn fill_skip(ui: &AppWindow, st: &mut State) {
         };
         title = c.planet.clone();
         note = if c.played {
-            "Choose where to go back to, from the chapter's beginning to its end. What came after it is taken back out of the save.".into()
+            "Pick where to go back to. Everything after it is undone.".into()
         } else if current {
-            "Choose where to go: back to a point you have passed, or ahead to one you have not. Skipping ahead plays the story up to it for you: quests, XP, loot and companions.".into()
+            "Pick where to go: back to a point you passed, or ahead. Skipping ahead plays the story for you: quests, XP, loot and companions.".into()
         } else {
-            "Choose where to skip to, from the chapter's beginning to its end. Everything before it on your route is played for you: quests, XP, loot and companions.".into()
+            "Pick where to skip to. Everything before it is played for you: quests, XP, loot and companions.".into()
         };
     }
     let app = ui.global::<App>();
@@ -3100,9 +3100,9 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
     app.set_map_note(s(if here {
         "Where the save leaves you. Click a marker to see it, or the floor to pick a spot."
     } else if been {
-        "An area this save has been to, as it was left. Travel Here takes you there."
+        "Visited before, shown as you left it. Travel Here takes you there."
     } else {
-        "Not been here yet: shown as the game first builds it. Travel Here takes you there."
+        "Not visited yet, shown as the game first builds it. Travel Here takes you there."
     }));
 
     // Areas: this one, where the viewed area's ways out lead, then the rest visited.
@@ -3259,7 +3259,7 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
             app.set_pick_note(s(if here {
                 "Checked: walkable floor with room around it."
             } else {
-                "Checked: walkable floor with room around it. Moving straight there takes the player alone; Travel Here makes the trip the game's way, with the party."
+                "Open, walkable floor. Going straight there moves only the player; Travel Here brings the party."
             }));
             // Straight to a spot needs the area's saved copy; elsewhere Travel Here goes.
             app.set_pick_can_move(here || been);
@@ -3288,7 +3288,7 @@ fn fill_map(ui: &AppWindow, st: &mut State) {
             if o.spots.is_empty() {
                 note.push_str(". No free floor next to it to stand on.");
             } else if !here && been {
-                note.push_str(". Moving straight there takes the player alone; Travel Here makes the trip the game's way, with the party.");
+                note.push_str(". Going straight there moves only the player; Travel Here brings the party.");
             }
             app.set_pick_note(s(note));
             let door = matches!(o.kind, Door | Exit) && o.spots.len() == 2;
@@ -3738,7 +3738,7 @@ fn ask_pool(ui: &AppWindow, st: &mut State, force: bool, now: i64, most: i64) ->
     app.set_pool_level_now(level as i32);
     if force && hi <= 0 {
         app.set_pool_title(s("No Force"));
-        app.set_pool_line(s("This character can't have Force: the game gives Force only with a Jedi class."));
+        app.set_pool_line(s("This character can't have Force: only a Jedi class gives Force."));
         app.set_pool_line2(s("Add or change a class under Classes first."));
         app.set_pool_new_level(0);
         app.set_pool_chart(false);
@@ -3826,7 +3826,7 @@ fn needs_game(ui: &AppWindow, st: &State) -> bool {
         ui,
         &format!("This needs {} on this PC", title),
         &format!(
-            "It uses the game's own rules and files, which are not here. Pick the game's folder in Settings, or open this save on a PC with {} installed.",
+            "This needs the game's files, which weren't found. Pick the game's folder in Settings, or use a PC with {} installed.",
             title
         ),
     );
@@ -3901,7 +3901,7 @@ fn open_items_picker(ui: &AppWindow, st: &mut State, target: Target, title: &str
     app.set_picker_placeholder(s("Type part of a name: medpac, lightsaber, g_w_ ..."));
     app.set_overlay_title(s(title));
     app.set_overlay_note(s(
-        "Every item the game has, mods included. Type to narrow the list; click an item to add one.",
+        "Every item in the game, mods included. Type to search; click an item to add it.",
     ));
     app.set_overlay(1);
     st.picker_tab = 0;
@@ -3941,9 +3941,9 @@ fn search_items(ui: &AppWindow, st: &mut State) {
     // the list stops at 200 rows: say so, or most items look missing
     let more = rows.len() >= 200;
     ui.global::<App>().set_overlay_note(s(if more {
-        "Every item the game has, mods included. The first 200 that match are shown: type part of a name to narrow the list; click an item to add one."
+        "Every item in the game, mods included. Showing the first 200: type to search; click an item to add it."
     } else {
-        "Every item the game has, mods included. Type to narrow the list; click an item to add one."
+        "Every item in the game, mods included. Type to search; click an item to add it."
     }));
     ui.global::<App>().set_picker(model(rows));
 }
@@ -4038,7 +4038,7 @@ fn report_panics() {
         let _ = std::fs::create_dir_all(games::data_dir());
         let _ = std::fs::write(&path, format!("{}\n{}\n", save::timestamp(), info));
         let text = format!(
-            "The editor hit an error it did not expect and has to close. Changes not saved are lost; saves on disk keep what was last saved.\n\n{}\n\nThe details are in {}",
+            "Something went wrong and the editor has to close. Unsaved changes are lost; your saves on disk are safe.\n\n{}\n\nDetails: {}",
             info,
             path.display()
         );
@@ -4378,7 +4378,7 @@ fn main() {
         app.set_looks(model(rows));
         app.set_overlay_title(s("Change Look"));
         app.set_overlay_note(s(
-            "Every portrait the game has, the ones character creation offers first. Picking one of those also brings its body in the same build as now; any other portrait changes the picture only.",
+            "Every portrait in the game, character creation's first. Those also change the body to match; others change only the picture.",
         ));
         app.set_overlay(2);
     });
@@ -4420,7 +4420,7 @@ fn main() {
         app.set_picker(named(rows));
         app.set_overlay_title(s("Add a Class"));
         app.set_overlay_note(s(
-            "A second class at level 1, as a level-up into it would leave the character: its Health and Force are added and the XP is raised to the new level if needed. The game knows two classes at most.",
+            "Adds a second class at level 1, as a level-up would: its Health and Force are added, and XP is raised if needed. Two classes at most.",
         ));
         app.set_overlay(5);
     });
@@ -4434,7 +4434,7 @@ fn main() {
             return;
         };
         if st.who() != Who::Player {
-            message(&u, "Only the player can be moved here", "This moves the player. A companion's place is where the game puts the party when the save loads.");
+            message(&u, "Only the player can be moved here", "This moves the player. Companions appear where the game puts the party when the save loads.");
             return;
         }
         edit_who(&u, st, "position", |c| area::set_position(c, [x, y, z]));
@@ -4571,7 +4571,7 @@ fn main() {
             st,
             Target::ImportNpc(i.max(0) as usize),
             &format!("Bring {} from Another Save", name),
-            &format!("{} comes over as they are in the save you pick: level, items worn, feats and powers. They are listed as recruited here.", name),
+            &format!("{} is copied from the save you pick: level, gear, feats and powers. They become recruited here.", name),
         );
     });
 
@@ -4626,7 +4626,7 @@ fn main() {
             st,
             Target::Compare,
             "Compare with Another Save",
-            "Pick a save from before or after a quest. Every global variable that differs is marked, with the other save's value beside it.",
+            "Pick another save, say from before or after a quest. Every value that differs is marked, with the other save's value beside it.",
         );
     });
     on!(ui, state, on_use_other, |u, st, index: i32| {
@@ -4918,7 +4918,7 @@ fn main() {
         let Some(cat) = st.catalog() else { return };
         let current = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| c.int("Appearance_Type"));
         let rows = catalogue_rows(&cat.appearances, current);
-        open_list(&u, st, Target::Appearance, "Body", "Every body in appearance.2da, mods included. A party member's body on the player can take their head from them (KSE's readme describes it); choose with care.", rows);
+        open_list(&u, st, Target::Appearance, "Body", "Every body in the game, mods included. A party member's body on the player may also bring their head.", rows);
     });
     on!(ui, state, on_open_voice, |u, st| {
         let Some(cat) = st.catalog() else { return };
@@ -4930,7 +4930,7 @@ fn main() {
         let Some(cat) = st.catalog() else { return };
         let current = st.save.as_ref().and_then(|s| s.creature(st.who())).and_then(|c| c.int("Gender"));
         let rows = catalogue_rows(&cat.genders, current);
-        open_list(&u, st, Target::Gender, "Gender", "Conversations and romances read this. Anything but male or female can stop scenes that expect one of them.", rows);
+        open_list(&u, st, Target::Gender, "Gender", "Conversations and romances use this. Anything other than male or female can break scenes.", rows);
     });
     on!(ui, state, on_open_classes, |u, st| {
         fill_character(&u, st);
@@ -4966,7 +4966,7 @@ fn main() {
             .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty())
             .map(|k| row(k.id, &k.name, format!("{} Health{} a level", k.hit_die, if k.force_die > 0 { format!(" and {} Force", k.force_die) } else { String::new() })))
             .collect();
-        open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "The class takes the old one's place at the same level; Health and Force follow the new class's dice. Leaving a Force class takes its powers away.", rows);
+        open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "Replaces the class at the same level. Health and Force follow the new class. Leaving a Force class removes its powers.", rows);
     });
     on!(ui, state, on_remove_class, |u, st, index: i32| {
         if needs_game(&u, st) {
@@ -5034,7 +5034,7 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_copy_inventory, |u, st| {
-        open_save_picker(&u, st, Target::CopyInventory, "Copy Inventory from Another Save", "The party inventory of the save you pick replaces this one's. Equipped items stay as they are.");
+        open_save_picker(&u, st, Target::CopyInventory, "Copy Inventory from Another Save", "Replaces this inventory with the one from the save you pick. Equipped items stay.");
     });
     on!(ui, state, on_set_in_party, |u, st, npc: i32, on: bool| {
         let Some(save) = st.save.as_mut() else { return };
@@ -5102,7 +5102,7 @@ fn main() {
                 let app = u.global::<App>();
                 fill_map(&u, st);
                 app.set_pick_title(s("Not a place to stand"));
-                app.set_pick_note(s("That is not walkable floor (a wall, a drop, or outside the area). Click nearer a room or corridor."));
+                app.set_pick_note(s("That's not walkable floor. Click inside a room or corridor."));
                 return;
             }
         }
@@ -5154,7 +5154,7 @@ fn main() {
         let app = u.global::<App>();
         app.set_overlay_title(s("Spawn a Creature Here"));
         app.set_overlay_note(s(
-            "A copy of someone in this area, or any creature the game has. A new one runs its own spawn script when the save loads, as if the area had just made it. A copy keeps its tag, so a copy of a story character can confuse that story's scripts; creatures made for another planet may lack their conversation here.",
+            "Copy someone in this area, or pick any creature in the game. New ones act as if the area just made them. A copy of a story character can confuse that story, and creatures from another planet may have no conversation here.",
         ));
         app.set_picker_tab(0);
         app.set_picker_tabs(model(SPAWN_TABS.iter().map(|t| s(t)).collect()));
@@ -5265,7 +5265,7 @@ fn main() {
             body.push_str(&format!("{} · {}\n\n", sm.area, played(sm.seconds)));
         }
         body.push_str(&format!(
-            "{} closes and this save opens in its place. Nothing is written to either save.",
+            "{} closes and this save opens. Neither save is changed.",
             if here.is_empty() { "The save open now".to_string() } else { format!("\u{201c}{}\u{201d}", here) }
         ));
         st.open_ask = Some(i as usize);
@@ -5381,7 +5381,7 @@ fn main() {
                 }
             });
             if !opened {
-                message(&u, "No doors were opened", "This save has not been to that area, so the game builds it fresh when the player arrives.");
+                message(&u, "No doors were opened", "This save hasn't been to that area yet. The game builds it fresh when you arrive.");
             }
         }
         st.map = None;
@@ -5400,7 +5400,7 @@ fn main() {
             message(
                 &u,
                 &format!("{} is running", game.title()),
-                "Close the game first. A save changed while the game runs can be overwritten by it, or loaded half old and half new.",
+                "Close the game first. While it runs, it could overwrite the save or load it half changed.",
             );
             return;
         }
@@ -5416,7 +5416,7 @@ fn main() {
                 }
                 st.shots.lock().unwrap().remove(&folder);
                 st.pending_spawns.clear();
-                st.status = (format!("Saved! Backup of the unedited save is in {}", backup.display()), false);
+                st.status = (format!("Saved. The backup is in {}", backup.display()), false);
             }
             Err(e) if e.starts_with(save::HALF_WRITTEN) => st.status = (e, true),
             Err(e) => st.status = (format!("Nothing was changed: {}", e), true),
@@ -5475,17 +5475,17 @@ fn main() {
             return;
         }
         if game_running(game) {
-            message(&u, &format!("{} is running", game.title()), "Close the game first. A save changed while the game runs can be overwritten by it, or loaded half old and half new.");
+            message(&u, &format!("{} is running", game.title()), "Close the game first. While it runs, it could overwrite the save or load it half changed.");
             return;
         }
         if save::same_files(&folder, &backup) {
-            message(&u, "Nothing to revert", "The save on disk is already exactly this backup, file for file.");
+            message(&u, "Nothing to revert", "The save is already the same as this backup.");
             return;
         }
         let made = when(std::fs::metadata(&backup).ok().and_then(|m| m.created().or_else(|_| m.modified()).ok()));
-        let mut body = "The save becomes exactly what this backup holds, file for file. The save as it is now is backed up first and listed in History, so this can be undone.".to_string();
+        let mut body = "The save goes back to this backup. Your current save is backed up first, so you can undo this from History.".to_string();
         if unsaved > 0 {
-            body.push_str(&format!(" The {} not saved yet {} lost.", if unsaved == 1 { "change" } else { "changes" }, if unsaved == 1 { "is" } else { "are" }));
+            body.push_str(" Unsaved changes are lost.");
         }
         st.revert_pick = Some(backup);
         let app = u.global::<App>();
@@ -5519,7 +5519,7 @@ fn main() {
                 forget_pending_spawns(st);
                 forget_timeline_saves(st);
                 st.shots.lock().unwrap().remove(&folder);
-                st.status = (format!("Reverted to the backup of {}. The save as it was is backed up in {}", made, r.before.display()), false);
+                st.status = (format!("Reverted to {}. Your previous save is backed up in {}", made, r.before.display()), false);
                 fill_editor(&u, st);
                 fill_skip(&u, st);
             }
@@ -5547,7 +5547,7 @@ fn main() {
         let Some((game, folder)) = copy_source(&u, st) else { return };
         // A copy changes savenfo.res, which the signature in the .xbx files covers.
         if is_xbox_save(&folder) {
-            message(&u, "Nothing was copied", "It is an original Xbox save; the Xbox would call a copy with a new name damaged.");
+            message(&u, "Nothing was copied", "It's an original Xbox save. The Xbox would reject a renamed copy.");
             return;
         }
         if game_running(game) {
@@ -5736,7 +5736,7 @@ fn main() {
                 let app = u.global::<App>();
                 app.set_pick_title(s(format!("{} spawned", sp.name)));
                 app.set_pick_note(s(
-                    "It stands on the map now. Save Changes to keep it; Advanced, Creatures lists it and can remove it again.",
+                    "It's on the map now. Save Changes to keep it. You can remove it in Advanced, Creatures.",
                 ));
             }
             Target::Class => {
@@ -5886,7 +5886,7 @@ fn main() {
                 return slint::CloseRequestResponse::HideWindow;
             }
             *warned.borrow_mut() = Some(changes);
-            message(&u, "There are changes not saved", "Save them or press Revert first. Close the window again to leave without saving them.");
+            message(&u, "There are changes not saved", "Save them or press Revert. Close the window again to quit without saving.");
             slint::CloseRequestResponse::KeepWindowShown
         });
     }

@@ -293,7 +293,7 @@ component CharacterTab inherits Rectangle {
         Note {
             x: 0; y: 32px + 6 * 60px + 10px;
             width: parent.width;
-            text: "Base scores, before items and powers. The game works out Defence and saving throws from them.";
+            text: "Base scores, without items or powers. Defence and saving throws come from these.";
         }
     }
     // Health, Force, look
@@ -424,7 +424,7 @@ component AbilitiesTab inherits Rectangle {
             height: self.preferred-height;
             for s[i] in App.skills: StatLine { stat: s; label-size: 15px; height: 50px; set(v) => { App.set-skill(i, v); } }
         }
-        Note { x: 0; y: 32px + App.skills.length * 50px + 10px; width: parent.width; visible: self.y + self.preferred-height <= root.height; text: "Ranks the character has bought. Items and attributes add on top in the game."; }
+        Note { x: 0; y: 32px + App.skills.length * 50px + 10px; width: parent.width; visible: self.y + self.preferred-height <= root.height; text: "Ranks bought. Items and attributes add more in the game."; }
     }
     AbilityList {
         x: colw * 0.92 + 34px;
@@ -818,7 +818,7 @@ component InventoryTab inherits Rectangle {
         if App.equip-slot != 0 && App.slot-items.length == 0: Note {
             x: 0; y: 90px;
             width: parent.width;
-            text: "Nothing in the party inventory fits here. Add Item finds any item the game has.";
+            text: "Nothing in the inventory fits here. Use Add Item to find one.";
         }
         // Add Item, and Copy from Another Save beside it, under the list.
         HorizontalLayout {
@@ -851,7 +851,7 @@ component PartyTab inherits Rectangle {
         height: self.preferred-height;
         spacing: 4px;
         Label { text: "PARTY MEMBERS"; }
-        Note { text: "With you: in the active party (two at most).  Recruited: in the party screen.  Can be picked: not held back by the story."; font-size: 12.5px * Theme.ts; }
+        Note { text: "With you: in the party now (two at most).  Recruited: on the party screen.  Can be picked: the story allows it."; font-size: 12.5px * Theme.ts; }
     }
     Scroller {
         x: 0; y: party-head.height + 8px;
@@ -970,7 +970,7 @@ component GlobalsSection inherits Rectangle {
         VerticalLayout { alignment: center; Switch { on: App.cheat-used; changed: App.cheat-changed; toggled(v) => { App.set-cheat(v); } } }
         Text { text: "Marked as cheated"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
     }
-    Note { x: 0; y: 46px; width: parent.width; text: "The save's name on the game's Load screen and its time played (Enter keeps a change); the game marks a save cheated when the console's cheats are used, and turning it off clears the mark."; }
+    Note { x: 0; y: 46px; width: parent.width; text: "The save's name on the Load screen and its time played (press Enter to keep a change). Cheated is set when console cheats were used; turn it off to clear it."; }
     Rectangle { x: 0; y: 84px; height: 1px; background: Theme.row-line; }
     HorizontalLayout {
         x: 0; y: root.top;
@@ -1180,7 +1180,7 @@ component MoreSection inherits Rectangle {
         x: split + 44px;
         width: parent.width - self.x;
         Label { x: 0; y: 0; text: "PAZAAK CARDS"; }
-        paz-note := Note { x: 0; y: 28px; width: parent.width; text: "Your side deck cards, as the game draws them. Set how many of each you carry."; }
+        paz-note := Note { x: 0; y: 28px; width: parent.width; text: "Your side deck cards. Set how many of each you carry."; }
         // under the note however many lines it takes (two at Large text ran under the cards)
         Scroller {
             x: 0;
@@ -1235,7 +1235,7 @@ component CreaturesSection inherits Rectangle {
         x: 0; y: 0;
         height: 24px;
         Label { text: "CREATURES IN THE AREA · " + App.creatures.length; }
-        Note { text: "Taking one out of the area removes it from the save; a creature a quest needs can leave the quest stuck."; horizontal-alignment: right; vertical-alignment: center; }
+        Note { text: "Removing a creature deletes it from the save. Removing one a quest needs can break that quest."; horizontal-alignment: right; vertical-alignment: center; }
     }
     Scroller {
         x: 0; y: 36px;
@@ -1474,11 +1474,11 @@ component JournalSection inherits Rectangle {
                     Note {
                         horizontal-stretch: 1;
                         vertical-alignment: center;
-                        text: App.stage-action == 2 ? "Plays the quest to this ending as the game would; you see what you receive first." : "The quest's experience for reaching this point is given once, as the game gives it.";
+                        text: App.stage-action == 2 ? "Plays the quest to this ending. You see what you get first." : "The XP for reaching this point is given once, as in the game.";
                     }
                 }
             }
-            if App.stage-pick < 0: Note { text: "Open the quest on the left and pick one of its stages to see it in full and start or finish the quest there."; }
+            if App.stage-pick < 0: Note { text: "Open a quest on the left and pick a stage to see it, or to start or finish the quest there."; }
             Rectangle { vertical-stretch: 1; }
             // what to do with the quest
             Rectangle { height: 1px; background: Theme.row-line; }
@@ -2084,7 +2084,7 @@ component GalaxySection inherits Rectangle {
                     font-family: Theme.body-font;
                     font-size: 11.5px * Theme.ts;
                     color: root.ink-soft;
-                    text: "Bands of light join the planets in the order you played them. Click a planet to see its quests, and to skip ahead or go back."
+                    text: "Lines join the planets in the order you played them. Click a planet to see its quests, or to skip ahead or go back."
                         + (App.tl-saves.length > 0 ? " The " + (Theme.k2 ? "blue" : "green") + " tags are your other saves." : "")
                         + " Scroll to zoom, drag to move.";
                 }
@@ -2626,14 +2626,14 @@ component MapTab inherits Rectangle {
             if App.pick-can-move: Button { kind: 0; compact: true; text: App.pick-move-label; font-size: 15px * Theme.ts; clicked => { App.move-here(0); } }
             if App.pick-has-second: Button { kind: 1; compact: true; text: App.pick-second-label; font-size: 15px * Theme.ts; clicked => { App.move-here(1); } }
             if App.map-here: Button { kind: 1; compact: true; enabled: App.pick-can-spawn; text: "Spawn a Creature"; font-size: 15px * Theme.ts; clicked => { App.spawn-here(); } }
-            if App.map-here && !App.pick-can-spawn: Note { font-size: 12.5px * Theme.ts; text: "Click a spot on the floor of the map to choose where a creature appears."; }
+            if App.map-here && !App.pick-can-spawn: Note { font-size: 12.5px * Theme.ts; text: "Click the floor on the map to choose where the creature appears."; }
             if App.pick-can-remove: Button { kind: 4; compact: true; text: "Remove " + App.pick-title; font-size: 15px * Theme.ts; clicked => { App.remove-pick(); } }
-            if App.pick-can-remove: Note { font-size: 12.5px * Theme.ts; text: "Added with this editor, so it can be taken out again. The area's own creatures stay."; }
+            if App.pick-can-remove: Note { font-size: 12.5px * Theme.ts; text: "Added with this editor, so you can remove it. The area's own creatures stay."; }
             if App.pick-is-exit: Button { kind: 3; text: "Show Where It Leads"; clicked => { App.follow-exit(); } }
             // Another area: go there the way the game does, arriving at one of its ways in.
             if !App.map-here && App.travel-ways.length > 0: Rectangle { height: 6px; }
             if !App.map-here && App.travel-ways.length > 0: Label { text: "TRAVEL HERE"; }
-            if !App.map-here && App.travel-ways.length > 0: Note { font-size: 12.5px * Theme.ts; text: "The game takes you there right after the save loads, as if you walked in."; }
+            if !App.map-here && App.travel-ways.length > 0: Note { font-size: 12.5px * Theme.ts; text: "The game takes you there when the save loads, as if you walked in."; }
             for w[i] in (App.map-here ? [] : App.travel-ways): Button { kind: 3; text: w.name; clicked => { App.travel(w.id); } }
             if App.pick-can-unlock: Button { kind: 3; text: "Unlock"; clicked => { App.unlock-pick(); } }
         }
@@ -2688,7 +2688,7 @@ component MapTab inherits Rectangle {
             vertical-stretch: 1;
             spacing: 10px;
             alignment: start;
-            Note { font-size: 12.5px * Theme.ts; text: "Move to any marked place, or click the floor. Every spot is checked to be walkable floor with room around it, out of the walls."; }
+            Note { font-size: 12.5px * Theme.ts; text: "Move to a marked place, or click the floor. Only open, walkable floor can be picked."; }
             Button { kind: 3; text: "Open Every Door Here"; clicked => { App.open-all-doors(); } }
             Note { font-size: 12.5px * Theme.ts; text: "A quest that will not move on: Quests, pick it and choose its ending."; }
         }

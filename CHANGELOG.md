@@ -6,6 +6,11 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
+  language"). About 75 descriptions, notes and messages are rewritten to say the same in
+  fewer, plainer words: the History and pop-up notes, the save and folder messages, the
+  pickers' hints, the timeline's travel text, the crash and error messages. Settings now
+  says the save is backed up when it is opened.
 - **Revert to a backup from History** (2026-11-07, the maintainer: "a safe feature ...
   impossible to break"). Pick a backup in History and press Revert to This Backup, then
   confirm. The save as it is is backed up first, so a revert can itself be undone. The
@@ -19,8 +24,8 @@ CHANGELOG.
   unchanged save keeps its newest backup instead of piling up copies. Save Changes first
   checks that backup against the save on disk, byte for byte and without writing, and makes
   a new one where it is missing, damaged or out of date, so every write still has a checked
-  copy of exactly what it replaces. The pop-ups say "a backup was made when the save was
-  opened". A History button between Copy and Settings lists the save's backups oldest first.
+  copy of exactly what it replaces. The pop-ups say "your save was backed up when you
+  opened it". A History button between Copy and Settings lists the save's backups oldest first.
 - **The story pop-ups grow with the window, and a skip's description is short** (2026-11-07,
   the maintainer). Finish Quest, travelling on the timeline and Go Back are drawn for a window
   of 1600 by 900 and now grow in step with a larger one instead of sitting small in its middle.
