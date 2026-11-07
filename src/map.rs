@@ -260,6 +260,9 @@ pub struct Area {
     pub picture: Option<crate::formats::tga::Image>,
     pub floor: Floor,
     pub objects: Vec<Object>,
+    /// The outlines of the area's ways out (transition triggers), in the area's own
+    /// coordinates: a spot picked on the map keeps out of them (Area::clear_of_exits).
+    pub exit_shapes: Vec<Vec<(f32, f32)>>,
 }
 
 /// The area files of a module as the game finds them: a .mod (from a mod) first, then the
@@ -408,6 +411,7 @@ impl Area {
                 });
             }
         }
+        let mut exit_shapes: Vec<Vec<(f32, f32)>> = Vec::new();
         if let Some(l) = git.list("TriggerList") {
             for (i, t) in l.iter().enumerate() {
                 let leads = t.string("LinkedToModule").unwrap_or_default();
@@ -430,6 +434,9 @@ impl Area {
                 // carried off as the save loads. The nearest floor outside its shape, with a
                 // margin (2026-11-06 audit; before, the floor at its middle).
                 let shape: Vec<(f32, f32)> = pts.iter().map(|p| (pos[0] + p.0, pos[1] + p.1)).collect();
+                if shape.len() >= 3 {
+                    exit_shapes.push(shape.clone());
+                }
                 let clear = |x: f32, y: f32| {
                     shape.len() < 3 || ![(0.0, 0.0), (0.75, 0.0), (-0.75, 0.0), (0.0, 0.75), (0.0, -0.75)].iter().any(|(dx, dy)| inside(&shape, x + dx, y + dy))
                 };
@@ -520,7 +527,14 @@ impl Area {
             }
         }
         let picture = picture(data, &area);
-        Area { module: module.to_string(), area, name, calibration, picture, floor, objects }
+        Area { module: module.to_string(), area, name, calibration, picture, floor, objects, exit_shapes }
+    }
+
+    /// Whether a spot is clear of every way out, with the margin exit spots keep (0.75 on each
+    /// side): a player saved inside a transition trigger can be carried off as the save loads.
+    /// A spot picked on the map did not keep out of them (2026-11-07 audit, W-4).
+    pub fn clear_of_exits(&self, x: f32, y: f32) -> bool {
+        !self.exit_shapes.iter().any(|shape| [(0.0, 0.0), (0.75, 0.0), (-0.75, 0.0), (0.0, 0.75), (0.0, -0.75)].iter().any(|(dx, dy)| inside(shape, x + dx, y + dy)))
     }
 
     pub fn to_map(&self, x: f32, y: f32) -> Option<(f32, f32)> {

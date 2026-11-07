@@ -426,6 +426,7 @@ impl Save {
             n.set("LASTMODULE", Value::String(module_bytes));
             n.set("AREANAME", Value::String(name_bytes));
         });
+        self.set_planet_for(&target);
         self.module_name = target;
         self.load_module();
         self.changed("player.module");
@@ -1030,6 +1031,34 @@ impl Save {
     /// maintainer's own reverse engineering of KotOR 1 (area event handler 0x0050D6C0).
     /// `movies` (up to six) play before the area loads, as a script's StartNewModule plays
     /// them (the escape pod's 01c before the vision, for one).
+    /// KotOR's current planet (`K_CURRENT_PLANET`) set for a trip to `module` where the planet
+    /// is known: scripts and conversations read it (Juhani's "what do you know about this
+    /// world" spoke of Manaan after a trip to Dantooine, the maintainer in the game,
+    /// 2026-11-07). The values as the game writes them, measured in its own saves and in the
+    /// quest data: Endar Spire 5, Taris 10, Dantooine 15, Manaan 25, Tatooine 35, Unknown
+    /// World 45. Kashyyyk and Korriban are not measured and are left as they are; so is KotOR 2.
+    fn set_planet_for(&mut self, module: &str) {
+        if self.game != Game::K1 {
+            return;
+        }
+        let m = module.to_ascii_lowercase();
+        let value = [("end_", 5), ("tar_", 10), ("dan", 15), ("man", 25), ("tat_", 35), ("unk_", 45)]
+            .iter()
+            .find(|(prefix, _)| m.starts_with(prefix))
+            .map(|(_, v)| *v);
+        let Some(value) = value else { return };
+        let Some(g) = self.globals.as_ref() else { return };
+        let Some(index) = crate::globals::list(&g.root)
+            .into_iter()
+            .find(|x| x.kind == crate::globals::Kind::Number && x.name.eq_ignore_ascii_case("K_CURRENT_PLANET"))
+            .filter(|x| x.value != crate::globals::GlobalValue::Number(value))
+            .map(|x| x.index)
+        else {
+            return;
+        };
+        self.edit_globals("K_CURRENT_PLANET", |root| crate::globals::set_number(root, index, value));
+    }
+
     pub fn queue_transition(&mut self, module: &str, waypoint: &str, movies: &[&str]) -> Result<()> {
         let ifo = self.ifo.as_mut().ok_or("this save has no module file")?;
         let day = ifo.root.int("Mod_PauseDay").unwrap_or(0);
@@ -1068,6 +1097,7 @@ impl Save {
         ifo.root.list_mut("EventQueue").unwrap().insert(0, event);
         self.dirty.insert("ifo");
         self.changed(format!("travel.{}", module.to_ascii_lowercase()));
+        self.set_planet_for(module);
         Ok(())
     }
 

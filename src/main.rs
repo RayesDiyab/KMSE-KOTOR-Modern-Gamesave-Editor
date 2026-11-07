@@ -387,6 +387,48 @@ impl State {
         self.current().map(|g| g.catalog.clone())
     }
 
+    /// The game's data from the install whose folder holds `save` (with two installs of one
+    /// game, a GOG save read the Steam install's Override and templates: 2026-11-07 audit,
+    /// W-14). Data already read from another install is dropped and read again, with what was
+    /// made from it (pictures, ways into areas, the item list).
+    fn ensure_game_for(&mut self, game: Game, save: &Path) {
+        let plain = |p: &Path| {
+            let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase()
+        };
+        let folder = plain(save);
+        let holder = self
+            .installs
+            .iter()
+            .filter(|i| i.game == game)
+            .map(|i| i.path.clone())
+            .find(|root| folder.starts_with(&format!("{}{}", plain(root).trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR)));
+        if let Some(root) = holder {
+            let other = self.games.get(&game).map_or(false, |g| plain(&g.data.root) != plain(&root));
+            if other {
+                self.games.remove(&game);
+                self.arrivals.remove(&game);
+                self.portraits.clear();
+                self.art_asked.remove(&game);
+                self.ready_items.lock().unwrap().remove(&game);
+            }
+            if !self.games.contains_key(&game) {
+                // a preloaded copy is used only when it is of this install
+                let ready = self.ready.lock().unwrap().remove(&game);
+                match ready {
+                    Some(r) if plain(&r.data.root) == plain(&root) => {
+                        self.games.insert(game, r);
+                    }
+                    _ => {
+                        self.games.insert(game, build_game(game, &root, false));
+                    }
+                }
+            }
+            return;
+        }
+        self.ensure_game(game);
+    }
+
     fn ensure_game(&mut self, game: Game) {
         if self.games.contains_key(&game) {
             return;
@@ -765,7 +807,7 @@ fn fill_preview(ui: &AppWindow, st: &mut State) {
 
 fn open_selected(ui: &AppWindow, st: &mut State) {
     let Some((folder, _)) = st.saves.get(st.selected).cloned() else { return };
-    st.ensure_game(folder.game);
+    st.ensure_game_for(folder.game, &folder.path);
     match (Save::open(&folder.path), Save::open(&folder.path)) {
         (Ok(sv), Ok(orig)) => {
             st.read_only = read_only_reason(&folder.path).is_some() || sv.module_problem().is_some();
@@ -974,6 +1016,11 @@ fn fill_character(ui: &AppWindow, st: &mut State) {
         ),
         _ => format!("Level {}, the highest the game allows.", level),
     };
+    // On KotOR's Endar Spire the game sets the player's XP and level itself as the save loads
+    // (the maintainer's untouched start save, 150 XP and level 1 in the file, shows 3,080 and
+    // level 3 in the game, 2026-11-07): an edit there is not what the game shows
+    let endar = who == Who::Player && st.save.as_ref().map_or(false, |sv| sv.game == Game::K1 && sv.module_name().to_ascii_lowercase().starts_with("end_m01"));
+    let note = if endar { format!("{} On the Endar Spire the game sets XP and level itself as the save loads.", note) } else { note };
     app.set_level_note(s(note));
     app.set_max_xp(cat.xp_for(max).unwrap_or(0) as i32);
     app.set_max_level(s(max.to_string()));
@@ -1523,7 +1570,7 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let plan = kse_core::questdb::return_to(&chapter_states(&chapters), i);
     let later: Vec<String> = plan.undo.iter().filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
     let summary = format!(
-        "{}Undoes these chapters, newest first: {}.\n\nTheir quests, companions, story values and XP go back to how they were before. Their areas reset.{}\n\nNot undone: things outside the main quests, and items bought, sold or used since.",
+        "{}Undoes these chapters, newest first: {}.\n\nTheir quests, companions, story values and your XP go back to how they were before. Their areas reset. The items they give are taken back, up to the number they give, bought ones of the same kind too.{}\n\nNot undone: things outside the main quests, and your companions' XP.",
         stage_text,
         later.join(", "),
         if stage.is_some() { " Then the chapter plays up to the picked stage again." } else { "" }
@@ -5181,14 +5228,15 @@ fn main() {
             eprintln!("map click {} {} -> {} {}", fx, fy, x, y);
         }
         let z = st.save.as_ref().and_then(|s| s.player()).map(|p| area::position(p)[2]).unwrap_or(0.0);
-        match area.floor.nearest(x, y, z, 1.5) {
+        // the nearest walkable floor that keeps out of the area's ways out (W-4)
+        match area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_of_exits(px, py)) {
             Some(spot) => st.map_pick = Some(MapPick::Floor(spot)),
             None => {
                 st.map_pick = None;
                 let app = u.global::<App>();
                 fill_map(&u, st);
                 app.set_pick_title(s("Not a place to stand"));
-                app.set_pick_note(s("That's not walkable floor. Click inside a room or corridor."));
+                app.set_pick_note(s("That's not walkable floor, or it's in a way out of the area. Click inside a room or corridor."));
                 return;
             }
         }

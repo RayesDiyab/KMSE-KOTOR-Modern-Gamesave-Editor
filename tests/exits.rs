@@ -58,3 +58,31 @@ fn a_way_outs_spot_is_outside_its_trigger() {
         eprintln!("{} ways out, {} spots outside their triggers", exits, spots);
     }
 }
+
+/// A spot clicked on the map keeps out of the area's ways out too (2026-11-07 audit, W-4):
+/// clicked at the middle of each way out, the floor picked is clear of every trigger, with the
+/// margin. Before, the nearest floor was taken, inside the trigger.
+#[test]
+fn a_clicked_spot_keeps_out_of_the_ways_out() {
+    let installs = find_installs(&[]);
+    let (mut clicks, mut moved) = (0, 0);
+    for game in [Game::K1, Game::K2] {
+        let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
+        let data = GameData::open(game, &install.path);
+        for module in kse_core::map::game_modules(&install.path).into_iter().take(60) {
+            let Some(git) = kse_core::map::game_git(&data, &module) else { continue };
+            let area = Area::build(&data, &module, &git.root, &|_| String::new());
+            for o in area.objects.iter().filter(|o| o.kind == Kind::Exit && o.list == "TriggerList") {
+                let [x, y, z] = o.pos;
+                let plain = area.floor.nearest(x, y, z, 1.5);
+                let Some(spot) = area.floor.nearest_where(x, y, z, 1.5, &|px, py| area.clear_of_exits(px, py)) else { continue };
+                clicks += 1;
+                assert!(area.clear_of_exits(spot[0], spot[1]), "{} {}: the picked spot is in a way out", module, o.tag);
+                if plain.map_or(false, |p| !area.clear_of_exits(p[0], p[1])) {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{} clicks at ways out; {} would have stood inside one before", clicks, moved);
+}

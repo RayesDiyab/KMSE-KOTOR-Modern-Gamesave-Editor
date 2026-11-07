@@ -55,6 +55,18 @@ CHANGELOG.
     kept Trask's slot 0 marked; at the end of Taris that slot is Bastila, the game queued a
     switch to her on every area load, and after the turret game it crashed
     (`CrownFutureLeader`). Found and confirmed in the game by KMRP's agent.
+  - Travel to a KotOR planet sets the current planet (`K_CURRENT_PLANET`): after a trip to
+    Dantooine, Juhani still spoke of Manaan. Values as the game writes them: Endar Spire 5,
+    Taris 10, Dantooine 15, Manaan 25, Tatooine 35, Unknown World 45; Kashyyyk and Korriban
+    are not measured and stay as they are.
+  - A spot clicked on the map keeps out of the area's ways out, as the offered exit spots do:
+    clicked at the middle of a way out, 17 of 17 tested landed inside the trigger.
+  - With two installs of one game, a save reads the game's data from the install that holds it.
+  - Stored copies of areas keep each door's and trigger's own tag.
+  - The Go Back pop-up says what it does: the chapters' items are taken back up to the number
+    they give, bought ones of the same kind too, and companions' XP is not rewound.
+  - On KotOR's Endar Spire the Character tab says that the game sets XP and level itself there
+    (the maintainer's untouched start save, 150 XP in the file, shows 3,080 in the game).
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

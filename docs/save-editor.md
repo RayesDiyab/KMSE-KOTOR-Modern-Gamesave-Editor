@@ -537,6 +537,20 @@ save with the flag cleared played on to Dantooine. Checked by
 `tests/audit_2026_11_07.rs` (`a_story_move_leaves_the_player_leading`), which fails without
 the change on the maintainer's own Endar Spire save.
 
+**Travel sets the current planet, KotOR only (2026-11-07).** A move to another module, by
+travel or by a story move, sets the global number `K_CURRENT_PLANET` in GLOBALVARS.res to the
+value the game writes for the target's planet (`Save::set_planet_for`), and only when it
+differs. The values, measured in the game's own saves and matching the quest data: `end_` 5,
+`tar_` 10, `dan` 15, `man` 25, `tat_` 35, `unk_` 45. Kashyyyk and Korriban are not measured,
+so a move there leaves the value as it was; KotOR 2 is not touched. Without it, after a trip
+from Manaan to Dantooine Juhani still spoke of Manaan (the maintainer, in the game). Checked
+by `travel_sets_the_current_planet`.
+
+**A clicked map spot keeps out of the ways out (2026-11-07).** A spot clicked on the map moves
+to the nearest walkable point that is clear, with 0.75 to each side, of every transition
+trigger's shape in the area's GIT (`Area::clear_of_exits`), as the offered exit spots already did. Stored area copies now keep
+each door's and trigger's own `Tag`.
+
 **Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
 through one conversation line or script as its own step (a reply chosen, a condition met, an
 "otherwise"). Finish Quest applied all of them together, so KotOR II's DroidRetrieval stage 20

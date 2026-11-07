@@ -196,3 +196,25 @@ fn a_story_move_leaves_the_player_leading() {
     }
     eprintln!("{} Endar Spire saves with a member leading checked", checked);
 }
+
+/// Travel to another KotOR planet sets the current planet (`K_CURRENT_PLANET`), as the game's
+/// own saves on each planet hold it: after a trip from Manaan to Dantooine, Juhani spoke of
+/// Manaan (the maintainer, in the game). Unknown planets and KotOR 2 are left as they are.
+#[test]
+fn travel_sets_the_current_planet() {
+    let installs = find_installs(&[]);
+    let planet = |s: &Save| s.globals.as_ref().map(|g| kse_core::globals::list(&g.root)).unwrap_or_default().into_iter().find(|x| x.name.eq_ignore_ascii_case("K_CURRENT_PLANET")).map(|x| x.value);
+    let Some(original) = find_saves(&installs, Game::K1, &[]).into_iter().filter_map(|f| Save::open(&f.path).ok()).find(|s| s.module_name().to_ascii_lowercase().starts_with("man") && planet(s).is_some()) else {
+        return eprintln!("no KotOR save on Manaan here: nothing checked");
+    };
+    for (module, want) in [("danm13", 15), ("tar_m02aa", 10), ("tat_m17aa", 35)] {
+        let mut s = original.clone();
+        s.queue_transition(module, "wp_test", &[]).unwrap();
+        assert_eq!(planet(&s), Some(kse_core::globals::GlobalValue::Number(want)), "travel to {}", module);
+    }
+    // a planet with no measured value: left as it was
+    let mut s = original.clone();
+    let before = planet(&s);
+    s.queue_transition("kas_m22aa", "wp_test", &[]).unwrap();
+    assert_eq!(planet(&s), before, "Kashyyyk is not measured: unchanged");
+}

@@ -218,7 +218,9 @@ pub fn played_through(data: &GameData, module: &str, cleared: &Cleared, last_ifo
     for e in entries("Door List") {
         let Some(resref) = e.string("TemplateResRef") else { continue };
         let Some(t) = template(&files, data, &resref, "utd", 2042) else { continue };
-        let mut d = full(t, 8, &e, &["Bearing", "X", "Y", "Z", "LinkedTo", "LinkedToFlags", "LinkedToModule", "TransitionDestin"]);
+        // the area's own Tag too: doors of one template are told apart by it (every door in 12
+        // of KotOR's areas carries one, 2 of 107 not the template's; 2026-11-07 audit, W-1)
+        let mut d = full(t, 8, &e, &["Bearing", "X", "Y", "Z", "Tag", "LinkedTo", "LinkedToFlags", "LinkedToModule", "TransitionDestin"]);
         d.set("ObjectId", Value::Dword(id()));
         if tag_in(&d, &cleared.open) {
             d.set_int("OpenState", 1, Value::Byte(0));
@@ -277,7 +279,7 @@ pub fn played_through(data: &GameData, module: &str, cleared: &Cleared, last_ifo
             t,
             1,
             &e,
-            &["XPosition", "YPosition", "ZPosition", "XOrientation", "YOrientation", "ZOrientation", "Geometry", "LinkedTo", "LinkedToFlags", "LinkedToModule", "TransitionDestin"],
+            &["XPosition", "YPosition", "ZPosition", "XOrientation", "YOrientation", "ZOrientation", "Geometry", "Tag", "LinkedTo", "LinkedToFlags", "LinkedToModule", "TransitionDestin"],
         );
         tr.set("ObjectId", Value::Dword(id()));
         tr.set("CreatorId", Value::Dword(0x7F00_0000));
