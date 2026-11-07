@@ -144,3 +144,55 @@ fn the_endar_spire_stand_in_never_replaces_bastila() {
     earlier.import_npc(bastila, 0).unwrap_or_else(|e| panic!("Bastila comes over to the Endar Spire: {}", e));
     assert_eq!(tag(&earlier), "bastila");
 }
+
+fn leader_flags(s: &Save) -> (usize, i64) {
+    let leads = s.party.root.list("PT_MEMBERS").map_or(0, |l| l.iter().filter(|m| m.int("PT_IS_LEADER").unwrap_or(0) != 0).count());
+    (leads, s.party.root.int("PT_CONTROLLED_NP").unwrap_or(-1))
+}
+
+/// A save moved to another point of the story leaves no party member marked as the one the
+/// player controls. The Endar Spire's "test" save marks slot 0 (Trask) leader; carried to the
+/// end of Taris, slot 0 is Bastila, the game queued a switch to her on every area load, and
+/// after the turret game it crashed in CrownFutureLeader (KMRP's agent, 2026-11-07, confirmed
+/// in the game with the flag cleared). Skip Ahead and Go Back both clear it.
+#[test]
+fn a_story_move_leaves_the_player_leading() {
+    let installs = find_installs(&[]);
+    let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return eprintln!("KotOR is not installed here: nothing checked") };
+    let data = kse_core::gamedata::GameData::open(Game::K1, &install.path);
+    let order = |m: &serde_json::Value| m.get("order").and_then(|v| v.as_i64()).unwrap_or(99);
+    let upto = |planet: &str| {
+        let all = kse_core::questdb::milestones(Game::K1);
+        let end = all.iter().find(|(p, _)| p.eq_ignore_ascii_case(planet)).map(|(_, m)| order(m)).unwrap();
+        let mut path: Vec<_> = all.into_iter().map(|(_, m)| m).filter(|m| m.get("side_chapter").is_none() && order(m) <= end).collect();
+        path.sort_by_key(order);
+        path
+    };
+    let mut checked = 0;
+    for folder in find_saves(&installs, Game::K1, &[]) {
+        let Ok(original) = Save::open(&folder.path) else { continue };
+        if leader_flags(&original).0 == 0 || original.module_name().to_ascii_lowercase() != "end_m01aa" {
+            continue;
+        }
+        // Skip Ahead from the Endar Spire to the end of Taris
+        let plan = kse_core::story_preview::Plan::Skip { chapters: upto("Taris"), stage: None, class: None, dark: false, prestige: None, train: false };
+        let skipped = plan.prepare(&original, &data).unwrap().save;
+        assert_eq!(leader_flags(&skipped), (0, -1), "{}: after Skip Ahead the player leads", folder.path.display());
+        // Go Back over Taris, from a save whose party table marks a member leader again
+        let mut marked = skipped.clone();
+        marked.edit_party_table("leader-test", |p| {
+            if let Some(m) = p.list_mut("PT_MEMBERS").and_then(|l| l.first_mut()) {
+                m.set_int("PT_IS_LEADER", 1, Value::Byte(0));
+            }
+        });
+        if leader_flags(&marked).0 == 0 {
+            continue; // no member to mark
+        }
+        let path = upto("Taris");
+        let kept = path[..path.len() - 1].to_vec();
+        kse_core::questdb::go_back(&mut marked, &data, &kept, &[path.last().unwrap().clone()], false, None).unwrap();
+        assert_eq!(leader_flags(&marked), (0, -1), "{}: after Go Back the player leads", folder.path.display());
+        checked += 1;
+    }
+    eprintln!("{} Endar Spire saves with a member leading checked", checked);
+}

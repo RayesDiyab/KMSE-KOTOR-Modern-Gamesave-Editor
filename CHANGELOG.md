@@ -50,6 +50,11 @@ CHANGELOG.
     was left open). Advanced, Creatures does not remove a party member's own copy in the area.
   - `examples/ingame_fixture.rs` makes one edited save in a new slot of a game's saves folder,
     for checks in the game.
+  - Skip Ahead and Go Back leave the player leading: no party member stays marked as the one
+    controlled (`PT_IS_LEADER` 0, `PT_CONTROLLED_NP` -1). A save skipped from the Endar Spire
+    kept Trask's slot 0 marked; at the end of Taris that slot is Bastila, the game queued a
+    switch to her on every area load, and after the turret game it crashed
+    (`CrownFutureLeader`). Found and confirmed in the game by KMRP's agent.
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

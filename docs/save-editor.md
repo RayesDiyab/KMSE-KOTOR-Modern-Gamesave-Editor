@@ -526,6 +526,17 @@ order counts as passed by the same test. Seen in the program on a KotOR save aft
 Leviathan: Carth's stages read ..., "won Carth's full trust", "revenge is complete" (passed),
 "devastated" (current), the three endings.
 
+**Skip Ahead and Go Back leave the player leading (2026-11-07).** Both set `PT_IS_LEADER` to 0
+on every `PT_MEMBERS` entry and `PT_CONTROLLED_NP` to -1 in PARTYTABLE.res
+(`Save::release_controlled_npc`). The game reads a member marked leader as the party member it
+controls (CSWPartyTable::LoadTableInfo) and queues a switch to that member on every area
+load. Found by KMRP's agent in the game: a save skipped from the Endar Spire kept slot 0
+(Trask there) marked; at the end of Taris slot 0 is Bastila, and after the turret game the
+switch fired where her creature was not and the game crashed in `CrownFutureLeader`. The same
+save with the flag cleared played on to Dantooine. Checked by
+`tests/audit_2026_11_07.rs` (`a_story_move_leaves_the_player_leading`), which fails without
+the change on the maintainer's own Endar Spire save.
+
 **Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
 through one conversation line or script as its own step (a reply chosen, a condition met, an
 "otherwise"). Finish Quest applied all of them together, so KotOR II's DroidRetrieval stage 20

@@ -1032,6 +1032,9 @@ pub fn skip_to_stage(save: &mut Save, data: &GameData, chapters: &[serde_json::V
 fn skip_core(save: &mut Save, data: &GameData, chapters: &[serde_json::Value], jedi_class: Option<usize>, dark: bool, prestige: Option<i64>, train: bool, partial: Option<(String, i64)>) -> Result<Vec<String>, String> {
     let all: Vec<serde_json::Value> = leviathan_in_place(save, chapters).iter().map(|m| for_side(m, dark)).collect();
     let target = all.last().cloned().ok_or("no chapter to skip to")?;
+    // the player leads at the new point of the story: a party member left marked as the one
+    // controlled crashed the game (Save::release_controlled_npc)
+    save.release_controlled_npc();
     // a skip to a quest stage plays the chapters before its own in full
     let chapters: Vec<serde_json::Value> = if partial.is_some() { all[..all.len() - 1].to_vec() } else { all.clone() };
     let last = chapters.last().cloned().unwrap_or_else(|| target.clone());
@@ -2701,6 +2704,8 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
     let is_unfinished = |p: &str| unfinished.iter().any(|u| u.eq_ignore_ascii_case(p));
     if !(0..=100).contains(&alignment) { return Err("Alignment must be between 0 and 100.".into()); }
     let first = undo.first().cloned().ok_or("nothing to go back over")?;
+    // the player leads at the earlier point of the story (Save::release_controlled_npc)
+    save.release_controlled_npc();
     let asked = undo;
     let (kept, undo) = fourth_planet_with_the_leviathan(save, kept, undo);
     let dark = save.player().map_or(false, |p| crate::creature::alignment(p) < 50);

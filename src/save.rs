@@ -866,6 +866,32 @@ impl Save {
     /// Who travels with the player: two at most, each recruited and held in the save. The
     /// area is left alone: on the Ebon Hawk the game stands every member around the ship
     /// itself (a member taken out of the Hawk's area went missing in a test, 2026-10-22).
+    /// The player leads the party again: no party member is the one controlled
+    /// (`PT_IS_LEADER` 0 on every `PT_MEMBERS` entry, `PT_CONTROLLED_NP` -1), as for a save
+    /// moved to another point of the story. The game reads a member marked leader as the
+    /// party member it controls (CSWPartyTable::LoadTableInfo) and queues a switch to that
+    /// member's creature on every area load; carried from the Endar Spire (Trask in slot 0)
+    /// to the end of Taris (Bastila in slot 0), the switch fired after the turret game in an
+    /// area where her creature was not, and the game crashed in CrownFutureLeader (found by
+    /// KMRP's agent, 2026-11-07, and confirmed in the game: the flag cleared, no crash).
+    pub fn release_controlled_npc(&mut self) {
+        let leads = self.party.root.list("PT_MEMBERS").map_or(false, |l| l.iter().any(|m| m.int("PT_IS_LEADER").unwrap_or(0) != 0));
+        let controlled = self.party.root.int("PT_CONTROLLED_NP").map_or(false, |n| n != -1);
+        if !leads && !controlled {
+            return;
+        }
+        self.edit_party_table("leader", |p| {
+            if let Some(members) = p.list_mut("PT_MEMBERS") {
+                for m in members.iter_mut() {
+                    m.set_int("PT_IS_LEADER", 0, Value::Byte(0));
+                }
+            }
+            if p.get("PT_CONTROLLED_NP").is_some() {
+                p.set_int("PT_CONTROLLED_NP", -1, Value::Int(0));
+            }
+        });
+    }
+
     pub fn set_party_members(&mut self, members: &[usize]) -> Result<()> {
         if members.len() > 2 {
             return Err("two party members at most".into());

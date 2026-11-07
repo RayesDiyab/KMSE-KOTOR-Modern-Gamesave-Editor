@@ -67,6 +67,13 @@ Game: K1, K2, or both.
 | U-7 | P3 | both | `on_finish_quest` | After a finish the member list and the map were not read again | Read again, as after Skip | code read |
 | D-1 | P3 | build | `Cargo.lock` | `pulldown-cmark` 0.13.5, RUSTSEC-2026-0433 (quadratic parse of nested wiki links). Reached through Slint; the editor never enables wiki links | 0.13.6 | `cargo audit` |
 
+### Found in the game, after the report (2026-11-07 afternoon)
+
+| ID | Sev | Game | Where | What was wrong | Fix | Checked by |
+| --- | --- | --- | --- | --- | --- | --- |
+| G-1 | P1 | K1 (both by the code) | `questdb::skip_core`, `go_back_part_played` | The party table's leader flag was carried through a story move. "KMSE back from Dantooine", made from the Endar Spire "test" save, kept slot 0 marked as the controlled member (Trask there, Bastila after the move). The game queued a switch to that member on every area load, and after the Taris turret game it crashed in `CrownFutureLeader` (`0x005FB803`, a null creature). **First reported here as a crash in the rumble code: wrong.** KMRP's agent found the real cause and confirmed it in the game: the same save with the flag cleared played on to Dantooine | `Save::release_controlled_npc` on Skip Ahead and Go Back | `a_story_move_leaves_the_player_leading` (8 Endar Spire saves; fails without the fix) |
+| G-2 | P2 | K1 | `Save::queue_transition` | Travel leaves `K_CURRENT_PLANET` as it was: after travel from Manaan to Dantooine, Juhani's "what do you know about this world" spoke of Manaan (the maintainer, in the game). The values the game writes, measured in its saves: Endar Spire 5, Taris 10, Dantooine 15, Manaan 25, Tatooine 35, Unknown World 45 (the quest data agrees) | not yet fixed: waits for the maintainer's go | |
+
 ### Measured, not a defect
 
 | | |
