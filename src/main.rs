@@ -1140,6 +1140,26 @@ fn named(rows: impl Iterator<Item = (i64, String, String)>) -> ModelRc<Named> {
     model(rows.map(|(id, name, note)| row(id, name, note)).collect())
 }
 
+/// The level the class pickers test prestige classes against: the higher of the creature's
+/// class levels and the level its XP reaches, as Kreia's test reads XP (`prestige_due`).
+fn class_level(cat: &Catalog, c: &Struct) -> i64 {
+    let xp = creature::experience(c);
+    let by_xp = (1..=cat.max_level()).filter(|&l| cat.xp_for(l).map_or(false, |need| need <= xp)).max().unwrap_or(1);
+    creature::level(c).max(by_xp)
+}
+
+/// The side a KotOR II prestige class belongs to, for the class pickers' notes: Kreia offers
+/// the light side's three to a light-side player and the Sith three to a dark-side one.
+fn prestige_side(id: i64) -> &'static str {
+    if kse_core::questdb::PRESTIGE_LIGHT.contains(&id) {
+        ". Light side prestige class"
+    } else if kse_core::questdb::PRESTIGE_DARK.contains(&id) {
+        ". Dark side prestige class"
+    } else {
+        ""
+    }
+}
+
 /// Every entry of a catalogue list, under its group's heading, with its icon: what the
 /// creature has is lit. Entries it has that the game's list lacks (a removed mod) come
 /// last, so they can still be removed.
@@ -1570,7 +1590,7 @@ fn ask_back(u: &AppWindow, st: &mut State, i: i32, tag: &str, stage: i32) {
     let plan = kse_core::questdb::return_to(&chapter_states(&chapters), i);
     let later: Vec<String> = plan.undo.iter().filter_map(|k| chapters.iter().find(|x| x.index == *k)).map(|x| x.planet.clone()).collect();
     let summary = format!(
-        "{}Undoes these chapters, newest first: {}.\n\nTheir quests, companions, story values and your XP go back to how they were before. Their areas reset. The items they give are taken back, up to the number they give, bought ones of the same kind too.{}\n\nNot undone: things outside the main quests, and your companions' XP.",
+        "{}Undoes these chapters, newest first: {}.\n\nTheir quests, companions, story values and your XP go back to how they were before. Their areas reset. The items they give are taken back, up to the number they give, bought ones of the same kind too, unless you keep your items below.{}\n\nNot undone: things outside the main quests, and your companions' XP.",
         stage_text,
         later.join(", "),
         if stage.is_some() { " Then the chapter plays up to the picked stage again." } else { "" }
@@ -1592,6 +1612,7 @@ fn current_story_plan(ui: &AppWindow, st: &State, back: bool) -> Option<StoryPla
         let plan = kse_core::questdb::return_to(&chapter_states(&chapters), *i);
         Some(StoryPlan::Back {
             alignment: ui.global::<App>().get_back_alignment() as i64,
+            keep_items: ui.global::<App>().get_back_keep_items(),
             kept: plan.kept.iter().filter_map(|k| milestone(*k)).collect(),
             undo: plan.undo.iter().filter_map(|k| milestone(*k)).collect(),
             stage: stage.clone(),
@@ -1782,8 +1803,18 @@ fn finish_story_preview(ui: &AppWindow, st: &mut State) {
     app.set_story_grants(model(grants));
     app.set_story_items(model(items));
     app.set_story_preview_status(s(""));
-    // a quest's finish: what only the game does, said beside what changes
-    app.set_story_notes(s(if matches!(st.story_plan, Some(StoryPlan::Quest { .. })) { prepared.notes.join("\n") } else { String::new() }));
+    // a quest's finish: what else the editor did, and apart from it the steps left to the game
+    // (2026-11-07 audit, S-7: they were all under "Happens in the game", the editor's own
+    // among them, and the game may never run a step the journal is past)
+    let quest = matches!(st.story_plan, Some(StoryPlan::Quest { .. }));
+    let (game, done): (Vec<&String>, Vec<&String>) = prepared.notes.iter().partition(|n| n.starts_with(kse_core::questdb::LEFT_TO_THE_GAME));
+    let line = |n: &String| {
+        let t = n.strip_prefix(kse_core::questdb::LEFT_TO_THE_GAME).unwrap_or(n);
+        let mut c = t.chars();
+        c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+    };
+    app.set_story_notes(s(if quest { done.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("\n") } else { String::new() }));
+    app.set_story_game_notes(s(if quest { game.into_iter().map(line).collect::<Vec<_>>().join("\n") } else { String::new() }));
     app.set_story_preview_ready(true);
     st.story_prepared = Some(prepared);
 }
@@ -2824,31 +2855,24 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
             app.set_quest_text(s(current.and_then(|v| q.stage(v)).map(|x| x.text.trim().to_string()).unwrap_or_else(|| {
                 "This quest is not in the journal yet. Start it, or put it at any stage below.".to_string()
             })));
-            // The stages in the story's order: by number, except those the game sets out of
-            // number order (questdb::lowered_stages), which go just before the current stage
-            // when the save has been where they are set, else after the others; the endings
-            // last. A stage is passed when its number is below the current one, or, for one set
-            // out of order, when the save has been there. (2026-11-06: by number alone, Carth's
-            // "revenge is complete", set on the Leviathan, came first as the quest's beginning.)
-            let lowered = kse_core::questdb::lowered_stages(st.game, &q.tag);
-            let areas = st.save.as_ref().map(been_areas).unwrap_or_default();
-            // been where it is set: the save keeps the area, or the chapter the area belongs to
-            // is played (a save after the Leviathan no longer keeps the Leviathan's areas)
-            let played = st.save.as_ref().map(kse_core::questdb::chapters_played_in).unwrap_or_default();
-            let game = st.game;
-            let reached = |m: &String| {
-                areas.iter().any(|a| a.eq_ignore_ascii_case(m)) || kse_core::questdb::chapter_of_module(game, m).map_or(false, |c| played.get(c).copied().unwrap_or(false))
-            };
-            let been = |id: i64| lowered.iter().find(|(s, _)| *s == id).map(|(_, m)| m.iter().any(|m| reached(m)));
-            let mut regular: Vec<&kse_core::quests::Stage> = q.stages.iter().filter(|x| !x.end && been(x.id).is_none()).collect();
-            regular.sort_by_key(|x| x.id);
-            for x in q.stages.iter().filter(|x| !x.end && been(x.id).is_some()) {
-                let at = if been(x.id) == Some(true) { current.and_then(|c| regular.iter().position(|r| r.id == c)) } else { None };
-                regular.insert(at.unwrap_or(regular.len()), x);
+            // The stages in the story's order (questdb::story_order, which Finish Quest and Skip
+            // to stage use too): by number, except those the story reaches out of number order,
+            // which go just before the current stage when the save has been where they are set,
+            // else after the others; the endings last. A stage is passed when its number is
+            // below the current one, or, for one set out of order, when the save has been
+            // there. (2026-11-06: by number alone, Carth's "revenge is complete", set on the
+            // Leviathan, came first as the quest's beginning.)
+            let order = st
+                .save
+                .as_ref()
+                .map(|save| kse_core::questdb::story_order(save, &q.tag, &q.stages.iter().map(|x| (x.id, x.end)).collect::<Vec<_>>(), current))
+                .unwrap_or_default();
+            let been = |id: i64| order.iter().find(|(s, _)| *s == id).and_then(|(_, b)| *b);
+            let mut ordered: Vec<kse_core::quests::Stage> = order.iter().filter_map(|(id, _)| q.stages.iter().find(|x| x.id == *id).cloned()).collect();
+            if ordered.is_empty() {
+                ordered = q.stages.clone();
+                ordered.sort_by_key(|x| (x.end, x.id));
             }
-            let mut ends: Vec<&kse_core::quests::Stage> = q.stages.iter().filter(|x| x.end).collect();
-            ends.sort_by_key(|x| x.id);
-            let ordered: Vec<kse_core::quests::Stage> = regular.into_iter().chain(ends).cloned().collect();
             let stages: Vec<StageRow> = ordered
                 .iter()
                 .map(|x| StageRow {
@@ -4501,13 +4525,17 @@ fn main() {
         // with a Jedi class is offered only Jedi classes; a party member's Force does not
         // follow that rule.
         let jedi_player = creature::uses_level_records(&c) && have.iter().any(|id| cat.class(*id).map_or(false, |k| k.force_die > 0));
+        let player = st.who() == Who::Player;
+        let level = class_level(&cat, &c);
+        let game = st.save.as_ref().map_or(Game::K1, |s| s.game);
         let rows = cat
             .classes
             .iter()
             .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty() && !(jedi_player && k.force_die == 0))
+            .filter(|k| kse_core::questdb::class_offered(game, k.id, player, &have, level))
             .map(|k| {
                 let note = if k.force_die > 0 {
-                    format!("Jedi class: {} Health and {} Force a level", k.hit_die, k.force_die)
+                    format!("Jedi class: {} Health and {} Force a level{}", k.hit_die, k.force_die, prestige_side(k.id))
                 } else {
                     format!("{} Health a level", k.hit_die)
                 };
@@ -5073,11 +5101,16 @@ fn main() {
         // Force the other one gives (the game reads Force from the newest class; E-3)
         let i = index.max(0) as usize;
         let newest_after_jedi = creature::uses_level_records(&c) && i + 1 == have.len() && have.iter().take(i).any(|id| cat.class(*id).map_or(false, |k| k.force_die > 0));
+        let player = st.who() == Who::Player;
+        let level = class_level(&cat, &c);
+        let game = st.save.as_ref().map_or(Game::K1, |s| s.game);
+        let others: Vec<i64> = have.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, id)| *id).collect();
         let rows: Vec<Named> = cat
             .classes
             .iter()
             .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty() && !(newest_after_jedi && k.force_die == 0))
-            .map(|k| row(k.id, &k.name, format!("{} Health{} a level", k.hit_die, if k.force_die > 0 { format!(" and {} Force", k.force_die) } else { String::new() })))
+            .filter(|k| kse_core::questdb::class_offered(game, k.id, player, &others, level))
+            .map(|k| row(k.id, &k.name, format!("{} Health{} a level{}", k.hit_die, if k.force_die > 0 { format!(" and {} Force", k.force_die) } else { String::new() }, prestige_side(k.id))))
             .collect();
         open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "Replaces the class at the same level. Health and Force follow the new class. Leaving a Force class removes its powers.", rows);
     });
@@ -5345,6 +5378,7 @@ fn main() {
     });
     on!(ui, state, on_open_chapter, |u, st, i: i32| {
         u.global::<App>().set_back_alignment(50);
+        u.global::<App>().set_back_keep_items(false);
         clear_story_preview(&u, st);
         st.timeline_pick = Some(i);
         st.pop_pick = None;

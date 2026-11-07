@@ -36,6 +36,7 @@ fn rewind_alignment_is_neutral_by_default_and_honors_the_chosen_target() {
                 stage: None,
                 alignment: target,
                 unfinished: Vec::new(),
+                keep_items: false,
             };
             let prepared = plan.prepare(&save, &data).unwrap();
             assert_eq!(

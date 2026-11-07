@@ -34,6 +34,10 @@ pub enum Plan {
         alignment: i64,
         /// The chapters of `undo` begun and never finished, by their planets.
         unfinished: Vec<String>,
+        /// Keep the items and credits as they are now, the Go Back pop-up's switch under its
+        /// inventory changes (off unless picked; 2026-11-07, the maintainer, audit S-8: the
+        /// save cannot tell a bought item from one a chapter gave).
+        keep_items: bool,
     },
 }
 
@@ -73,12 +77,13 @@ impl Plan {
                 stage,
                 alignment,
                 unfinished,
+                keep_items,
             } => questdb::go_back_part_played(
                 &mut save,
                 data,
                 kept,
                 undo,
-                false,
+                *keep_items,
                 stage.clone(),
                 *alignment,
                 unfinished,
@@ -164,7 +169,10 @@ pub fn inventory_changes(before: &[Struct], after: &[Struct]) -> Vec<ItemChange>
 
 /// The party inventory plus gear held by the player and recruited companions. Moving
 /// equipment into inventory must not look like a new item. A departing companion's
-/// gear leaves the accessible inventory with them.
+/// gear leaves the accessible inventory with them. A companion's starting gear still in its
+/// template form (only `EquippedRes`; the game makes the items as the save loads) is not
+/// counted: it is theirs, and comes and goes with them (2026-11-07: with items kept, Go Back
+/// listed T3-M4's own droid gear as taken from the player).
 pub fn accessible_items(save: &Save) -> Vec<Struct> {
     let mut items = save.inventory();
     let whos = std::iter::once(Who::Player).chain(
@@ -175,7 +183,7 @@ pub fn accessible_items(save: &Save) -> Vec<Struct> {
     );
     for who in whos {
         if let Some(c) = save.creature(who) {
-            items.extend(creature::equipped(c).into_iter().cloned());
+            items.extend(creature::equipped(c).into_iter().filter(|i| i.get("BaseItem").is_some()).cloned());
         }
     }
     items

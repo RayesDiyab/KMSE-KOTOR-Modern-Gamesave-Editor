@@ -4,7 +4,8 @@
 //! - a hurt character whose Constitution is lowered keeps at least 1 Health (it went below 0);
 //! - a companion brought from another save: the same person always, someone else only from a
 //!   save at least as far along the story (an earlier save's stand-in is refused);
-//! - a link (a junction) inside a save folder is never followed by a backup or a write.
+//! - a link (a junction) inside a save folder is never followed by a backup or a write;
+//! - the class pickers offer only the classes the game gives (E-4).
 
 use kse_core::creature;
 use kse_core::formats::gff::Value;
@@ -217,4 +218,49 @@ fn travel_sets_the_current_planet() {
     let before = planet(&s);
     s.queue_transition("kas_m22aa", "wp_test", &[]).unwrap();
     assert_eq!(planet(&s), before, "Kashyyyk is not measured: unchanged");
+}
+
+/// E-4: Add a Class and Change Class offered every class in classes.2da, which marks all of
+/// them as player classes. They now follow the game: no Minion; Tech Specialist (Bao-Dur's)
+/// for party members only; a prestige class only for a player with one Jedi class at level
+/// 15 or above. The rows named in the code are checked against each installed game's table.
+#[test]
+fn class_pickers_offer_what_the_game_gives() {
+    use kse_core::questdb::{class_offered, CLASS_MINION, CLASS_TECH_SPECIALIST, PRESTIGE_DARK, PRESTIGE_LIGHT};
+    for game in [Game::K1, Game::K2] {
+        assert!(!class_offered(game, CLASS_MINION, true, &[0], 5));
+        assert!(!class_offered(game, CLASS_MINION, false, &[0], 5));
+        assert!(class_offered(game, 3, true, &[0], 5), "a Jedi class stays");
+    }
+    assert!(!class_offered(Game::K2, CLASS_TECH_SPECIALIST, true, &[2], 5));
+    assert!(class_offered(Game::K2, CLASS_TECH_SPECIALIST, false, &[0], 5));
+    for id in PRESTIGE_LIGHT.into_iter().chain(PRESTIGE_DARK) {
+        assert!(class_offered(Game::K2, id, true, &[4], 15));
+        assert!(!class_offered(Game::K2, id, true, &[4], 14), "below level 15");
+        assert!(!class_offered(Game::K2, id, true, &[0], 20), "not a Jedi class");
+        assert!(!class_offered(Game::K2, id, true, &[], 20), "no Jedi class");
+        assert!(!class_offered(Game::K2, id, false, &[4], 20), "a party member");
+    }
+    let installs = find_installs(&[]);
+    for game in [Game::K1, Game::K2] {
+        let Some(install) = installs.iter().find(|i| i.game == game) else {
+            eprintln!("{:?} is not installed here: its class rows not checked", game);
+            continue;
+        };
+        let data = kse_core::gamedata::GameData::open(game, &install.path);
+        let t = data.table("classes");
+        let label = |r: i64| t.cell(r as usize, "label").unwrap_or("").to_ascii_lowercase();
+        assert!(label(CLASS_MINION).contains("minion"), "{:?}: {}", game, label(CLASS_MINION));
+        if game == Game::K2 {
+            assert!(label(CLASS_TECH_SPECIALIST).contains("tech"), "{}", label(CLASS_TECH_SPECIALIST));
+            let all: Vec<String> = PRESTIGE_LIGHT.into_iter().chain(PRESTIGE_DARK).map(label).collect();
+            println!("KotOR II prestige rows: {:?}", all);
+            for (r, l) in PRESTIGE_LIGHT.into_iter().zip(&all[..3]) {
+                assert!(l.contains("jedi"), "row {} is {}", r, l);
+            }
+            for (r, l) in PRESTIGE_DARK.into_iter().zip(&all[3..]) {
+                assert!(l.contains("sith"), "row {} is {}", r, l);
+            }
+        }
+    }
 }

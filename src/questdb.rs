@@ -318,6 +318,11 @@ fn story_values(save: &Save) -> Vec<crate::globals::Global> {
 pub fn one_way_in(q: &Quest, ending: i64, dark: bool, alignment: i64, globals: &[crate::globals::Global]) -> Vec<Step> {
     let mut stages: Vec<&Stage> = q.stages.iter().filter(|s| s.stage == ending || (s.stage < ending && !s.end)).collect();
     stages.sort_by_key(|s| s.stage);
+    one_way_ordered(q, stages, ending, dark, alignment, globals)
+}
+
+/// `one_way_in` over stages of `q` already picked and put in the order they are played.
+fn one_way_ordered(q: &Quest, stages: Vec<&Stage>, ending: i64, dark: bool, alignment: i64, globals: &[crate::globals::Global]) -> Vec<Step> {
     let mut out = Vec::new();
     // the story values as the run goes: what an earlier stage sets, a later one reads
     // (2026-11-07 second review: conditions read the values before the run)
@@ -890,6 +895,34 @@ pub fn prestige_due(save: &Save, data: &GameData, xp: i64) -> bool {
     !taken && level >= 15
 }
 
+/// classes.2da rows the game never gives a player or party member, or only some (both games
+/// number them the same; KotOR 1 stops at 8).
+pub const CLASS_MINION: i64 = 8;
+pub const CLASS_TECH_SPECIALIST: i64 = 9;
+
+/// Whether Add a Class and Change Class offer class `id` to a creature whose other classes
+/// are `others`, at `level` (the higher of its class levels and its XP's level). classes.2da
+/// marks every class as a player class, so the rules are the game's story (2026-11-07 audit,
+/// E-4): Minion is the class of ordinary enemies and background characters; Tech Specialist
+/// is Bao-Dur's, never the player's; Kreia offers a prestige class only to a player with one
+/// Jedi class at level 15 or above (c_pc_prestige, as `prestige_due`), and party members
+/// never get one.
+pub fn class_offered(game: Game, id: i64, player: bool, others: &[i64], level: i64) -> bool {
+    if id == CLASS_MINION {
+        return false;
+    }
+    if game != Game::K2 {
+        return true;
+    }
+    if id == CLASS_TECH_SPECIALIST {
+        return !player;
+    }
+    if PRESTIGE_LIGHT.contains(&id) || PRESTIGE_DARK.contains(&id) {
+        return player && others.len() == 1 && [3, 4, 5].contains(&others[0]) && level >= 15;
+    }
+    true
+}
+
 /// What a chapter's conversations and scripts give a run of one side (credits.py: credits,
 /// alignment, influence per party slot), less the conversations whose quests the save had
 /// already finished; and the payments the story needs (credits_fixed), less a purchase whose
@@ -1200,12 +1233,21 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
     let before_journal = save.quests();
     for (q, st) in &plan {
         let now = before_journal.iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map_or(-1, |(_, v)| *v);
-        if now >= *st {
+        // the story's order, not the numbers' (2026-11-07 audit, S-4): Carth's 3 comes after 65
+        let story = StoryOrder::of(save, q, now);
+        if now >= 0 && !story.after(*st, now) {
             continue; // the save is there already: nothing given twice
         }
-        for (i, step) in one_way_in(q, *st, dark, alignment, &story_values(save)).iter().enumerate() {
+        for (i, step) in one_way_story(q, *st, dark, alignment, &story_values(save), &story).iter().enumerate() {
             // stages the save has passed already gave their rewards
-            let reached = step.does.iter().any(|e| e.get("journal").and_then(|j| j.get(1)).and_then(|v| v.as_i64()).map_or(false, |v| v <= now));
+            let reached = step.does.iter().any(|e| {
+                let Some((t, v)) = e.get("journal").and_then(pair).and_then(|(t, v)| v.as_i64().map(|v| (t, v))) else { return false };
+                if t.eq_ignore_ascii_case(&q.tag) {
+                    now >= 0 && !story.after(v, now)
+                } else {
+                    v <= now
+                }
+            });
             if reached {
                 continue;
             }
@@ -1223,7 +1265,8 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
             }
             notes.extend(recruits_in(save, data, m, &step));
         }
-        if *st > save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map_or(-1, |(_, v)| v) {
+        let at = save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map_or(-1, |(_, v)| v);
+        if at < 0 || story.after(*st, at) {
             save.set_quest(&q.tag, *st);
         }
     }
@@ -1662,7 +1705,7 @@ fn recruits_in(save: &mut Save, data: &GameData, m: &serde_json::Value, step: &S
         let Some(template) = template else {
             // KotOR II's AddAvailableNPCByObject names a creature in the area, and the chapter
             // has no template for the slot: said, as before, not dropped (second review)
-            notes.push(format!("Left to the game: party member {} joins", slot));
+            notes.push(format!("{}party member {} joins", LEFT_TO_THE_GAME, slot));
             continue;
         };
         // recruit_from_template keeps the same companion and replaces anyone else in the slot
@@ -2396,16 +2439,119 @@ pub fn lowered_stages(game: Game, tag: &str) -> Vec<(i64, Vec<String>)> {
         .collect()
 }
 
+/// The stages the story reaches out of number order: a step may lower the stage to it
+/// (`lowered_stages`), and no later-numbered stage short of an ending is set in a chapter it
+/// is set in. In KotOR these are Carth's 3 (the Leviathan, after his talks on the Ebon Hawk)
+/// and Bastila's 1 and 2 (the Leviathan, the Unknown World). Most stages that may lower the
+/// stage are set in the same area as the stages above them (all of KotOR II's RebuildHK47 on
+/// the Ebon Hawk, the Nar Shaddaa quests): for them number order is the story's order
+/// (2026-11-07 audit, S-4).
+pub fn out_of_order_stages(game: Game, tag: &str) -> Vec<(i64, Vec<String>)> {
+    let Some((q, _)) = quest(game, tag) else { return Vec::new() };
+    let chapters = |s: &Stage| -> Vec<usize> { s.steps.iter().filter(|t| !t.module.is_empty()).filter_map(|t| chapter_of_module(game, &t.module)).collect() };
+    lowered_stages(game, tag)
+        .into_iter()
+        .filter(|(stage, _)| {
+            let Some(own) = q.stages.iter().find(|s| s.stage == *stage) else { return false };
+            let mine = chapters(own);
+            let above: Vec<&Stage> = q.stages.iter().filter(|s| s.stage > *stage && !s.end).collect();
+            // with nothing numbered above it, number order puts it last already
+            !own.end && !mine.is_empty() && !above.is_empty() && !above.iter().any(|s| chapters(s).iter().any(|c| mine.contains(c)))
+        })
+        .collect()
+}
+
+/// A quest's stages in the order the story reaches them, as the Quests tab lists them and as
+/// Finish Quest and Skip to stage take them: by number, except a stage set out of number order
+/// (`out_of_order_stages`), which goes just before the current stage when the save has been
+/// where it is set, else after the others; the endings last. Each stage comes with, for one
+/// set out of order, whether the save has been where it is set. `stages` are the quest's
+/// stages (number, ending); `current` is the journal's stage. Before 2026-11-07 Finish Quest
+/// and Skip to stage went by number alone: Carth's quest at 3, set on the Leviathan after his
+/// talks, finished again every talk from 10 to 65.
+pub fn story_order(save: &Save, tag: &str, stages: &[(i64, bool)], current: Option<i64>) -> Vec<(i64, Option<bool>)> {
+    let moved = out_of_order_stages(save.game, tag);
+    let mut areas = save.visited_modules();
+    areas.push(save.module_name().to_ascii_lowercase());
+    // been where it is set: the save keeps the area, or the chapter the area belongs to is
+    // played (a save after the Leviathan no longer keeps the Leviathan's areas)
+    let played = chapters_played_in(save);
+    let reached = |m: &String| areas.iter().any(|a| a.eq_ignore_ascii_case(m)) || chapter_of_module(save.game, m).map_or(false, |c| played.get(c).copied().unwrap_or(false));
+    let been = |id: i64| moved.iter().find(|(s, _)| *s == id).map(|(_, m)| m.iter().any(|m| reached(m)));
+    let mut seen: Vec<(i64, bool)> = Vec::new();
+    for s in stages {
+        if !seen.iter().any(|x| x.0 == s.0) {
+            seen.push(*s);
+        }
+    }
+    let mut regular: Vec<i64> = seen.iter().filter(|(id, end)| !end && been(*id).is_none()).map(|(id, _)| *id).collect();
+    regular.sort();
+    let mut out_of_order: Vec<i64> = seen.iter().filter(|(id, end)| !end && been(*id).is_some()).map(|(id, _)| *id).collect();
+    out_of_order.sort();
+    for id in out_of_order {
+        let at = if been(id) == Some(true) { current.and_then(|c| regular.iter().position(|r| *r == c)) } else { None };
+        regular.insert(at.unwrap_or(regular.len()), id);
+    }
+    let mut ends: Vec<i64> = seen.iter().filter(|(_, end)| *end).map(|(id, _)| *id).collect();
+    ends.sort();
+    regular.into_iter().chain(ends).map(|id| (id, been(id))).collect()
+}
+
+/// A quest's stages in story order, for telling which of two comes later. Stages in number
+/// order are compared by number; one set out of order by its place in `story_order`.
+#[derive(Default)]
+struct StoryOrder {
+    order: Vec<i64>,
+    moved: Vec<i64>,
+}
+
+impl StoryOrder {
+    fn of(save: &Save, q: &Quest, now: i64) -> StoryOrder {
+        let mut stages: Vec<(i64, bool)> = q.stages.iter().map(|s| (s.stage, s.end)).collect();
+        if now >= 0 && !stages.iter().any(|s| s.0 == now) {
+            stages.push((now, false));
+        }
+        let order = story_order(save, &q.tag, &stages, (now >= 0).then_some(now));
+        StoryOrder { moved: order.iter().filter(|(_, b)| b.is_some()).map(|(id, _)| *id).collect(), order: order.into_iter().map(|(id, _)| id).collect() }
+    }
+
+    fn rank(&self, id: i64) -> Option<usize> {
+        self.order.iter().position(|x| *x == id)
+    }
+
+    /// Whether stage `a` comes after stage `b` in the story.
+    fn after(&self, a: i64, b: i64) -> bool {
+        if self.moved.contains(&a) || self.moved.contains(&b) {
+            if let (Some(ra), Some(rb)) = (self.rank(a), self.rank(b)) {
+                return ra > rb;
+            }
+        }
+        a > b
+    }
+}
+
+/// `one_way_in` with the stages taken in story order: a stage set out of number order comes
+/// before `ending` when the story reaches it first, whatever its number.
+fn one_way_story(q: &Quest, ending: i64, dark: bool, alignment: i64, globals: &[crate::globals::Global], story: &StoryOrder) -> Vec<Step> {
+    if story.moved.is_empty() {
+        return one_way_in(q, ending, dark, alignment, globals);
+    }
+    let mut stages: Vec<&Stage> = q.stages.iter().filter(|s| s.stage == ending || (!s.end && story.after(ending, s.stage))).collect();
+    stages.sort_by_key(|s| (story.rank(s.stage).unwrap_or(usize::MAX), s.stage));
+    one_way_ordered(q, stages, ending, dark, alignment, globals)
+}
+
 /// The steps finishing `tag` at `ending` takes from where the save stands: one way through
-/// each stage after the quest's current stage (`one_way`, the way that suits the side), the
-/// ending's own steps last.
+/// each stage after the quest's current stage in story order (`one_way`, the way that suits
+/// the side), the ending's own steps last.
 fn finish_steps(save: &Save, q: &Quest, ending: i64, dark: bool) -> Vec<Step> {
     let now = save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map(|(_, v)| v).unwrap_or(-1);
     let alignment = save.player().map(crate::creature::alignment).unwrap_or(50);
-    let after: std::collections::HashSet<i64> = q.stages.iter().filter(|s| s.stage > now || s.stage == ending).map(|s| s.stage).collect();
+    let story = StoryOrder::of(save, q, now);
+    let after: std::collections::HashSet<i64> = q.stages.iter().filter(|s| s.stage == ending || (now < 0 || story.after(s.stage, now))).map(|s| s.stage).collect();
     let mut trimmed = q.clone();
     trimmed.stages.retain(|s| after.contains(&s.stage));
-    one_way_in(&trimmed, ending, dark, alignment, &story_values(save))
+    one_way_story(&trimmed, ending, dark, alignment, &story_values(save), &story)
 }
 
 /// Whether the side played changes what finishing `tag` at `ending` does from where the save
@@ -2462,6 +2608,8 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
     }
     let mut notes = Vec::new();
     let mut reached: Vec<(String, i64)> = Vec::new();
+    // the quest's stages in story order as the save stands, for the journal's XP below
+    let story = quest(save.game, tag).map(|(q, _)| StoryOrder::of(save, &q, was(tag).unwrap_or(-1))).unwrap_or_default();
     if let Some((q, _)) = quest(save.game, tag) {
         // the chapter the quest is in: its star map and the templates of its recruits
         let chapter = chapter_of_quest(save.game, tag).unwrap_or(serde_json::Value::Null);
@@ -2517,7 +2665,9 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
         reached.push((tag.to_string(), ending));
     }
     // the journal's experience for each stage reached that is new to the save, once
-    let xp: i64 = reached.iter().filter(|(t, s)| was(t).map_or(true, |w| *s > w || (t.eq_ignore_ascii_case(tag) && *s == ending && *s != w))).map(|(t, s)| xp_of(t, *s)).sum();
+    // (this quest's stages in story order: Carth's quest at 3 has had the talks 10 to 65)
+    let new = |t: &str, s: i64, w: i64| if t.eq_ignore_ascii_case(tag) { story.after(s, w) || (s == ending && s != w) } else { s > w };
+    let xp: i64 = reached.iter().filter(|(t, s)| was(t).map_or(true, |w| new(t, *s, w))).map(|(t, s)| xp_of(t, *s)).sum();
     save.set_quest(tag, ending);
     if xp != 0 {
         save.edit(Who::Player, &format!("finish.{}.xp", tag), |c| {
@@ -2609,17 +2759,23 @@ fn only_the_game(text: &str) -> Option<String> {
     if t.is_empty() || QUIET.iter().any(|q| t.contains(q)) {
         return None;
     }
+    // Said as what the step holds, not as what will happen: once the journal is past the step,
+    // the game may never run it (2026-11-07 audit, S-7: "A cutscene plays" promised it).
     if let Some(movie) = t.strip_prefix("PlayMovie(\"") {
-        return Some(format!("A cutscene plays ({})", movie.split('"').next().unwrap_or_default()));
+        return Some(format!("{}a cutscene ({})", LEFT_TO_THE_GAME, movie.split('"').next().unwrap_or_default()));
     }
     if let Some(rest) = t.strip_prefix("starts conversation ") {
-        return Some(format!("A conversation starts ({})", rest.trim_matches('"')));
+        return Some(format!("{}a conversation ({})", LEFT_TO_THE_GAME, rest.trim_matches('"')));
     }
     if let Some(rest) = t.strip_prefix("moves the party to module ") {
-        return Some(format!("The party is taken to {}", rest.trim_matches('"')));
+        return Some(format!("{}the party taken to {}", LEFT_TO_THE_GAME, rest.trim_matches('"')));
     }
-    Some(format!("Left to the game: {}", t))
+    Some(format!("{}{}", LEFT_TO_THE_GAME, t))
 }
+
+/// How a note of Finish Quest and Skip Ahead starts when the step it tells of is the game's to
+/// run, not the editor's: the Finish Quest pop-up lists these apart from what the editor did.
+pub const LEFT_TO_THE_GAME: &str = "Left to the game: ";
 
 /// A chapter's own quests for Skip Ahead's list, in the order a player meets them: the main
 /// story (the milestone's journal) first, then the rest as the quest file lists them. (tag,
@@ -2730,12 +2886,31 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
     let cat = crate::catalog::Catalog::build(data);
     crate::creature::validate_rewind_prefix(save.player().ok_or("This save has no player to rewind.")?, target, &cat)?;
     let before = Before::of(save);
+    let recruited_before: Vec<usize> = save.npcs().into_iter().filter(|i| save.recruited(*i)).collect();
     for m in undo.iter().rev() {
         let on_dark = played_dark(m, &quests, dark);
         let side = if on_dark { "dark" } else { "light" };
         let m = for_side(m, on_dark);
         let part = m.get("planet").and_then(|p| p.as_str()).map_or(false, is_unfinished);
         notes.extend(undo_chapter(save, data, &m, &kept_side, keep_items, side, &before, part));
+    }
+    // Items kept: what a companion who leaves has on goes to the party inventory, not away
+    // with them (2026-11-07, audit S-8). Their starting gear, entries the game makes into
+    // items as the save loads (`Save::slot_is_template`), stays with them: it is theirs.
+    if keep_items {
+        let mut moved = 0;
+        let left: Vec<usize> = recruited_before.into_iter().filter(|s| !save.recruited(*s)).collect();
+        for slot in left {
+            let worn: Vec<u32> = save.creature(Who::Npc(slot)).map(|c| crate::creature::equipped(c).iter().map(|i| i.id).collect()).unwrap_or_default();
+            for s in worn {
+                if save.unequip(Who::Npc(slot), s) {
+                    moved += 1;
+                }
+            }
+        }
+        if moved > 0 {
+            notes.push(format!("{} items worn by companions who leave go to the party inventory", moved));
+        }
     }
     restore_star_maps(save, data, &kept_side, &undo);
     // Prestige class story state goes with the class (KotOR 2).

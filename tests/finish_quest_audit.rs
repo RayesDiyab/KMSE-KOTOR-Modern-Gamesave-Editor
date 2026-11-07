@@ -214,3 +214,64 @@ fn a_finished_quest_is_not_finished_again() {
         assert!(checked > 0, "{:?}: saves with quests were there to check", game);
     }
 }
+
+/// Stages the story reaches out of number order (2026-11-07 audit, S-4): of the stages the
+/// game may lower the journal to, only those set in a later chapter than every stage numbered
+/// above them. All of KotOR II's RebuildHK47 may lower the stage, and all of it is on the
+/// Ebon Hawk: number order there.
+#[test]
+fn only_stages_set_in_a_later_chapter_are_out_of_order() {
+    let ids = |g: Game, t: &str| questdb::out_of_order_stages(g, t).into_iter().map(|(s, _)| s).collect::<Vec<_>>();
+    assert_eq!(ids(Game::K1, "k_swg_carthtalk"), vec![3], "Carth's revenge, on the Leviathan");
+    assert_eq!(ids(Game::K1, "k_swg_bastilatalk"), vec![1, 2], "Bastila on the Leviathan and the Unknown World");
+    assert!(ids(Game::K2, "RebuildHK47").is_empty());
+    let mut all = Vec::new();
+    for game in [Game::K1, Game::K2] {
+        let mut tags: Vec<String> = questdb::milestones_ref(game).iter().flat_map(|(p, _)| questdb::chapter_quests(game, p)).map(|(t, _)| t).collect();
+        tags.sort();
+        tags.dedup();
+        for t in tags {
+            for s in ids(game, &t) {
+                all.push(format!("{:?} {} {}", game, t, s));
+            }
+        }
+    }
+    assert_eq!(all, ["K1 k_swg_bastilatalk 1", "K1 k_swg_bastilatalk 2", "K1 k_swg_carthtalk 3"]);
+}
+
+/// Carth's quest at 3 ("revenge is complete", the Leviathan) is past his talks 10 to 70 on
+/// the Ebon Hawk: finishing it gives what finishing it from 70 gives, not every talk again
+/// (by number, 3 came first and Finish Quest replayed them all).
+#[test]
+fn finishing_carths_quest_from_the_leviathan_skips_his_talks() {
+    let Some((data, saves)) = setup(Game::K1) else { return eprintln!("KotOR is not installed or has no saves here: nothing checked") };
+    let tag = "k_swg_carthtalk";
+    let mut checked = 0;
+    for original in saves.iter().filter(|s| s.player().is_some()).take(3) {
+        // what finishing does: XP, credits and the story values (the talks give no XP or
+        // credits, but each sets Carth's own values)
+        let gain = |stage: i64| -> (i64, i64, Vec<String>) {
+            let mut s = original.clone();
+            s.set_quest(tag, stage);
+            let xp = kse_core::creature::experience(s.player().unwrap());
+            let credits = s.party_int("PT_GOLD").unwrap_or(0);
+            let values = |s: &Save| s.globals.as_ref().map(|g| globals::list(&g.root)).unwrap_or_default().into_iter().map(|g| format!("{}={:?}", g.name, g.value)).collect::<Vec<_>>();
+            let before = values(&s);
+            questdb::finish_quest(&mut s, &data, tag, 99, false).unwrap();
+            let changed = values(&s).into_iter().filter(|v| !before.contains(v)).collect();
+            (kse_core::creature::experience(s.player().unwrap()) - xp, s.party_int("PT_GOLD").unwrap_or(0) - credits, changed)
+        };
+        let (from_3, from_70, from_10) = (gain(3), gain(70), gain(10));
+        eprintln!("finishing from 3: {:?}\nfrom 70: {:?}\nfrom 10: {:?}", from_3, from_70, from_10);
+        assert_eq!(from_3, from_70, "at 3 the talks are behind");
+        assert_ne!(from_10, from_70, "from 10 the talks are ahead, and they change the save");
+        // the story's order as the Quests tab lists it: 3 after the talks, the endings last
+        let mut s = original.clone();
+        s.set_quest(tag, 3);
+        let (q, _) = questdb::quest(Game::K1, tag).unwrap();
+        let order: Vec<i64> = questdb::story_order(&s, tag, &q.stages.iter().map(|x| (x.stage, x.end)).collect::<Vec<_>>(), Some(3)).into_iter().map(|(id, _)| id).collect();
+        assert_eq!(order, [10, 15, 20, 25, 30, 35, 40, 43, 50, 55, 60, 65, 70, 3, 45, 75, 99]);
+        checked += 1;
+    }
+    assert!(checked > 0);
+}

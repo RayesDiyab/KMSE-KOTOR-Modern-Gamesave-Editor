@@ -6,7 +6,7 @@ use kse_core::{
     games::{find_installs, find_saves, Game},
     questdb,
     save::{Save, Who},
-    story_preview::{companion_name, Plan},
+    story_preview::{accessible_items, companion_name, inventory_changes, Plan},
 };
 use std::{fs, path::Path};
 
@@ -158,6 +158,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
                 kept: vec![get("Endar Spire")],
                 undo: vec![get("Taris")],
                 stage: Some(stage.clone()),
+                keep_items: false,
             };
             let partial_back = plan.prepare(&partial.save, &data).unwrap();
             let mut expected = partial.save.clone();
@@ -175,25 +176,49 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
             assert_eq!(files(&work), disk);
         }
 
-        // Back uses the story's inventory policy, never the old keep-items choice.
+        // Back takes the chapters' items and credits back unless "Keep my items and credits"
+        // is on (off when the pop-up opens).
         let back = Plan::Back {
             alignment: 50,
             unfinished: Vec::new(),
             kept: Vec::new(),
             undo: chapters.clone(),
             stage: None,
+            keep_items: false,
         };
         let rewound = back.prepare(&prepared.save, &data).unwrap();
         let mut expected = prepared.save.clone();
         let notes = questdb::go_back(&mut expected, &data, &[], &chapters, false, None).unwrap();
         same_result(&rewound.save, &expected);
         assert_eq!(rewound.notes, notes);
+        // kept: the engine's keep_items, and no inventory or credit change at all (2026-11-07)
+        let keep = Plan::Back {
+            alignment: 50,
+            unfinished: Vec::new(),
+            kept: Vec::new(),
+            undo: chapters.clone(),
+            stage: None,
+            keep_items: true,
+        };
+        let kept_items = keep.prepare(&prepared.save, &data).unwrap();
+        let mut expected = prepared.save.clone();
+        questdb::go_back(&mut expected, &data, &[], &chapters, true, None).unwrap();
+        same_result(&kept_items.save, &expected);
+        let still: Vec<String> = inventory_changes(&accessible_items(&prepared.save), &accessible_items(&kept_items.save))
+            .iter()
+            .map(|c| format!("{} {}", c.item.string("TemplateResRef").or_else(|| c.item.string("EquippedRes")).unwrap_or_default(), c.difference))
+            .collect();
+        assert!(still.is_empty(), "items kept: no inventory change, not {:?}", still);
+        assert_eq!(kept_items.save.party_int("PT_GOLD"), prepared.save.party_int("PT_GOLD"), "credits kept");
+        let taken = inventory_changes(&accessible_items(&prepared.save), &accessible_items(&rewound.save)).len();
+        eprintln!("going back takes {} kinds of item back; with them kept, none", taken);
         assert!(Plan::Back {
             alignment: 50,
             unfinished: Vec::new(),
             kept: Vec::new(),
             undo: Vec::new(),
-            stage: None
+            stage: None,
+            keep_items: false,
         }
         .prepare(&save, &data)
         .is_err());

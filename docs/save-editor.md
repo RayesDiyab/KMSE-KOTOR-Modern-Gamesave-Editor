@@ -124,7 +124,7 @@ modded game shows its mods.
 | Character | Experience | `Experience` | at least 0; buttons set the next level's or the highest level's XP from `exptable.2da` |
 | Character | Alignment | `GoodEvil` | 0 to 100 |
 | Character | Attributes | `Str` `Dex` `Con` `Int` `Wis` `Cha` | 1 to 100 |
-| Character | Add a Class | a second `ClassList` entry at level 1, its hit die added to `HitPoints`, its Force die to `ForcePoints`, for the player one more `LvlStatList` record, XP raised to the new level if short; then Health full and Force up by what its maximum rose, as the game's level-up leaves them | only when there is one class; droids get droid classes only |
+| Character | Add a Class | a second `ClassList` entry at level 1, its hit die added to `HitPoints`, its Force die to `ForcePoints`, for the player one more `LvlStatList` record, XP raised to the new level if short; then Health full and Force up by what its maximum rose, as the game's level-up leaves them | only when there is one class; droids get droid classes only; never Minion; KotOR II's Tech Specialist for party members only, and a prestige class only for a player with one Jedi class at level 15 or above (by class level or XP), as Kreia offers one; Change Class follows the same rules |
 | Character | Look | `PortraitId`, `Appearance_Type` (the portrait's body in the current build: `appearance_s`, `appearancenumber` or `appearance_l` of `portraits.2da`), `Gender` | portraits with `forpc` 1 |
 | Character | Position (player) | `XPosition`, `YPosition`, `ZPosition` | numbers only |
 | Character | Heal Everyone Fully | `CurrentHitPoints` and `CurrentForce` such that the game loads both at their maxima, for every creature (the player: equal to `HitPoints` and `ForcePoints`; a party member: above them by the bonuses the load leaves out) | |
@@ -396,13 +396,22 @@ companions. Stack splits, row order, object IDs and inventory positions do not c
 changes. Different upgrades and charges remain distinct. If the game supplies no icon,
 the item's name and quantity remain visible.
 
-Going back always uses the story's items and credits (`keep_items = false` in the existing
-story engine). It removes mapped rewards still held and restores what the story operation
-restores. This is not an earlier snapshot of everything the player bought, sold or used;
-that limit still applies. **Correction:** the earlier interface offered a keep-items
-choice, and this reference described a separate confirmation with a button on each row.
-The choice has been removed; the selected row's prepared result is reviewed and applied
-in this one popup.
+Going back uses the story's items and credits by default (`keep_items = false`). It
+removes mapped rewards still held, bought ones of the same kind too (the save cannot tell
+them apart), and restores what the story operation restores. This is not an earlier snapshot
+of everything the player bought, sold or used; that limit still applies. **Correction:** the
+earlier interface offered a keep-items choice, and this reference described a separate
+confirmation with a button on each row. The choice was removed; the selected row's prepared
+result is reviewed and applied in this one popup.
+
+**Keep my items and credits (2026-11-07, the maintainer; audit S-8).** The choice is back, as
+a switch under the pop-up's "Inventory changes", off each time the pop-up opens. On, Go Back
+runs with `keep_items = true`: no reward is taken back, credits stay, and the real items a
+companion who leaves has on go to the party inventory (`Save::unequip`). Their starting gear
+still in template form (only `EquippedRes`) stays with them: the game makes those items as
+the save loads, and the inventory changes no longer count them for anyone
+(`story_preview::accessible_items`). Checked by `tests/story_preview.rs`: with the switch on,
+no inventory or credit change in either game (9 and 34 kinds of item taken back with it off).
 
 Go Back restores classes from the chronological `LvlStatList` records that remain at
 the target level. It removes the recorded gains from later levels, restores XP and party
@@ -518,7 +527,8 @@ to have seen.
 not numbered in story order: KotOR's Carth sets stage 3 ("Carth's revenge is complete, Saul
 Karath is dead") on the Leviathan, after stage 65, with a journal call that may lower the stage
 (`bAllowOverrideHigher`; the quest data keeps that remark on the step). It came first, read
-"The Beginning" and offered "Start the Quest". Such stages (`questdb::lowered_stages`) now go
+"The Beginning" and offered "Start the Quest". Such stages (`questdb::out_of_order_stages` since
+2026-11-07; before, every stage with that remark, `questdb::lowered_stages`) now go
 just before the current stage when the save has been where they are set (it keeps that area, or
 the chapter the area belongs to is played; a save after the Leviathan no longer keeps the
 Leviathan's areas), else after the other stages; the endings come last, and a stage set out of
@@ -550,6 +560,24 @@ by `travel_sets_the_current_planet`.
 to the nearest walkable point that is clear, with 0.75 to each side, of every transition
 trigger's shape in the area's GIT (`Area::clear_of_exits`), as the offered exit spots already did. Stored area copies now keep
 each door's and trigger's own `Tag`.
+
+**Stages in the story's order (2026-11-07).** A quest's stages are taken in the order the story
+reaches them (`questdb::story_order`) by the Quests tab, Finish Quest (which stages are still
+ahead, and which give journal XP) and Skip to stage (which are passed, and where the journal
+ends up). That is number order, except for a stage set out of number order
+(`questdb::out_of_order_stages`): a step may lower the journal to it (`bAllowOverrideHigher`),
+and no later-numbered stage short of an ending is set in a chapter it is set in. In KotOR
+that is Carth's 3 (the Leviathan) and Bastila's 1 and 2 (the Leviathan, the Unknown World); in
+KotOR II none. Such a stage goes just before the current stage when the save has been where it
+is set, else after the others; endings last. By number, Carth's quest at 3 replayed his talks
+10 to 70 (they set `K_SWG_CARTH_LEVEL`) and paid their journal XP again. Checked by
+`tests/finish_quest_audit.rs`.
+
+**Party XP from quests (2026-11-07).** Journal and step XP go to the player and `PT_XP_POOL`;
+companions are not given theirs directly. In KotOR the game raises each companion to 80% of
+the pool as the save loads (Carth brought from Taris: 69,389 of 86,735, the maintainer, in the
+game). KotOR II's companions in three saves on this PC stand at 80% of the pool too (Atton
+26,790 of 33,400), but whether the game raises them on load is not checked in the game.
 
 **Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
 through one conversation line or script as its own step (a reply chosen, a condition met, an

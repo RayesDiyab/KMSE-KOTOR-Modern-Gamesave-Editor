@@ -2743,8 +2743,11 @@ export component EditorPage inherits Rectangle {
             }
         }
         property <bool> fits-mid: mid-row.preferred-width + self.tab-pad <= self.width;
+        // Spread over the whole bar, the first at its left end and the last at its right
+        // (2026-11-07, the maintainer: "more spread out so it fills the bar"). The row checks
+        // above keep at least the old room between them.
         HorizontalLayout {
-            alignment: start;
+            alignment: space-between;
             // Timeline (the galaxy map) is its own tab (2026-11-06, the maintainer), and so are
             // the planets and Pazaak, beside Quests, which was Story (the same day: "put Pazaak &
             // Destinations as a seperate menu tab / make Story called Quests"). They keep the
@@ -2756,7 +2759,8 @@ export component EditorPage inherits Rectangle {
                 { name: "Map", i: 5 }, { name: "Advanced", i: 6 },
             ]: Rectangle {
                 property <int> i: t.i;
-                width: tt.preferred-width + tabs.tab-pad;
+                // the words and room for the mark of changes after them (6 + 7 px)
+                width: tt.preferred-width + 14px;
                 tt := Text { y: 10px; text: t.name; font-family: Theme.list-font; font-size: tabs.tab-font; color: i == App.tab ? Theme.text : ta.has-hover ? Theme.muted : Theme.soft; }
                 if App.tab-changed[i]: Rectangle {
                     x: tt.x + tt.width + 6px;

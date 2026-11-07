@@ -67,6 +67,23 @@ CHANGELOG.
     they give, bought ones of the same kind too, and companions' XP is not rewound.
   - On KotOR's Endar Spire the Character tab says that the game sets XP and level itself there
     (the maintainer's untouched start save, 150 XP in the file, shows 3,080 in the game).
+  - Finish Quest and Skip to stage take a quest's stages in the story's order, as the Quests
+    tab lists them: Carth's quest at 3 (his revenge, on the Leviathan) no longer replays his
+    talks 10 to 70, nor pays their journal XP again. Only stages set in a later chapter than
+    every stage numbered above them count as out of order (Carth's 3, Bastila's 1 and 2), so
+    the Quests tab no longer shows KotOR II's RebuildHK47 stages 20 to 71 as passed at 10.
+  - The Finish Quest pop-up lists what the editor does apart from the steps only the game can
+    run ("Left to the game", once "Happens in the game"), and says the game may skip those
+    now that the quest is further on.
+  - The tabs are spread over the whole bar.
+  - Go Back can keep your items and credits: a switch under "Inventory changes", off when the
+    pop-up opens. On, nothing is taken back, and what a companion who leaves has on goes to
+    the party inventory. A companion's starting gear the game has not made into items yet is
+    no longer listed as an inventory change.
+  - Add a Class and Change Class offer only the classes the game gives: no Minion (the class
+    of ordinary enemies); KotOR II's Tech Specialist, Bao-Dur's class, to party members only;
+    a prestige class only to a player with one Jedi class at level 15 or above, as Kreia
+    offers it, with its side in the note. Party members get no prestige class.
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

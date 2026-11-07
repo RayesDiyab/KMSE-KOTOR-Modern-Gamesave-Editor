@@ -433,9 +433,11 @@ export global App {
     in property <[StoryItem]> story-items;
     in property <[Named]> story-grants;
     callback refresh-story-preview();
-    // Finish Quest's preview: what only the game does, in lines; whether the side matters for
-    // the ending picked, and the side (0 light, 1 dark); a new ending or side asks again
+    // Finish Quest's preview: what else the editor does, and the steps left to the game, in
+    // lines; whether the side matters for the ending picked, and the side (0 light, 1 dark); a
+    // new ending or side asks again
     in property <string> story-notes;
+    in property <string> story-game-notes;
     in property <bool> quest-side-matters;
     // per ending in quest-endings: 1 a light side ending, -1 a dark side one, 0 neither
     in property <[int]> quest-ending-sides;
@@ -468,6 +470,8 @@ export global App {
     in property <string> back-title;
     in property <string> back-summary;
     in-out property <int> back-alignment: 50;
+    // Go Back keeps the items and credits as they are now (off when the pop-up opens)
+    in-out property <bool> back-keep-items: false;
     // another save of the game, opened from the timeline
     callback open-timeline-save(int);
     // Open in the warning that open-timeline-save shows (overlay 15)

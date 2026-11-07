@@ -102,13 +102,13 @@ No row is VERIFIED for gameplay: nothing was loaded in a game (section E).
 | History list, Revert to This Backup | VERIFIED (backend) / PARTIAL (window) | VERIFIED (backend) / PARTIAL (window) | `restore.rs`, 9 tests incl. a held file and same-name saves; the pop-up seen in the program, a real revert not run on a real save |
 | Save As, Copy, rename | PARTIAL | PARTIAL | `save_as.rs` |
 | Attributes, skills, Health, Force | PARTIAL | PARTIAL | `edits.rs`, `audit_2026_11_07.rs`; E-3 remains |
-| Classes, levels | PARTIAL | PARTIAL | `levels.rs`, `level_grants.rs`; E-3, E-4, E-5 remain |
+| Classes, levels | PARTIAL | PARTIAL | `levels.rs`, `level_grants.rs`, `audit_2026_11_07.rs`; E-3 and E-4 fixed, E-5 remains |
 | Feats, powers | PARTIAL | PARTIAL | `abilities.rs`; E-10 remains |
 | Inventory, stacks, credits | PARTIAL | PARTIAL | `edits.rs` |
 | Equipment | PARTIAL | PARTIAL | `audit_fixes.rs`; E-8, E-9 remain |
 | Party, recruit, import | PARTIAL | PARTIAL | `audit_fixes.rs`, `audit_2026_11_07.rs`; E-6, E-7 remain |
 | Influence, components | NOT TESTED | PARTIAL | `edits.rs` (influence) |
-| Finish Quest | PARTIAL | PARTIAL | `finish_quest.rs` (84 + K2 finishes prepared), `finish_quest_audit.rs`; S-4, S-6, S-7 remain |
+| Finish Quest | PARTIAL | PARTIAL | `finish_quest.rs` (84 + K2 finishes prepared), `finish_quest_audit.rs`; S-4 and S-7 fixed later; S-6 open for KotOR II |
 | Skip Ahead, Go Back | PARTIAL | PARTIAL | `story_safety.rs`, `star_maps.rs`, `galaxy_route.rs`, `audit_fixes.rs`; S-8 remains |
 | Map, travel, spawn | PARTIAL | PARTIAL | `audit_round2.rs`, `exits.rs`; W-1, W-3, W-4, W-5 remain |
 | Pazaak, destinations | PARTIAL | PARTIAL | code read; W-8 remains |
@@ -245,13 +245,13 @@ Not fixed. Each was checked against the code, and none is P0 or P1.
 
 | ID | Sev | Game | What | Why left |
 | --- | --- | --- | --- | --- |
-| S-4 | P2 | both | Stage order is taken as number order in Finish Quest and Skip to stage; stages the game sets lower (`lowered_stages`, Carth's stage 3) replay earlier stages' rewards | needs the journal view's ordering rule moved into the engine and checked per quest |
-| S-6 | P2 | both | Journal and plot XP go to the player and `PT_XP_POOL` only; the game hands them out (`DistributeExperience`) to the party, scaled. Other quests' stages reached also give journal XP | partly answered in the game: KotOR raises a companion's XP to 80% of `PT_XP_POOL` when the save loads (Carth brought from Taris, 69,389 of a pool of 86,735), so what goes to the pool reaches the companions; KotOR 2 and the scaling unverified |
-| S-7 | P2 | both | "Happens in the game" lists events (a cutscene, a conversation) the game may never run once the journal is past them | wording change wants the maintainer's say |
-| S-8 | P2 | both | Go Back takes back the chapters' items up to the number they give, bought ones of the same kind among them; companions' XP is not rewound | the save cannot tell a bought item from a found one; **the pop-up now says so** (it claimed bought items were not undone, and that XP went back for all). The Endar Spire save's leftover AVAILNPCn of a companion not yet met is left: the game keeps such files itself (BOS_SAVE keeps Bastila's while she is not recruited) |
+| S-4 | P2 | both | ~~Stage order is taken as number order in Finish Quest and Skip to stage~~ | **fixed**: `questdb::story_order`, shared with the Quests tab. Only stages set in a later chapter than every stage numbered above them are out of order (K1: Carth's 3, Bastila's 1 and 2; the flag alone also marked all of RebuildHK47, which the tab then showed as passed). `finishing_carths_quest_from_the_leviathan_skips_his_talks`, `only_stages_set_in_a_later_chapter_are_out_of_order` |
+| S-6 | P2 | both | Journal and plot XP go to the player and `PT_XP_POOL` only; the game hands them out (`DistributeExperience`) to the party, scaled. Other quests' stages reached also give journal XP | partly answered in the game: KotOR raises a companion's XP to 80% of `PT_XP_POOL` when the save loads (Carth brought from Taris, 69,389 of a pool of 86,735), so what goes to the pool reaches the companions. KotOR II: in three saves on this PC its companions stand at 80% of the pool too (Atton 26,790 of 33,400); whether the game raises them on load is unchecked. The journal XP's way to `DistributeExperience` (0x005FE0C0, 13 callers) was not traced: REA timed out on swkotor2.exe |
+| S-7 | P2 | both | ~~"Happens in the game" lists events the game may never run once the journal is past them~~ | **fixed**: the pop-up lists what the editor did ("Also done") apart from the steps "Left to the game", and says the game may skip those |
+| S-8 | P2 | both | Go Back takes back the chapters' items up to the number they give, bought ones of the same kind among them; companions' XP is not rewound | the save cannot tell a bought item from a found one; **the pop-up now says so, and offers "Keep my items and credits"** (off by default; on, nothing is taken back and what departing companions wear goes to the party inventory) (it claimed bought items were not undone, and that XP went back for all). The Endar Spire save's leftover AVAILNPCn of a companion not yet met is left: the game keeps such files itself (BOS_SAVE keeps Bastila's while she is not recruited) |
 | S-9, S-10, S-11 | P3 | both | Skip/back previews show no notes; a panic in the preview worker leaves "Calculating"; script line clamp 0..255 against globals' -128..127 | small; listed |
 | E-3 | P2 | both | ~~Add a Class lets a Jedi player take a non-Jedi newest class, which sets Force to 0~~ | **fixed** in the second pass: only Jedi classes are offered then, in Add a Class and in Change Class of the newest class |
-| E-4 | P2 | both | Classes no player can get (Minion; K2 Tech Specialist, Bounty Hunter; prestige classes at any level) are offered | no game data tells them apart: `classes.2da` `playerclass` is 1 for Minion in both games and for KotOR II's "BountyHunter(CUT!!!)" (read 2026-11-07) |
+| E-4 | P2 | both | ~~Classes no player can get (Minion; K2 Tech Specialist, Bounty Hunter; prestige classes at any level) are offered~~ | **fixed** by a hand-kept rule, since no game data tells them apart (`classes.2da` `playerclass` is 1 for all of them): no Minion; Tech Specialist for party members only; a prestige class only for a player with one Jedi class at level 15 or above, party members never; the Bounty Hunter row has no name and was already hidden (`questdb::class_offered`, `audit_2026_11_07.rs`, rows checked against both games' tables). What the game does with a class it never gives was not tried |
 | E-5..E-15 | P3 | both | `MClassLevUpIn` left after removing a class; party leader flag; story lock on "With you"; equip checks in the backend; feat prerequisites; class change keeps granted feats; three classes from a damaged rewind; companion rename language; portrait changes gender; XP display above 2^31 | small or need a design choice |
 | W-1 | P2 | both | ~~Stored area copies drop each door's and trigger's own `Tag`~~ | **fixed**: measured in 12 KotOR areas, every one of 107 doors carries its own Tag (2 differ from the template), 8 of 160 triggers (1 differs); now kept |
 | W-2 | P2 | both | ~~Advanced, Creatures removes any creature with one click, party copies included~~ | **fixed** in part: a recruited member's own copy is refused, with the reason; other creatures still go with one click (a confirmation is a design change) |
@@ -279,7 +279,7 @@ What supports it:
 
 What stops a release candidate:
 - No edited save was loaded in either game.
-- Story features carry P2 defects that change gameplay state (S-4, S-6, S-8, E-3).
+- Story features carry a P2 defect that changes gameplay state: KotOR II's party XP from quests (S-6) is unchecked in the game. S-4, S-7, E-3 and E-4 are fixed; S-8 is answered by a switch that keeps the items.
 - The window does not fit a common laptop at 150% scaling (U-6).
 
 A beta should load edited saves in both games, above all Finish Quest, Skip Ahead, Go Back, companion import and travel, and report back.

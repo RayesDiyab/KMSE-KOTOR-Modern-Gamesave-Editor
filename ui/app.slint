@@ -332,10 +332,26 @@ component ItemCard inherits Rectangle {
 // sit in (rows 0), or in a box `rows` cards high that scrolls on its own.
 component StoryItems inherits VerticalLayout {
     in property <int> rows: 0;
+    // Go Back's choice to keep the items and credits, under the heading (2026-11-07, the
+    // maintainer): off, the changes below; on, none. Shown while the preview is worked out
+    // again too, so it does not jump away under the pointer.
+    in property <bool> keep-option: false;
     spacing: 10px;
     // the heading on its box, whatever room the pop-up gives
     alignment: start;
-    if App.story-preview-ready: Section { text: "INVENTORY CHANGES"; }
+    if App.story-preview-ready || root.keep-option: Section { text: "INVENTORY CHANGES"; }
+    if root.keep-option: HorizontalLayout {
+        spacing: 12px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Switch {
+                on: App.back-keep-items;
+                toggled(v) => { App.back-keep-items = v; App.refresh-story-preview(); }
+            }
+        }
+        Text { text: "Keep my items and credits"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
+    }
     if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
     if App.story-preview-ready && App.story-items.length > 0 && root.rows == 0: VerticalLayout {
         spacing: 8px;
@@ -419,7 +435,7 @@ component StoryPreviewDetails inherits Rectangle {
                 StoryValues { compact: root.back; }
                 // in the same scroll, right under the changes, as in Finish Quest (2026-11-07):
                 // in a box of its own at the column's foot, a tall window left a gap between them
-                StoryItems { }
+                StoryItems { keep-option: root.back; }
             }
         }
     }
@@ -1246,12 +1262,20 @@ export component AppWindow inherits Window {
                             height: self.preferred-height;
                             spacing: 18px;
                             StoryValues { }
-                            // what the game does itself when it gets there ("what only the game
-                            // does" until 2026-11-07: the maintainer found it unclear)
+                            // what else the editor does (a member let go, areas stored)
                             if App.story-preview-ready && App.story-notes != "": VerticalLayout {
                                 spacing: 10px;
-                                Section { text: "HAPPENS IN THE GAME"; }
+                                Section { text: "ALSO DONE"; }
                                 Note { text: App.story-notes; font-size: 13px * Theme.ts; color: Theme.muted; }
+                            }
+                            // the steps only the game can run. "Happens in the game" until
+                            // 2026-11-07 (audit, S-7): the game may never run a step the
+                            // journal is past, and the editor's own notes were listed there too
+                            if App.story-preview-ready && App.story-game-notes != "": VerticalLayout {
+                                spacing: 10px;
+                                Section { text: "LEFT TO THE GAME"; }
+                                Note { text: "The editor can't do these. The game may skip them now that the quest is further on."; font-size: 13px * Theme.ts; color: Theme.faint; }
+                                Note { text: App.story-game-notes; font-size: 13px * Theme.ts; color: Theme.muted; }
                             }
                             // in the same scroll as the rest: beside it, a reward's items took
                             // the room and hid the last rows of the changes
