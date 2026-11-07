@@ -48,6 +48,12 @@ The one thing this program must never do is damage a player's save.
   and stops if that fails. Every write therefore has a checked copy of exactly the files it
   replaces (`tests/backup_on_open.rs`). Do not add a write path that goes around this, and
   do not weaken it.
+- History's Revert to This Backup writes only through `save::restore`, which backs the
+  save up and checks that copy before it replaces anything. It stages and reads back every
+  file, swaps them so a failure puts every old file back, and compares the result with the
+  backup byte for byte. It refuses anything that is not one of this save's own backups and
+  opens as a save of the same game (`tests/restore.rs`, including a file held open part
+  way). Keep every one of those steps.
 - Keep the checks that stop a write: an original Xbox save (`SaveMeta.xbx` or
   `SaveImage.xbx` in the folder) is read only, because the Xbox checks a signature; and
   nothing is written while `swkotor.exe` or `swkotor2.exe` runs (`game_running` in

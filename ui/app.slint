@@ -726,7 +726,7 @@ export component AppWindow inherits Window {
         panel-height: 680px;
         title: "Backups of This Save";
         status: App.backup-rows.length == 1 ? "1 BACKUP" : App.backup-rows.length + " BACKUPS";
-        note: "Made when the save was opened, and before a save that had changed since. Each is the whole save folder as it was then; copy one's files over the save folder to have it back.";
+        note: "Made when the save was opened, and before a save that had changed since. Each is the whole save folder as it was then: pick one and Revert to This Backup to have it back. The save as it is is backed up first, so a revert can be undone here too.";
         VerticalLayout {
             spacing: 18px;
             Frame {
@@ -745,26 +745,30 @@ export component AppWindow inherits Window {
                             width: parent.width - 16px;
                             height: self.preferred-height;
                             spacing: 8px;
-                            for b[i] in App.backup-rows: Rectangle {
+                            for b[i] in App.backup-rows: brow := Rectangle {
+                                property <bool> picked: i == App.backup-picked;
                                 height: 58px * Theme.ts;
                                 border-radius: 8px;
-                                background: b.current ? Theme.selected : Theme.field;
-                                border-width: b.current ? 2px : 1px;
-                                border-color: b.current ? Theme.accent : Theme.frame-dim;
+                                background: self.picked ? Theme.selected : pick.has-hover ? Theme.hover : Theme.field;
+                                border-width: self.picked || pick.has-hover ? 2px : 1px;
+                                border-color: self.picked ? Theme.accent : pick.has-hover ? Theme.hover-edge : Theme.frame-dim;
+                                // picked for Revert to This Backup by a click anywhere on it
+                                pick := TouchArea { mouse-cursor: pointer; clicked => { App.backup-picked = i; } }
                                 Rectangle {
                                     x: 14px;
                                     width: 28px * Theme.ts; height: self.width;
                                     border-radius: self.width / 2;
                                     border-width: 1.5px;
-                                    border-color: b.current ? Theme.accent : Theme.frame-line;
-                                    Text { text: i + 1; font-family: Theme.label-font; font-size: 11px * Theme.ts; color: b.current ? Theme.accent : Theme.soft; }
+                                    border-color: brow.picked ? Theme.accent : Theme.frame-line;
+                                    background: brow.picked ? Theme.accent : transparent;
+                                    Text { text: i + 1; font-family: Theme.label-font; font-size: 11px * Theme.ts; color: brow.picked ? Theme.ink : Theme.soft; }
                                 }
                                 VerticalLayout {
                                     x: 14px + 28px * Theme.ts + 14px;
                                     width: parent.width - self.x - show.preferred-width - 32px - (b.current ? tag.preferred-width + 24px : 0px);
                                     alignment: center;
                                     spacing: 3px;
-                                    Text { text: b.when; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: b.current ? Theme.gold : Theme.text; overflow: elide; }
+                                    Text { text: b.when; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: brow.picked ? Theme.gold : Theme.text; overflow: elide; }
                                     Text { text: b.detail; font-size: 12.5px * Theme.ts; color: Theme.muted; overflow: elide; }
                                 }
                                 tag := Text {
@@ -791,9 +795,37 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+            // Close, and beside it the lit Revert to This Backup once a backup is picked
+            // (2026-11-07, the maintainer)
             HorizontalLayout {
+                spacing: 14px;
                 alignment: end;
-                Button { width: 170px; kind: 0; text: "Close"; clicked => { App.close-overlay(); } }
+                Button { width: 170px; text: "Close"; clicked => { App.close-overlay(); } }
+                Button {
+                    width: 400px;
+                    kind: 0;
+                    text: "Revert to This Backup";
+                    enabled: App.backup-picked >= 0 && App.backup-picked < App.backup-rows.length;
+                    clicked => { App.revert-to-backup(App.backup-picked); }
+                }
+            }
+        }
+    }
+
+    // Revert to This Backup, asked once more: when the backup was made, what happens, Cancel.
+    if App.overlay == 17: Overlay {
+        panel-width: 680px;
+        panel-height: 330px;
+        VerticalLayout {
+            spacing: 14px;
+            Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            Note { text: App.message-body; font-size: 15px * Theme.ts; color: Theme.muted; vertical-stretch: 1; }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: end;
+                // Cancel goes back to the list
+                Button { width: 170px; text: "Cancel"; clicked => { App.show-history(); } }
+                Button { width: 200px; kind: 0; text: "Revert"; clicked => { App.confirm-revert(); } }
             }
         }
     }

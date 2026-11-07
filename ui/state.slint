@@ -291,6 +291,11 @@ export global App {
     in property <[BackupRow]> backup-rows;
     callback show-history();
     callback show-backup(int);
+    // a row picked, then Revert to This Backup (2026-11-07, the maintainer): asked first in a
+    // pop-up of its own (overlay 17, message-title and message-body), then done
+    in-out property <int> backup-picked: -1;
+    callback revert-to-backup(int);
+    callback confirm-revert();
     // The saves page's pen: the selected save renamed on the game's Load screen
     callback rename-save(string);
     callback do-copy-save(string);

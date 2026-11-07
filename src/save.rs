@@ -1440,6 +1440,183 @@ pub fn civil(days: i64) -> (i64, i64, i64) {
     (yoe + era * 400 + (m <= 2) as i64, m, d)
 }
 
+/// What a restore did: the backup of the save made just before it was replaced.
+pub struct Restored {
+    pub before: PathBuf,
+}
+
+/// Puts the save folder `folder` back to its backup `backup` (2026-11-07, the maintainer:
+/// History's Revert to This Backup, "a safe feature ... impossible to break").
+///
+/// Refuses, with nothing changed, unless: no write into the save was cut off; `backup` is one
+/// of this save's own backups in `backups`, not the save itself; the backup opens as a save of
+/// the same game; neither folder has subfolders or a write's left-over files; no two of the
+/// files share a stem (the staged names are `<stem>.kmrp-new`); the save is not already the
+/// same as the backup. Then:
+/// 1. the save as it is now is backed up and that copy checked, so the restore can be undone;
+/// 2. every file of the backup is written beside the save as `<stem>.kmrp-new`, flushed to
+///    the disk and read back the same, before anything is replaced (a failure removes them
+///    and leaves the save as it was);
+/// 3. each save file is swapped for its new one, the old waiting as `<stem>.kmrp-old`; a file
+///    the backup does not have goes the same way; a failure part way puts every old file back;
+/// 4. the old files are removed and the save folder is compared with the backup, byte for
+///    byte, and opened as a save.
+/// A file that cannot be put back is named in the error, with HALF_WRITTEN and where the
+/// backup made in step 1 is.
+pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Result<Restored> {
+    if let Some(left) = interrupted_write(folder) {
+        return Err(format!("{} {}", INTERRUPTED, left));
+    }
+    let canon = |p: &Path| fs::canonicalize(p).map_err(|e| format!("{}: {}", p.display(), e));
+    let (cf, cb) = (canon(folder)?, canon(backup)?);
+    let own = canon(&backups.join(backup_name(folder)))?;
+    if cb.parent() != Some(own.as_path()) || cb == cf {
+        return Err("that folder is not one of this save's backups".into());
+    }
+    let listing = |p: &Path| -> Result<Vec<(String, PathBuf)>> {
+        let mut v = Vec::new();
+        for e in fs::read_dir(p).map_err(|e| format!("{}: {}", p.display(), e))? {
+            let e = e.map_err(|e| e.to_string())?;
+            let name = e.file_name().to_string_lossy().to_string();
+            if e.path().is_dir() {
+                return Err(format!("{} has a folder inside it ({}), which a save does not", p.display(), name));
+            }
+            if name.ends_with(".kmrp-new") || name.ends_with(".kmrp-old") {
+                return Err(format!("{} holds {}, left from a write", p.display(), name));
+            }
+            v.push((name, e.path()));
+        }
+        v.sort();
+        Ok(v)
+    };
+    let now = listing(folder)?;
+    let then = listing(backup)?;
+    let opened = Save::open(backup).map_err(|e| format!("the backup does not open as a save: {}", e))?;
+    if opened.game != game {
+        return Err("the backup is a save of the other game".into());
+    }
+    drop(opened);
+    let stem = |n: &str| Path::new(n).file_stem().map(|s| s.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let mut stems: Vec<String> = now.iter().chain(then.iter()).map(|(n, _)| n.to_ascii_lowercase()).collect();
+    stems.sort();
+    stems.dedup();
+    let mut seen = BTreeSet::new();
+    for n in &stems {
+        if !seen.insert(stem(n)) {
+            return Err(format!("two files share the name {} before their extension", stem(n)));
+        }
+    }
+    if same_files(folder, backup) {
+        return Err("the save is already the same as this backup".into());
+    }
+
+    // 1. the save as it is now, kept and checked
+    let before = make_backup(backups, game, folder)?;
+    let undo = |e: String| format!("{} (the save as it was is kept in {})", e, before.display());
+
+    // 2. every file of the backup staged beside the save, flushed and read back
+    let mut staged: Vec<PathBuf> = Vec::new();
+    let unstage = |staged: &[PathBuf]| staged.iter().for_each(|t| drop(fs::remove_file(t)));
+    let mut wanted: Vec<(String, PathBuf, PathBuf)> = Vec::new(); // name, its place, staged copy
+    for (name, src) in &then {
+        let bytes = match fs::read(src) {
+            Ok(b) => b,
+            Err(e) => {
+                unstage(&staged);
+                return Err(undo(format!("the backup's {} could not be read: {}", name, e)));
+            }
+        };
+        let place = folder.join(name);
+        let tmp = place.with_extension("kmrp-new");
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(&bytes)?;
+            f.sync_all()
+        });
+        staged.push(tmp.clone());
+        if let Err(e) = written {
+            unstage(&staged);
+            return Err(undo(format!("{}: {}", tmp.display(), e)));
+        }
+        if fs::read(&tmp).map_or(true, |b| b != bytes) {
+            unstage(&staged);
+            return Err(undo(format!("{} did not read back the same as the backup's file", tmp.display())));
+        }
+        wanted.push((name.clone(), place, tmp));
+    }
+
+    // 3. the swap; every step remembered so a failure can be undone in reverse
+    enum Step {
+        Aside(PathBuf), // a save file moved to its .kmrp-old name
+        In(PathBuf),    // a staged file moved into its place
+    }
+    let old_of = |p: &Path| p.with_extension("kmrp-old");
+    let mut steps: Vec<Step> = Vec::new();
+    let mut failed: Option<String> = None;
+    let have = |name: &str| now.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, p)| p.clone());
+    'swap: {
+        for (name, place, tmp) in &wanted {
+            if let Some(cur) = have(name) {
+                if let Err(e) = fs::rename(&cur, old_of(&cur)) {
+                    failed = Some(format!("{}: {}", cur.display(), e));
+                    break 'swap;
+                }
+                steps.push(Step::Aside(cur));
+            }
+            if let Err(e) = fs::rename(tmp, place) {
+                failed = Some(format!("{}: {}", place.display(), e));
+                break 'swap;
+            }
+            steps.push(Step::In(place.clone()));
+        }
+        // a file the backup does not have goes aside too, removed with the old ones
+        for (name, cur) in &now {
+            if wanted.iter().any(|(n, _, _)| n.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            if let Err(e) = fs::rename(cur, old_of(cur)) {
+                failed = Some(format!("{}: {}", cur.display(), e));
+                break 'swap;
+            }
+            steps.push(Step::Aside(cur.clone()));
+        }
+    }
+    if let Some(error) = failed {
+        let mut stuck = Vec::new();
+        for step in steps.iter().rev() {
+            match step {
+                Step::In(place) => {
+                    if let Err(e) = fs::remove_file(place) {
+                        stuck.push(format!("{}: {}", place.display(), e));
+                    }
+                }
+                Step::Aside(cur) => {
+                    if let Err(e) = fs::rename(old_of(cur), cur) {
+                        stuck.push(format!("{}: {}", cur.display(), e));
+                    }
+                }
+            }
+        }
+        unstage(&staged);
+        return Err(if stuck.is_empty() {
+            undo(error)
+        } else {
+            format!("{}. Copy the files of {} over the save folder. {}; {}", HALF_WRITTEN, before.display(), error, stuck.join("; "))
+        });
+    }
+
+    // 4. the old files removed, the result checked
+    for step in &steps {
+        if let Step::Aside(cur) = step {
+            let _ = fs::remove_file(old_of(cur));
+        }
+    }
+    if !same_files(folder, backup) || Save::open(folder).is_err() {
+        return Err(format!("{}. The restored save does not read back as the backup. Copy the files of {} over the save folder.", HALF_WRITTEN, before.display()));
+    }
+    Ok(Restored { before })
+}
+
 /// A new backup of the save folder `folder` in `backups`, read back and compared with the
 /// save; an error if the copy fails or does not read back the same.
 fn make_backup(backups: &Path, game: Game, folder: &Path) -> Result<PathBuf> {
@@ -1458,15 +1635,31 @@ pub fn backup_list(backups: &Path, folder: &Path) -> Vec<PathBuf> {
     let mut list: Vec<PathBuf> = fs::read_dir(&dir)
         .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect())
         .unwrap_or_default();
-    list.sort();
+    // "2026-11-07 10-00-00", then "... (2)", "... (3)" made in the same second, "(10)" after "(9)"
+    list.sort_by_key(|p| {
+        let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        match name.rsplit_once(" (").and_then(|(base, n)| n.strip_suffix(')').and_then(|n| n.parse::<u32>().ok()).map(|n| (base.to_string(), n))) {
+            Some((base, n)) => (base, n),
+            None => (name, 1),
+        }
+    });
     list
 }
 
 /// Whether folder `b` holds exactly the files of folder `a`, the same names and the same bytes,
-/// subfolders too. Only reads.
+/// subfolders too. A write's left-over `.kmrp-old` and `.kmrp-new` files are not the save's and
+/// are passed over on both sides. Only reads.
 pub fn same_files(a: &Path, b: &Path) -> bool {
     let names = |p: &Path| -> Option<Vec<(std::ffi::OsString, bool)>> {
-        let mut v: Vec<_> = fs::read_dir(p).ok()?.filter_map(|e| e.ok()).map(|e| (e.file_name(), e.path().is_dir())).collect();
+        let mut v: Vec<_> = fs::read_dir(p)
+            .ok()?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+                !n.ends_with(".kmrp-old") && !n.ends_with(".kmrp-new")
+            })
+            .map(|e| (e.file_name(), e.path().is_dir()))
+            .collect();
         v.sort();
         Some(v)
     };

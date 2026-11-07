@@ -673,7 +673,20 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
    fails. *Changed 2026-11-07, the maintainer:* until then the backup was made at saving.
    A save outside the game keeps its backups in the folder that holds it. The History button,
    between Copy and Settings, lists the open save's backups oldest first, the one the next
-   save checks marked, each with Show in Folder.
+   save checks marked, each with Show in Folder. A backup picked there and **Revert to This
+   Backup** (asked once more, with Cancel) puts the save back to it through `save::restore`.
+   It is refused where Save Changes is (an Xbox save, `pifo.ifo`, the game running), for a
+   folder that is not one of this save's own backups, for a backup that does not open as a
+   save of the same game, and where the save is already that backup. Otherwise:
+   1. the save as it is is backed up and that copy checked, so the revert shows in History
+      and can be undone;
+   2. each file of the backup is written beside the save as `<stem>.kmrp-new`, flushed and
+      read back;
+   3. the files are swapped with the old ones waiting as `<stem>.kmrp-old`, so a failure part
+      way puts every one back;
+   4. the result is compared with the backup byte for byte and opened as a save.
+   Changes not saved are lost, and the pop-up says so. `tests/restore.rs` runs all of this on
+   copies, including a file held open part way through the swap.
    *Corrected 2026-11-02:* backups were in the folder that holds the save until then, and for a
    KotOR 2 Steam Cloud save in the game's `saves` folder. Steam Cloud syncs all of KotOR 1's
    `Saves`, backups too (`remotecache.vdf` listed them), so they moved out. Backups made before

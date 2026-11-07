@@ -6,6 +6,14 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Revert to a backup from History** (2026-11-07, the maintainer: "a safe feature ...
+  impossible to break"). Pick a backup in History and press Revert to This Backup, then
+  confirm. The save as it is is backed up first, so a revert can itself be undone. The
+  backup's files are staged, flushed and read back before any file is replaced, and the swap
+  puts every old file back if one step fails. The result is compared with the backup byte for
+  byte. A folder that is not one of this save's backups, a damaged backup, one of the other
+  game, a running game and an Xbox save are refused with nothing changed. Tested on copies of
+  saves from both games (`tests/restore.rs`), including a file held open part way through.
 - **The backup is made when a save is opened, and checked before saving** (2026-11-07, the
   maintainer). Opening a save copies it to its backup folder and reads the copy back; an
   unchanged save keeps its newest backup instead of piling up copies. Save Changes first

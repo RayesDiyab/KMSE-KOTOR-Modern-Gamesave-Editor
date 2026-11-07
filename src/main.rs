@@ -341,6 +341,8 @@ struct State {
     story_prepared: Option<PreparedStory>,
     story_result: Arc<Mutex<Option<Result<PreparedStory, String>>>>,
     status: (String, bool),
+    // the backup History's Revert to This Backup asked about, until it is confirmed
+    revert_pick: Option<PathBuf>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -4098,6 +4100,7 @@ fn main() {
         saves: Vec::new(),
         shots: Arc::new(Mutex::new(HashMap::new())),
         portraits: HashMap::new(),
+        revert_pick: None,
         selected: 0,
         save: None,
         original: None,
@@ -5429,9 +5432,6 @@ fn main() {
         app.set_save_as_copy(false);
         app.set_overlay(14);
     });
-    // Copy: the name asked (filled with "<the save's name> - Copy"), then the save as it is on
-    // disk copied into the next free slot under it, the changes not in it; the save open stays
-    // open, changes and all (2026-10-24, the maintainer).
     // History: every backup of the open save, oldest first (2026-11-07, the maintainer); the
     // one this session's saving checks marked.
     on!(ui, state, on_show_history, |u, st| {
@@ -5453,6 +5453,7 @@ fn main() {
             .collect();
         let app = u.global::<App>();
         app.set_backup_rows(model(rows));
+        app.set_backup_picked(-1);
         app.set_overlay(16);
     });
     on!(ui, state, on_show_backup, |_u, st, i: i32| {
@@ -5461,6 +5462,74 @@ fn main() {
             open_path(p);
         }
     });
+    // Revert to This Backup (2026-11-07, the maintainer: "a safe feature ... impossible to
+    // break"): refused where Save Changes would be, asked in a pop-up of its own, then
+    // save::restore, which backs the save up first and checks every step.
+    on!(ui, state, on_revert_to_backup, |u, st, i: i32| {
+        st.revert_pick = None;
+        let Some(save) = st.save.as_ref() else { return };
+        let (game, folder, unsaved) = (save.game, save.folder.clone(), save.changes.len());
+        let Some(backup) = save::backup_list(&backups_of(st), &folder).get(i.max(0) as usize).cloned() else { return };
+        if let Some(why) = read_only_reason(&folder) {
+            message(&u, "This save cannot be reverted", why);
+            return;
+        }
+        if game_running(game) {
+            message(&u, &format!("{} is running", game.title()), "Close the game first. A save changed while the game runs can be overwritten by it, or loaded half old and half new.");
+            return;
+        }
+        if save::same_files(&folder, &backup) {
+            message(&u, "Nothing to revert", "The save on disk is already exactly this backup, file for file.");
+            return;
+        }
+        let made = when(std::fs::metadata(&backup).ok().and_then(|m| m.created().or_else(|_| m.modified()).ok()));
+        let mut body = "The save becomes exactly what this backup holds, file for file. The save as it is now is backed up first and listed in History, so this can be undone.".to_string();
+        if unsaved > 0 {
+            body.push_str(&format!(" The {} not saved yet {} lost.", if unsaved == 1 { "change" } else { "changes" }, if unsaved == 1 { "is" } else { "are" }));
+        }
+        st.revert_pick = Some(backup);
+        let app = u.global::<App>();
+        app.set_message_title(s(format!("Revert to {}?", made)));
+        app.set_message_body(s(body));
+        app.set_overlay(17);
+    });
+    on!(ui, state, on_confirm_revert, |u, st| {
+        let Some(backup) = st.revert_pick.take() else { return };
+        u.global::<App>().set_overlay(0);
+        let Some((game, folder)) = st.save.as_ref().map(|s| (s.game, s.folder.clone())) else { return };
+        // asked again: the game may have been started while the pop-up was open
+        if game_running(game) {
+            message(&u, &format!("{} is running", game.title()), "Close the game first. Nothing was reverted.");
+            return;
+        }
+        let made = when(std::fs::metadata(&backup).ok().and_then(|m| m.created().or_else(|_| m.modified()).ok()));
+        match save::restore(&folder, &backup, &backups_of(st), game) {
+            Ok(r) => {
+                if let (Ok(mut sv), Ok(orig)) = (Save::open(&folder), Save::open(&folder)) {
+                    // the save is now this backup, checked byte for byte: the next save checks it
+                    sv.backup = Some(backup.clone());
+                    st.save = Some(sv);
+                    st.original = Some(orig);
+                }
+                st.quest_xp.clear();
+                st.stage_pick = None;
+                st.map = None;
+                st.map_pick = None;
+                st.route_plan.clear();
+                forget_pending_spawns(st);
+                forget_timeline_saves(st);
+                st.shots.lock().unwrap().remove(&folder);
+                st.status = (format!("Reverted to the backup of {}. The save as it was is backed up in {}", made, r.before.display()), false);
+                fill_editor(&u, st);
+                fill_skip(&u, st);
+            }
+            Err(e) if e.starts_with(save::HALF_WRITTEN) => message(&u, "The save may be half written", &e),
+            Err(e) => message(&u, "Nothing was reverted", &e),
+        }
+    });
+    // Copy: the name asked (filled with "<the save's name> - Copy"), then the save as it is on
+    // disk copied into the next free slot under it, the changes not in it; the save open stays
+    // open, changes and all (2026-10-24, the maintainer).
     on!(ui, state, on_copy_save, |u, st| {
         let Some(folder) = copy_source(&u, st).map(|(_, f)| f) else { return };
         let name = save::summary(&folder).map(|x| x.name).unwrap_or_default();
