@@ -306,7 +306,9 @@ Quests; later that day the maintainer made each a tab of its own ("put Pazaak & 
 as a seperate menu tab / make Story called Quests"): **Quests**, then **Pazaak &
 Destinations** (planets and Pazaak, numbered 8 so the other tabs keep their numbers). Where the
 whole name does not fit beside the other tabs (measured unseen, the tab row with that name
-against the room; at 1280 by 780 it does not) the tab is "Pazaak". Its changes, `party.planet`
+against the room; at 1280 by 780 it does not) the tab is "Pazaak & Dest." (the maintainer's
+short name), measured the same way, and "Pazaak" only where even that does not fit. On a window
+under 1500 px the tabs' words are 16 px times the text size with 16 px after each. Its changes, `party.planet`
 and `party.pazaak`, put the orange mark on that tab. Its cards are five a row where the section
 is narrower than 1250 px, so the planets keep the room for their whole title, and a card's
 column is never narrower than 76 px times the text size (at 1280 by 780 a 74 px column cut the

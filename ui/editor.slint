@@ -2715,8 +2715,8 @@ export component EditorPage inherits Rectangle {
         height: 48px;
         Rectangle { x: 0; y: parent.height - 1px; height: 1px; background: Theme.edge; }
         // the tabs' words and the room after each
-        property <length> tab-font: (root.slim ? 17px : 18px) * Theme.ts;
-        property <length> tab-pad: 24px;
+        property <length> tab-font: (root.slim ? 16px : 18px) * Theme.ts;
+        property <length> tab-pad: root.slim ? 16px : 24px;
         // The tabs as they would be with the new tab's whole name, measured unseen: the whole
         // name only where it fits, else "Pazaak" (at 1600 by 900 with Large text it fits; at 1280
         // by 780 it does not)
@@ -2730,6 +2730,18 @@ export component EditorPage inherits Rectangle {
             }
         }
         property <bool> roomy: full-row.preferred-width + self.tab-pad <= self.width;
+        // the same with the short name the maintainer chose, "Pazaak & Dest." (2026-11-06); only
+        // where even that does not fit (the largest text on a small window) "Pazaak"
+        mid-row := HorizontalLayout {
+            visible: false;
+            spacing: tabs.tab-pad;
+            for n in ["Character", "Abilities", "Inventory", "Party", "Timeline", "Quests", "Pazaak & Dest.", "Map", "Advanced"]: Text {
+                text: n;
+                font-family: Theme.list-font;
+                font-size: tabs.tab-font;
+            }
+        }
+        property <bool> fits-mid: mid-row.preferred-width + self.tab-pad <= self.width;
         HorizontalLayout {
             alignment: start;
             // Timeline (the galaxy map) is its own tab (2026-11-06, the maintainer), and so are
@@ -2739,7 +2751,7 @@ export component EditorPage inherits Rectangle {
             for t in [
                 { name: "Character", i: 0 }, { name: "Abilities", i: 1 }, { name: "Inventory", i: 2 },
                 { name: "Party", i: 3 }, { name: "Timeline", i: 7 }, { name: "Quests", i: 4 },
-                { name: tabs.roomy ? "Pazaak & Destinations" : "Pazaak", i: 8 },
+                { name: tabs.roomy ? "Pazaak & Destinations" : tabs.fits-mid ? "Pazaak & Dest." : "Pazaak", i: 8 },
                 { name: "Map", i: 5 }, { name: "Advanced", i: 6 },
             ]: Rectangle {
                 property <int> i: t.i;

@@ -9,7 +9,8 @@ CHANGELOG.
 - **Pazaak & Destinations is a tab of its own, and Story is Quests** (2026-11-06, the
   maintainer). The planets the Ebon Hawk can fly to and the Pazaak cards have their own tab
   beside Quests, with its own mark for changes; Quests is the quest tracker alone. On a narrow
-  window the new tab reads "Pazaak" (its whole name is shown wherever it fits, measured) and
+  window the new tab reads "Pazaak & Dest." (its whole name is shown wherever it fits,
+  measured; "Pazaak" where neither fits, as with the largest text on a small window) and
   the cards go five a row so the planets keep their whole title; the cards' counts are never
   cut. The tabs are a little smaller so all nine fit. Hints that sent players to "Story,
   Quests" and "Story, Creatures" name the right places. Looked at in the program at 1600 by
