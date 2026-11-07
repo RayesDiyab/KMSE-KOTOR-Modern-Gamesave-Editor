@@ -601,7 +601,10 @@ to 80% of the pool as the save loads, as the maintainer saw in the game. In KotO
 brought from Taris showed 69,389 of a pool of 86,735. In KotOR II, a Telos save with the fuel
 quest finished (the pool 1,100 higher, the companions left as they were in the file) showed
 Atton and Kreia at 28,993, 80% of the new pool of 36,240 rounded up, where the file held
-28,258 and 28,257.
+28,258 and 28,257. A finish that moves another quest forward also gives that quest's journal
+XP, as the game does: KotOR's AddJournalQuestEntry (0x005483F0, the maintainer's
+reconstruction) pays the new stage's XP for whichever quest a script names, and only when the
+stage goes up, which is the rule Finish Quest follows.
 
 **Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
 through one conversation line or script as its own step (a reply chosen, a condition met, an
