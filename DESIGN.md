@@ -182,6 +182,9 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 - **Gain Green**: positive quantities and granted abilities in the story preview, paired
   with a plus sign. `Theme.gain` uses a darker green in light mode so small quantities
   remain readable. Negative quantities use Danger Red and a minus sign.
+- **Light Side Blue** and **Dark Side Red** (`Theme.light-side`, `Theme.dark-side`): the
+  alignment bar's two ends (#3b8fe0, #b8333a), lifted on dark panels and deepened on light
+  ones; only for what belongs to a side, as the tags on Finish Quest's endings.
 - **Danger Red**: "COULD NOT SAVE", the status box border on failure, and a remove cross on hover.
 
 ### Neutral
@@ -198,6 +201,12 @@ Deep navy (or deep green-black for KotOR II) with a single holo accent, gold for
 
 ### Named Rules
 **The Orange Means Unsaved Rule.** Orange appears only on something changed since the last save (or a warning about the save itself). If nothing is pending, no orange is on screen.
+
+**The Change Colours Rule** (2026-11-06, the maintainer). Wherever the program shows a change
+before it happens, what goes up or is gained is Gain Green, what goes down or is lost Danger
+Red, and the value after the change Crest Gold; what stays the same is plain Text. The words
+that say so ("Added", "Removed", "Quest finished") take the same green and red. A gain written
+elsewhere (a stage's "+500 XP") is green too.
 
 **The One World Per Game Rule.** A screen is all cyan (KotOR) or all teal (KotOR II). Accent, fills and ink switch together with the game; the structure never changes.
 

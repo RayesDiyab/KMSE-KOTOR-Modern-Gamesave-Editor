@@ -4824,7 +4824,14 @@ fn main() {
         request_quest_preview(&u, st);
     });
     on!(ui, state, on_open_finish_quest, |u, st| {
-        // the pop-up opens on the ending picked and the light side, and asks for its result
+        // the pop-up opens on the ending picked and the light side, and asks for its result;
+        // each ending marked light or dark where it is one (2026-11-06, the maintainer)
+        let app = u.global::<App>();
+        let sides: Vec<i32> = match (st.quest_pick.clone(), st.save.as_ref()) {
+            (Some(tag), Some(save)) => app.get_quest_endings().iter().map(|e| kse_core::questdb::ending_side(save, &tag, e.id as i64)).collect(),
+            _ => Vec::new(),
+        };
+        app.set_quest_ending_sides(model(sides));
         u.global::<App>().set_quest_dark(0);
         u.global::<App>().set_overlay(8);
         request_quest_preview(&u, st);

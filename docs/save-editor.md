@@ -557,6 +557,21 @@ prepared from untouched. Seen in the program: Genoharadan: Ithorak's "bounty col
 gives 1,000 XP and the GenoHaradan Power Gloves; a KotOR II bonus quest 1,050 XP (1,000 from
 its script, 50 from the journal). **In the game, untested.**
 
+An ending is tagged LIGHT SIDE or DARK SIDE where its own stage raises or lowers alignment on
+both its ways (`questdb::ending_side`; an earlier stage every ending shares says nothing about
+any one of them). Counted on 2026-11-06: in KotOR II 10 endings read light, 12 dark, 221
+neither. In the list of changes, what goes up is green, what goes down red and the value after
+gold, as everywhere a change is shown (DESIGN.md, the Change Colours Rule); the right side is
+one scroll, so a reward's items no longer hide the last changes.
+
+**The quest view, restyled 2026-11-06** (the maintainer: it "looks a bit like not a part of the
+rest of the program"; reviewed with the Impeccable design rules): spaced section labels
+(JOURNAL ENTRY, STAGE 2 OF 6) over plain text on the panel, as the other tabs have, where the
+journal entry and the picked stage sat in bordered boxes that read like input fields, the stage
+in a yellow frame; its buttons are outlined, as the one filled button of the editor is Save
+Changes; Finish Quest, Start Quest and Take Out of the Journal sit along the bottom behind a
+hairline. A stage's XP is green.
+
 **Removing what was spawned** (2026-10-22): a creature the editor spawned, picked on the map,
 offers Remove This Creature; the area's own creatures do not (Advanced, Creatures still lists
 every creature for modders). The editor records each spawn in `spawned.txt` beside its

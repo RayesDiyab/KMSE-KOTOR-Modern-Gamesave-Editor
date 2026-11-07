@@ -1384,15 +1384,20 @@ component JournalSection inherits Rectangle {
     }
 
     // The quest.
+    // The quest picked, in the editor's own grammar (2026-11-06, the maintainer: the right side
+    // "looks a bit like not a part of the rest of the program"): spaced section labels over
+    // plain text on the panel, as the other tabs have, instead of bordered boxes that read like
+    // fields and a yellow frame; outline buttons, as the one filled button of a screen is Save
+    // Changes; what to do with the quest along the bottom behind a hairline.
     if App.quest-shown: Rectangle {
         x: list-w + 34px;
         width: parent.width - self.x;
         VerticalLayout {
-            spacing: 12px;
+            spacing: 0px;
+            // the quest and where it stands
             HorizontalLayout {
                 spacing: 14px;
-                Text { text: App.quest-title; font-family: Theme.title-font; font-size: 24px * Theme.ts; color: Theme.text; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
-                // Where it stands, as a small tag.
+                Text { text: App.quest-title; font-family: Theme.title-font; font-size: 26px * Theme.ts; color: Theme.text; overflow: elide; vertical-alignment: center; horizontal-stretch: 1; }
                 VerticalLayout {
                     alignment: center;
                     Rectangle {
@@ -1411,85 +1416,83 @@ component JournalSection inherits Rectangle {
                     }
                 }
             }
-            // The journal entry where the quest stands, in full.
-            Rectangle {
-                border-radius: 8px;
-                border-width: 1px;
-                border-color: Theme.edge;
-                background: Theme.field;
-                height: entry.preferred-height + 28px;
-                entry := Text {
-                    x: 16px;
-                    width: parent.width - 32px;
-                    text: App.quest-text;
+            Rectangle { height: 14px; }
+            Rectangle { height: 1px; background: Theme.row-line; }
+            Rectangle { height: 18px; }
+            // the journal entry where the quest stands, in full
+            Label { text: App.quest-state == 2 ? "NOT IN THE JOURNAL" : "JOURNAL ENTRY"; }
+            Rectangle { height: 10px; }
+            Text {
+                text: App.quest-text;
+                wrap: word-wrap;
+                font-family: Theme.body-font;
+                font-size: 15px * Theme.ts;
+                color: Theme.text;
+            }
+            Rectangle { height: 28px; }
+            // the stage picked in the list, in full, with what it does
+            if App.stage-pick >= 0 && App.stage-pick < App.quest-stages.length: VerticalLayout {
+                property <StageRow> g: App.quest-stages[App.stage-pick];
+                spacing: 0px;
+                // its own height: the spare room goes below, not between its parts
+                vertical-stretch: 0;
+                alignment: start;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Label { text: g.end ? "ENDING" : App.stage-pick == 0 ? "THE BEGINNING" : "STAGE " + (App.stage-pick + 1) + " OF " + App.quest-stages.length; vertical-alignment: center; horizontal-stretch: 1; }
+                    // a gain, in the colour of a gain
+                    if g.xp > 0: Text { text: "+" + g.xp + " XP"; vertical-alignment: center; font-family: Theme.list-font; font-size: 15px * Theme.ts; color: Theme.gain; }
+                }
+                Rectangle { height: 10px; }
+                Text {
+                    text: App.stage-text != "" ? App.stage-text : "Stage " + g.id;
                     wrap: word-wrap;
                     font-family: Theme.body-font;
-                    font-size: 14.5px * Theme.ts;
+                    font-size: 15px * Theme.ts;
                     color: Theme.muted;
                 }
-            }
-            // the stage picked in the list, in full, with what it does
-            if App.stage-pick >= 0 && App.stage-pick < App.quest-stages.length: Rectangle {
-                vertical-stretch: 1;
-                property <StageRow> g: App.quest-stages[App.stage-pick];
-                VerticalLayout {
-                    spacing: 12px;
+                Rectangle { height: 16px; }
+                HorizontalLayout {
                     alignment: start;
-                    HorizontalLayout {
-                        spacing: 12px;
-                        Label { text: g.end ? "ENDING" : App.stage-pick == 0 ? "THE BEGINNING" : "STAGE " + (App.stage-pick + 1) + " OF " + App.quest-stages.length; vertical-alignment: center; horizontal-stretch: 1; }
-                        if g.xp > 0: Text { text: "+" + g.xp + " XP"; vertical-alignment: center; font-family: Theme.list-font; font-size: 15px * Theme.ts; color: Theme.gold; }
-                    }
-                    Rectangle {
-                        border-radius: 8px;
-                        border-width: 2px;
-                        border-color: Theme.hover-edge;
-                        background: Theme.field;
-                        height: stage-entry.preferred-height + 28px;
-                        stage-entry := Text {
-                            x: 16px;
-                            width: parent.width - 32px;
-                            text: App.stage-text != "" ? App.stage-text : "Stage " + g.id;
-                            wrap: word-wrap;
-                            font-family: Theme.body-font;
-                            font-size: 14.5px * Theme.ts;
-                            color: Theme.text;
-                        }
-                    }
-                    HorizontalLayout {
-                        alignment: start;
-                        Button {
-                            kind: 0;
-                            enabled: App.stage-action != 3;
-                            text: App.stage-action == 0 ? "Start the Quest"
-                                : App.stage-action == 1 ? "Start Quest at This Point"
-                                : App.stage-action == 2 ? "Finish the Quest"
-                                : "The Quest Is Here";
-                            clicked => {
-                                if (App.stage-action == 2) {
-                                    App.finish-pick = max(0, App.stage-ending);
-                                    App.open-finish-quest();
-                                } else {
-                                    App.set-quest-stage(g.id);
-                                }
+                    spacing: 16px;
+                    vertical-stretch: 0;
+                    Button {
+                        kind: 3;
+                        enabled: App.stage-action != 3;
+                        text: App.stage-action == 0 ? "Start the Quest"
+                            : App.stage-action == 1 ? "Start Quest at This Point"
+                            : App.stage-action == 2 ? "Finish the Quest"
+                            : "The Quest Is Here";
+                        clicked => {
+                            if (App.stage-action == 2) {
+                                App.finish-pick = max(0, App.stage-ending);
+                                App.open-finish-quest();
+                            } else {
+                                App.set-quest-stage(g.id);
                             }
                         }
                     }
-                    Note { text: App.stage-action == 2 ? "Finishing plays the quest to this ending as the game would, and shows what you receive before anything changes." : "The quest's experience for reaching this point is given once, as the game gives it."; }
+                    Note {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        text: App.stage-action == 2 ? "Plays the quest to this ending as the game would; you see what you receive first." : "The quest's experience for reaching this point is given once, as the game gives it.";
+                    }
                 }
             }
-            if App.stage-pick < 0: Note { vertical-stretch: 1; text: "Open the quest on the left and pick one of its stages to see it in full and start or finish the quest there."; }
-            // What to do with it.
+            if App.stage-pick < 0: Note { text: "Open the quest on the left and pick one of its stages to see it in full and start or finish the quest there."; }
+            Rectangle { vertical-stretch: 1; }
+            // what to do with the quest
+            Rectangle { height: 1px; background: Theme.row-line; }
+            Rectangle { height: 16px; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: start;
-                if App.quest-state != 1 && App.quest-endings.length > 0 && App.stage-pick < 0: Button {
-                    width: 240px;
-                    kind: 0;
+                if App.quest-state != 1 && App.quest-endings.length > 0: Button {
+                    kind: 1;
                     text: "Finish Quest";
-                    clicked => { App.finish-pick = 0; App.open-finish-quest(); }
+                    clicked => { App.finish-pick = max(0, App.stage-ending); App.open-finish-quest(); }
                 }
-                if App.quest-state == 2 && App.quest-stages.length > 0 && App.stage-pick < 0: Button {
+                if App.quest-state == 2 && App.quest-stages.length > 0: Button {
                     kind: 1;
                     text: "Start Quest";
                     clicked => { App.set-quest-stage(App.quest-stages[0].id); }
@@ -1503,7 +1506,6 @@ component JournalSection inherits Rectangle {
         }
     }
 }
-
 
 // A small arrow on a route stop: moves a free planet one place earlier (left) or later.
 component ArrowButton inherits Rectangle {

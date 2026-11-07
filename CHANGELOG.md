@@ -6,6 +6,13 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Light and dark endings are marked, and changes have one colour language** (2026-11-06,
+  the maintainer). Finish Quest tags an ending LIGHT SIDE or DARK SIDE where its own stage
+  moves alignment that way. Wherever a change is shown before it happens (Finish Quest, Skip
+  Ahead, Go Back), what goes up is green, what goes down red and the value after gold;
+  "Added" and "Removed" follow. The Quests tab's right side is restyled in the editor's own
+  grammar (section labels over plain text, outline buttons, actions along the bottom), and a
+  stage's XP is green. Looked at in the program at 1600 by 900 and 1280 by 780.
 - **Finish Quest plays the quest to its end, and shows what you receive first** (2026-11-06,
   the maintainer). It is always as if played from where the save stands: one way through each
   stage left, the one that suits the side, with its items, credits, XP, alignment, story values,

@@ -54,6 +54,10 @@ export global Theme {
     // teal (where green would read as the accent).
     out property <color> save-mark: k2 ? (dark ? #60b2ff : #2a6fb8) : good;
     out property <color> danger: dark ? #ff6b6b : #c0392b;
+    // The light and the dark side, as the alignment bar's ends (#3b8fe0, #b8333a), lifted on a
+    // dark panel and deepened on a light one so a small tag stays readable
+    out property <color> light-side: dark ? #5ea8f0 : #1f64b0;
+    out property <color> dark-side: dark ? #e0606a : #a3242e;
     out property <color> grey-top: dark ? #566272 : #c9d2dc;
     out property <color> grey-bottom: dark ? #424d5c : #b6c0cb;
     out property <color> scrim: dark ? #03060cbc : #1a2a3a66;

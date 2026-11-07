@@ -78,22 +78,34 @@ component StoryValues inherits VerticalLayout {
             Text { width: parent.width * 0.43; text: "CURRENT  →  AFTER"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
             Text { text: "DIFFERENCE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
         }
+        // One colour language everywhere (2026-11-06, the maintainer): what goes up is green,
+        // what goes down red, the value after the change gold, what stays the same plain.
         for r in App.story-values: Rectangle {
             height: root.compact ? 34px : 40px;
             HorizontalLayout {
                 spacing: 0px;
                 Text { width: parent.width * 0.34; text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; }
-                Text { width: parent.width * 0.43; text: r.changed ? r.before + " → " + r.after : r.before; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; wrap: word-wrap; overflow: elide; }
+                HorizontalLayout {
+                    width: parent.width * 0.43;
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: r.before; font-size: 13.5px * Theme.ts; color: r.changed ? Theme.muted : Theme.text; vertical-alignment: center; overflow: elide; }
+                    if r.changed: Text { text: "→"; font-size: 13.5px * Theme.ts; color: Theme.faint; vertical-alignment: center; }
+                    if r.changed: Text { text: r.after; font-size: 13.5px * Theme.ts; color: Theme.gold; vertical-alignment: center; overflow: elide; }
+                }
                 Text { text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center; }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
         }
-        for r in App.story-grants: HorizontalLayout {
+        for r in App.story-grants: Rectangle {
             height: 38px;
-            spacing: 10px;
-            Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
-            Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-            Text { text: r.note; font-size: 11px * Theme.ts; color: Theme.soft; vertical-alignment: center; }
+            HorizontalLayout {
+                spacing: 10px;
+                Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
+                Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                Text { text: r.note; font-size: 11px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
         }
     }
 }
@@ -131,7 +143,7 @@ component StoryItems inherits VerticalLayout {
                         alignment: center;
                         spacing: 2px;
                         Text { text: r.name; font-size: 13px * Theme.ts; color: Theme.text; wrap: word-wrap; overflow: elide; max-height: 2.6 * 13px * Theme.ts; }
-                        Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
+                        Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: r.gained ? Theme.gain : Theme.danger; }
                     }
                     Text {
                         x: parent.width - 80px; width: 72px; height: parent.height;
@@ -805,8 +817,7 @@ export component AppWindow inherits Window {
         property <int> chosen: App.finish-pick;
         VerticalLayout {
             spacing: 10px;
-            Label { text: "FINISH A QUEST"; font-size: 13px * Theme.ts; }
-            Text { text: App.quest-title; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            Text { text: "Finish " + App.quest-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
             Note {
                 font-size: 14px * Theme.ts;
                 text: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup is made first.";
@@ -827,7 +838,7 @@ export component AppWindow inherits Window {
                             x: 0px; y: 0px;
                             width: parent.width - 12px;
                             spacing: 8px;
-                            for x[i] in App.quest-endings: Rectangle {
+                            for x[i] in App.quest-endings: card := Rectangle {
                                 // as tall as its words: a long ending was cut and began
                                 // mid-sentence in a box of 88 px
                                 height: max(64px, et.preferred-height + 28px);
@@ -843,9 +854,27 @@ export component AppWindow inherits Window {
                                     border-color: i == chosen ? Theme.accent : Theme.edge;
                                     if i == chosen: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
                                 }
+                                // light or dark, where the ending is one (2026-11-06, the maintainer)
+                                property <int> side: i < App.quest-ending-sides.length ? App.quest-ending-sides[i] : 0;
+                                if self.side != 0: Rectangle {
+                                    x: parent.width - self.width - 12px;
+                                    y: 12px;
+                                    height: 20px * Theme.ts;
+                                    width: side-tag.preferred-width + 16px;
+                                    border-radius: self.height / 2;
+                                    border-width: 1px;
+                                    border-color: card.side > 0 ? Theme.light-side : Theme.dark-side;
+                                    side-tag := Text {
+                                        text: card.side > 0 ? "LIGHT SIDE" : "DARK SIDE";
+                                        font-family: Theme.label-font;
+                                        font-size: 9.5px * Theme.ts;
+                                        letter-spacing: 1.5px;
+                                        color: card.side > 0 ? Theme.light-side : Theme.dark-side;
+                                    }
+                                }
                                 et := Text {
                                     x: 46px; y: 14px;
-                                    width: parent.width - 46px - 14px;
+                                    width: parent.width - 46px - 14px - (card.side != 0 ? 110px * Theme.ts : 0px);
                                     // the words alone: the XP the ending gives in all is on the right (the
                                     // journal's own XP here read 1,000 where finishing gives 1,050)
                                     text: x.text != "" ? x.text : "Ending " + x.id;
@@ -896,9 +925,11 @@ export component AppWindow inherits Window {
                                 Label { text: "WHAT ONLY THE GAME DOES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
                                 Note { text: App.story-notes; font-size: 13px * Theme.ts; }
                             }
+                            // in the same scroll as the rest: beside it, a reward's items took
+                            // the room and hid the last rows of the changes
+                            StoryItems { rows: 2; }
                         }
                     }
-                    StoryItems { rows: 2; }
                 }
             }
             Rectangle { height: 1px; background: Theme.row-line; }

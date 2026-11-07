@@ -2221,6 +2221,24 @@ pub fn finish_side_matters(save: &Save, tag: &str, ending: i64) -> bool {
     key(finish_steps(save, &q, ending, false)) != key(finish_steps(save, &q, ending, true))
 }
 
+/// The side an ending belongs to: 1 light, -1 dark, 0 neither. Light when the ending's own
+/// stage raises alignment on both its light and its dark way, dark when it lowers it on both;
+/// an ending whose ways go both ways is neither (the pop-up asks the side for it). Only the
+/// ending's own stage counts: an earlier stage both endings share says nothing about either
+/// (Genoharadan: Ithorak's -4 comes before both its endings; counting it read both "dark").
+pub fn ending_side(save: &Save, tag: &str, ending: i64) -> i32 {
+    let Some((mut q, _)) = quest(save.game, tag) else { return 0 };
+    q.stages.retain(|s| s.stage == ending);
+    let alignment = save.player().map(crate::creature::alignment).unwrap_or(50);
+    let of = |e: &serde_json::Value, k: &str| e.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+    let moved = |dark: bool| -> i64 { one_way(&q, ending, dark, alignment).iter().flat_map(|s| &s.does).map(|e| of(e, "light_side") - of(e, "dark_side")).sum() };
+    match (moved(false), moved(true)) {
+        (a, b) if a > 0 && b > 0 => 1,
+        (a, b) if a < 0 && b < 0 => -1,
+        _ => 0,
+    }
+}
+
 /// Finishes a quest as if played from where the save stands: the steps the game takes on one
 /// way to `ending` (journal stages, story values, items, credits, XP, alignment, doors and
 /// the flags people read), the journal's own experience for every quest stage those steps
