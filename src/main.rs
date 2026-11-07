@@ -109,13 +109,20 @@ fn local_offset() -> i64 {
     OFFSET.with(|o| *o)
 }
 
+/// A program of Windows by its full path in the Windows folder (`%SystemRoot%`), never a bare
+/// name the program's own folder could answer to.
+fn windows_tool(relative: &str) -> PathBuf {
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\Windows"));
+    root.join(relative)
+}
+
 fn open_path(path: &Path) {
     let program = if cfg!(windows) {
-        "explorer"
+        windows_tool("explorer.exe")
     } else if cfg!(target_os = "macos") {
-        "open"
+        PathBuf::from("/usr/bin/open")
     } else {
-        "xdg-open"
+        PathBuf::from("xdg-open")
     };
     let _ = std::process::Command::new(program).arg(path).spawn();
 }
@@ -130,7 +137,9 @@ fn game_running(game: Game) -> bool {
     {
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW: no console flashes up.
-        let out = std::process::Command::new("tasklist")
+        // By its full path: a bare name is looked for in the program's own folder first, so a
+        // tasklist.exe beside the editor (in Downloads) would have run (2026-11-07 audit).
+        let out = std::process::Command::new(windows_tool("System32\\tasklist.exe"))
             .args(["/FI", &format!("IMAGENAME eq {}", names[0]), "/NH"])
             .creation_flags(0x0800_0000)
             .output();
@@ -158,6 +167,10 @@ struct Settings {
     light: bool,
     /// 0 Small, 1 Medium (the default since 2026-10-22), 2 Large.
     text_size: i32,
+    /// The settings file is there but could not be read (locked, a disk error): then it is
+    /// never written over at exit, which would have put the defaults in place of the player's
+    /// added folders and game folders (2026-11-07 audit).
+    unreadable: bool,
 }
 
 impl Settings {
@@ -168,7 +181,11 @@ impl Settings {
     fn load() -> Settings {
         let mut s = Settings { text_size: 1, ..Settings::default() };
         // Bytes, not a string: one bad byte in a path must not lose every other setting.
-        if let Ok(bytes) = std::fs::read(Self::path()) {
+        let read = std::fs::read(Self::path());
+        if let Err(e) = &read {
+            s.unreadable = e.kind() != std::io::ErrorKind::NotFound;
+        }
+        if let Ok(bytes) = read {
             for line in String::from_utf8_lossy(&bytes).lines() {
                 if let Some(p) = line.strip_prefix("added=") {
                     s.added.push(PathBuf::from(p));
@@ -201,8 +218,15 @@ impl Settings {
         text.push_str(if self.k2 { "game=k2\n" } else { "game=k1\n" });
         text.push_str(if self.light { "theme=light\n" } else { "theme=dark\n" });
         text.push_str(&format!("textsize={}\n", self.text_size));
+        if self.unreadable {
+            return;
+        }
         let _ = std::fs::create_dir_all(games::data_dir());
-        let _ = std::fs::write(Self::path(), text);
+        // written beside it, then moved over it: cut off part way, the old file stays whole
+        let tmp = Self::path().with_extension("txt.new");
+        if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, Self::path()).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 }
 
@@ -343,6 +367,9 @@ struct State {
     status: (String, bool),
     // the backup History's Revert to This Backup asked about, until it is confirmed
     revert_pick: Option<PathBuf>,
+    // the save's (session, edits) when the window last showed it: the status line gives way
+    // to the change count only when this moved, an edit, not a tab switch (second review)
+    seen_edits: (u64, u64),
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -656,12 +683,7 @@ fn load_shots(ui: &AppWindow, st: &State) {
 }
 
 fn is_xbox_save(path: &Path) -> bool {
-    std::fs::read_dir(path).map_or(false, |d| {
-        d.filter_map(|e| e.ok()).any(|e| {
-            let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-            n == "savemeta.xbx" || n == "saveimage.xbx"
-        })
-    })
+    save::is_xbox_save(path)
 }
 
 /// Why the save in `path` can be looked at but not changed, if it cannot.
@@ -756,6 +778,8 @@ fn open_selected(ui: &AppWindow, st: &mut State) {
             st.quest_xp.clear();
             st.who = 0;
             st.tab = 0;
+            st.feat_query.clear();
+            st.power_query.clear();
             st.stage_pick = None;
             st.equip_slot = None;
             forget_pending_spawns(st);
@@ -792,6 +816,9 @@ fn message(ui: &AppWindow, title: &str, body: &str) {
 }
 
 fn fill_editor(ui: &AppWindow, st: &mut State) {
+    // the save as the window shows it now: a status set with it (Saved, Reverted) stays until
+    // the next edit
+    st.seen_edits = st.save.as_ref().map_or((0, 0), |s| (s.session, s.edits));
     undo_read_only(ui, st);
     let app = ui.global::<App>();
     // A box typed in stops following its value; this has every box read it again.
@@ -3879,6 +3906,13 @@ fn whole_item_in_slot(ui: &AppWindow, st: &mut State, who: Who, slot: u32) -> bo
 }
 
 fn refresh_after_edit(ui: &AppWindow, st: &mut State) {
+    // after an edit an old "Saved" or error line no longer says how things stand: the change
+    // count shows instead (2026-11-07 audit); a tab switch, which comes here too, keeps it
+    let now = st.save.as_ref().map_or((0, 0), |s| (s.session, s.edits));
+    if now != st.seen_edits {
+        st.status = (String::new(), false);
+        st.seen_edits = now;
+    }
     undo_read_only(ui, st);
     // the whole window drawn again after the edit (app.slint says why)
     let app = ui.global::<App>();
@@ -4101,6 +4135,7 @@ fn main() {
         shots: Arc::new(Mutex::new(HashMap::new())),
         portraits: HashMap::new(),
         revert_pick: None,
+        seen_edits: (0, 0),
         selected: 0,
         save: None,
         original: None,
@@ -4280,6 +4315,11 @@ fn main() {
     });
     on!(ui, state, on_select_tab, |u, st, i: i32| {
         st.tab = i;
+        // the feat and power search boxes start empty when the tab is built again, so the
+        // lists do too (they stayed filtered under an empty box, 2026-11-07 audit)
+        st.feat_query.clear();
+        st.power_query.clear();
+        u.global::<App>().set_ability_reset(u.global::<App>().get_ability_reset().wrapping_add(1));
         // Timeline is section 5, Quests 3, Pazaak & Destinations 4, each alone; Advanced holds
         // 0 to 2 and opens on its first
         if i == 7 {
@@ -4350,7 +4390,13 @@ fn main() {
     });
     on!(ui, state, on_set_attribute, |u, st, i: i32, v: i32| {
         let label = creature::ATTRIBUTES[i.clamp(0, 5) as usize];
-        edit_who(&u, st, label, |c| creature::set_attribute(c, label, v as i64));
+        let game = st.game;
+        edit_who(&u, st, label, |c| {
+            creature::set_attribute(c, label, v as i64);
+            // a lower Constitution (Wisdom, Charisma) lowers the maxima: a hurt character stays
+            // alive (2026-11-07 audit)
+            creature::keep_in_range(c, game);
+        });
     });
     on!(ui, state, on_heal_all, |u, st| {
         let whos = st.whos.clone();
@@ -4461,8 +4507,11 @@ fn main() {
         });
     });
     on!(ui, state, on_remove_feat, |u, st, id: i32| {
+        let game = st.game;
         edit_who(&u, st, &format!("feat{}", id), |c| {
             creature::remove_feat(c, id as i64);
+            // Toughness and the Force feats raise the maxima: a hurt character stays alive
+            creature::keep_in_range(c, game);
         });
     });
     on!(ui, state, on_add_power, |u, st, id: i32| {
@@ -4812,6 +4861,14 @@ fn main() {
         u.global::<App>().set_overlay(0);
         // The quest moves to Completed; the tracker follows it there.
         st.quest_tab = 1;
+        // a finish can recruit or let go a companion and change the area's people: everything
+        // read again, as after Skip Ahead (2026-11-07 audit: the member list and the map stayed
+        // as they were)
+        st.map = None;
+        st.map_pick = None;
+        let keep = (st.tab, st.story);
+        fill_editor(&u, st);
+        (st.tab, st.story) = keep;
         refresh_after_edit(&u, st);
         story_problems(&u, &prepared.notes);
     });
@@ -5300,9 +5357,12 @@ fn main() {
         // the party can have changed, so everything is read again, not only the tab on screen
         st.map = None;
         st.map_pick = None;
-        let keep = (st.tab, st.story, st.who);
+        // the tab, not the member's row: fill_editor sorts the members again and keeps the
+        // one picked; putting the old row back showed one member's tabs under another's name
+        // (2026-11-07 audit)
+        let keep = (st.tab, st.story);
         fill_editor(&u, st);
-        (st.tab, st.story, st.who) = keep;
+        (st.tab, st.story) = keep;
         refresh_after_edit(&u, st);
         story_problems(&u, &prepared.notes);
     });
@@ -5322,9 +5382,12 @@ fn main() {
         // the party can have changed, so everything is read again, not only the tab on screen
         st.map = None;
         st.map_pick = None;
-        let keep = (st.tab, st.story, st.who);
+        // the tab, not the member's row: fill_editor sorts the members again and keeps the
+        // one picked; putting the old row back showed one member's tabs under another's name
+        // (2026-11-07 audit)
+        let keep = (st.tab, st.story);
         fill_editor(&u, st);
-        (st.tab, st.story, st.who) = keep;
+        (st.tab, st.story) = keep;
         refresh_after_edit(&u, st);
         story_problems(&u, &prepared.notes);
     });
@@ -5418,7 +5481,19 @@ fn main() {
                 st.pending_spawns.clear();
                 st.status = (format!("Saved. The backup is in {}", backup.display()), false);
             }
-            Err(e) if e.starts_with(save::HALF_WRITTEN) => st.status = (e, true),
+            // a pop-up, not only the status line (cut to one line, and gone at the next edit),
+            // with the checked backup named (2026-11-07 audit)
+            Err(e) if e.starts_with(save::HALF_WRITTEN) => {
+                let backup = st.save.as_ref().and_then(|s| s.backup.clone());
+                let body = match backup {
+                    Some(b) => format!("{}\n\nThe save as it was before this write is backed up in {}. Copy those files over the save folder to have it back.", e, b.display()),
+                    None => e.clone(),
+                };
+                st.status = (e, true);
+                fill_editor(&u, st);
+                message(&u, "The save may be half written", &body);
+                return;
+            }
             Err(e) => st.status = (format!("Nothing was changed: {}", e), true),
         }
         fill_editor(&u, st);
@@ -5876,16 +5951,21 @@ fn main() {
     {
         let weak = ui.as_weak();
         let state = state.clone();
-        let warned = std::cell::RefCell::new(None::<std::collections::BTreeSet<String>>);
+        // the edit count warned at: an edit after the warning warns again (the set of changed
+        // values alone stayed the same when one was changed again, 2026-11-07 audit)
+        let warned = std::cell::RefCell::new(None::<(u64, u64)>);
         ui.window().on_close_requested(move || {
             let Some(u) = weak.upgrade() else { return slint::CloseRequestResponse::HideWindow };
             // busy (a handler still running): stay open rather than drop changes unasked
             let Ok(st) = state.try_borrow() else { return slint::CloseRequestResponse::KeepWindowShown };
-            let changes = st.save.as_ref().map(|s| s.changes.clone()).unwrap_or_default();
-            if changes.is_empty() || warned.borrow().as_ref() == Some(&changes) {
+            let changes = st.save.as_ref().map(|s| s.changes.len()).unwrap_or(0);
+            // the opening and its edit count: another save opened since, or Save, starts its
+            // count at 0 again, so the count alone matched an old warning (second review)
+            let edits = st.save.as_ref().map_or((0, 0), |s| (s.session, s.edits));
+            if changes == 0 || *warned.borrow() == Some(edits) {
                 return slint::CloseRequestResponse::HideWindow;
             }
-            *warned.borrow_mut() = Some(changes);
+            *warned.borrow_mut() = Some(edits);
             message(&u, "There are changes not saved", "Save them or press Revert. Close the window again to quit without saving.");
             slint::CloseRequestResponse::KeepWindowShown
         });

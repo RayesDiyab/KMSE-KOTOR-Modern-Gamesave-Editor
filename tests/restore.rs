@@ -351,3 +351,55 @@ fn back_and_forth_many_times() {
         lab.done();
     }
 }
+
+/// Two saves with one folder name share a backups folder (two Steam accounts' cloud saves, a
+/// copy kept inside the game folder): each lists and reverts to its own backups only.
+#[test]
+fn a_save_of_the_same_folder_name_never_gets_the_others_backups() {
+    for lab in games("same-name") {
+        let g = lab.game;
+        let other = lab.root.join("elsewhere").join(lab.save.file_name().unwrap());
+        copy_dir(&lab.save, &other);
+        // the other one changed, then both backed up into the one backups folder
+        let mut o = Save::open(&other).unwrap();
+        o.back_up(&lab.backups).unwrap();
+        let xp = o.player().map(creature::experience).unwrap_or(0);
+        o.edit(Who::Player, "xp", |c| creature::set_experience(c, xp + 4321));
+        o.write(&lab.backups).unwrap();
+        let mut o = Save::open(&other).unwrap();
+        let theirs = o.back_up(&lab.backups).unwrap();
+        let mut mine = Save::open(&lab.save).unwrap();
+        let own = mine.back_up(&lab.backups).unwrap();
+        assert_eq!(theirs.parent(), own.parent(), "{:?}: one backups folder for both", g);
+        let list = save::backup_list(&lab.backups, &lab.save);
+        assert!(list.contains(&own), "{:?}: its own backup is listed", g);
+        assert!(!list.contains(&theirs), "{:?}: the other save's backup is not", g);
+        lab.edit_and_save(7);
+        lab.refused(&theirs, "the other save's backup of the same folder name");
+        save::restore(&lab.save, &own, &lab.backups, g).unwrap();
+        lab.done();
+    }
+}
+
+/// The game folder moved (another drive, another Steam library): the backups made before the
+/// move are still the save's own, listed and taken back (second review of 2026-11-07).
+#[test]
+fn backups_stay_the_saves_own_after_the_game_folder_moves() {
+    for lab in games("moved") {
+        let g = lab.game;
+        let mut sv = Save::open(&lab.save).unwrap();
+        let first = sv.back_up(&lab.backups).unwrap();
+        lab.edit_and_save(61);
+        let moved_root = lab.root.with_file_name(format!("{}-moved", lab.root.file_name().unwrap().to_string_lossy()));
+        let _ = fs::remove_dir_all(&moved_root);
+        fs::rename(&lab.root, &moved_root).unwrap();
+        let save_dir = moved_root.join(lab.save.strip_prefix(&lab.root).unwrap());
+        let backups = moved_root.join(lab.backups.strip_prefix(&lab.root).unwrap());
+        let moved_first = backups.join(first.strip_prefix(&lab.backups).unwrap());
+        let list = save::backup_list(&backups, &save_dir);
+        assert!(list.contains(&moved_first), "{:?}: the first backup is still listed after the move: {:?}", g, list);
+        save::restore(&save_dir, &moved_first, &backups, g).unwrap();
+        assert!(save::same_files(&save_dir, &moved_first));
+        let _ = fs::remove_dir_all(&moved_root);
+    }
+}

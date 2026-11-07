@@ -183,9 +183,145 @@ fn way_alignment(steps: &[&Step]) -> i64 {
 /// side played, ties to the first the data lists, and of the alignment-scaled steps only the
 /// band the player is in.
 pub fn one_way(q: &Quest, ending: i64, dark: bool, alignment: i64) -> Vec<Step> {
+    one_way_in(q, ending, dark, alignment, &[])
+}
+
+/// A step's condition, the part of its branch after the way ("way 1: Kodin, ... / if not
+/// GetLocalBoolean(...)", "choice: reply R13", "line E66", "otherwise"); empty for a step every
+/// path through its way takes. Alignment bands are not counted here: `alignment_fits` picks
+/// the one band the player is in.
+fn condition_of(step: &Step) -> String {
+    let b = step.branch.as_deref().unwrap_or("").trim();
+    let cond = if b.starts_with("way ") { b.split_once(" / ").map(|(_, c)| c).unwrap_or("") } else { b };
+    if cond.contains("player alignment") {
+        return String::new();
+    }
+    cond.trim().to_string()
+}
+
+/// Whether a condition holds for the save's story values, where every clause of it names a
+/// story value and compares it ("if DAN_ELISE_PLOT != 0", "if not 403DXN_Missing_Mand",
+/// "if K_SWG_BASTILA >= 2; not EBO_GIZKA_PLOT"): Some(true or false). None where any clause
+/// is something else (a conversation's local flag, an item held, a reply), which only the
+/// game can tell.
+fn condition_holds(cond: &str, globals: &[crate::globals::Global]) -> Option<bool> {
+    let text = cond.trim().strip_prefix("before this line: ").unwrap_or(cond.trim());
+    // "if not (1 && GetIsObjectValid(OBJECT_SELF))": the script's own object always exists
+    if text.contains("not (1 && GetIsObjectValid(") {
+        return Some(false);
+    }
+    let text = text.strip_prefix("if ")?;
+    if globals.is_empty() {
+        return None;
+    }
+    let find = |n: &str| globals.iter().find(|g| g.name.eq_ignore_ascii_case(n));
+    let mut all = true;
+    for clause in text.split(';').map(str::trim).filter(|c| !c.is_empty()) {
+        let (negated, clause) = match clause.strip_prefix("not ") {
+            Some(c) => (true, c.trim()),
+            None => (false, clause),
+        };
+        let words: Vec<&str> = clause.split_whitespace().collect();
+        let truth = |name: &str| -> Option<bool> {
+            match find(name)?.value {
+                crate::globals::GlobalValue::Bool(b) => Some(b),
+                crate::globals::GlobalValue::Number(n) => Some(n != 0),
+                _ => None,
+            }
+        };
+        let holds = match words.as_slice() {
+            // "501_FIRST_ENTER is TRUE"
+            [name, "is", "TRUE"] => truth(name)?,
+            [name, "is", "FALSE"] => !truth(name)?,
+            [name] => match find(name)?.value {
+                crate::globals::GlobalValue::Bool(b) => b,
+                crate::globals::GlobalValue::Number(n) => n != 0,
+                _ => return None,
+            },
+            [name, op, value] => {
+                let v: i64 = value.parse().ok()?;
+                let have = match find(name)?.value {
+                    crate::globals::GlobalValue::Number(n) => n,
+                    crate::globals::GlobalValue::Bool(b) => b as i64,
+                    _ => return None,
+                };
+                match *op {
+                    "==" => have == v,
+                    "!=" => have != v,
+                    ">=" => have >= v,
+                    "<=" => have <= v,
+                    ">" => have > v,
+                    "<" => have < v,
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        all &= holds != negated;
+    }
+    Some(all)
+}
+
+/// The group of alternatives a condition belongs to within its way: what comes before its last
+/// clause, and the kind of that clause (the node's own script, the line's own test, the line
+/// that follows a reply).
+fn alternative_group(cond: &str) -> String {
+    let (before, last) = cond.rsplit_once(" / ").unwrap_or(("", cond));
+    let last = last.trim();
+    let kind = if last.starts_with("before this line:") {
+        "script"
+    } else if last.starts_with("line ") {
+        "line"
+    } else if last.starts_with("choice:") {
+        "choice"
+    } else {
+        "test"
+    };
+    format!("{}|{}", before.trim(), kind)
+}
+
+/// Whether a step with a condition runs, by the story values as the run stands: its condition
+/// alone. Its `needs` are not read: they hold what reaching the line takes (KotOR II's
+/// escape_merchant recruits Mandalore only with 502OND_End_First at 2, which the run to the
+/// ending sets on the way), so judged by the save as it is now they refused steps the run
+/// itself makes possible (2026-11-07). None where only the game can tell.
+fn step_holds(t: &Step, values: &[crate::globals::Global]) -> Option<bool> {
+    condition_holds(&condition_of(t), values)
+}
+
+/// A story value an effect sets, put into the running values.
+fn set_running_value(values: &mut [crate::globals::Global], e: &serde_json::Value) {
+    let (name, value) = if let Some((n, v)) = e.get("set_global_bool").and_then(pair) {
+        (n, crate::globals::GlobalValue::Bool(v.as_bool().unwrap_or(false)))
+    } else if let Some((n, v)) = e.get("set_global_number").and_then(pair) {
+        let Some(v) = v.as_i64() else { return };
+        (n, crate::globals::GlobalValue::Number(v))
+    } else {
+        return;
+    };
+    if let Some(g) = values.iter_mut().find(|g| g.name.eq_ignore_ascii_case(&name)) {
+        g.value = value;
+    }
+}
+
+/// The save's story values, for `one_way_in`.
+fn story_values(save: &Save) -> Vec<crate::globals::Global> {
+    save.globals.as_ref().map(|g| crate::globals::list(&g.root)).unwrap_or_default()
+}
+
+/// `one_way` with the save's story values: of the steps one way takes, each is one path through
+/// its conversation or script, and the game runs exactly one path (2026-11-07 audit: KotOR II's
+/// DroidRetrieval stage 20 lists 63 paths of one line, each paying Kodin; taken together they
+/// took 46,400 credits). A step without a condition is on every path. A condition the save's
+/// story values decide keeps its step only when it holds; of the rest, one condition is taken,
+/// the first the data lists, as `one_way` takes the first of equal ways.
+pub fn one_way_in(q: &Quest, ending: i64, dark: bool, alignment: i64, globals: &[crate::globals::Global]) -> Vec<Step> {
     let mut stages: Vec<&Stage> = q.stages.iter().filter(|s| s.stage == ending || (s.stage < ending && !s.end)).collect();
     stages.sort_by_key(|s| s.stage);
     let mut out = Vec::new();
+    // the story values as the run goes: what an earlier stage sets, a later one reads
+    // (2026-11-07 second review: conditions read the values before the run)
+    let mut values: Vec<crate::globals::Global> = globals.to_vec();
     for s in stages {
         let fits: Vec<&Step> = s.steps.iter().filter(|t| alignment_fits(t.branch.as_deref(), alignment)).collect();
         let sets_stage = |t: &Step| t.does.iter().any(|e| e.get("journal").and_then(|j| j.get(0)).and_then(|v| v.as_str()).map_or(false, |x| x.eq_ignore_ascii_case(&q.tag)));
@@ -203,13 +339,62 @@ pub fn one_way(q: &Quest, ending: i64, dark: bool, alignment: i64) -> Vec<Step> 
                 pick = Some(w.clone());
             }
         }
-        for t in fits {
+        let kept = |t: &Step| {
             let w = way_of(t);
             let chosen = w.is_empty() || Some(&w) == pick.as_ref();
             // a stage with no line of its own: what `path` takes from it
             let plain = pick.is_none() && (s.stage == ending || t.branch.as_deref().map_or(true, |b| b.trim().is_empty()));
-            if chosen || plain {
-                out.push(t.clone());
+            chosen || plain
+        };
+        // Alternatives are the steps of one way at one point of it: the same line reached the
+        // same way (the part of the condition before its last clause), and the same kind of
+        // last clause: the node's own script ("before this line: ..."), the line's own test
+        // ("if ...", "otherwise"), or which line follows a reply ("line E66"). Of each such
+        // group one is taken: the first the save says holds, else the first that does
+        // something, else the first. Steps at different points are parts of one run and are
+        // all kept (2026-11-07 second review: taking one step per way dropped the 110 XP of
+        // KotOR II's tutorial_3CFD and of KotOR's dan_murder). Steps without a way of their
+        // own are separate scripts: each is kept unless the save says its condition fails.
+        let decide = |t: &Step| step_holds(t, &values);
+        let mut chosen: Vec<(String, usize)> = Vec::new();
+        for want in [Some(true), None] {
+            for prefer_effect in [true, false] {
+                for (i, t) in fits.iter().enumerate() {
+                    let w = way_of(t);
+                    let cond = condition_of(t);
+                    if w.is_empty() || cond.is_empty() || !kept(t) {
+                        continue;
+                    }
+                    let group = format!("{}|{}", w, alternative_group(&cond));
+                    if chosen.iter().any(|(g, _)| *g == group) || decide(t) != want || (prefer_effect && t.does.is_empty()) {
+                        continue;
+                    }
+                    chosen.push((group, i));
+                }
+            }
+        }
+        let mut taken: Vec<&Step> = Vec::new();
+        for (i, t) in fits.iter().enumerate() {
+            if !kept(t) {
+                continue;
+            }
+            let w = way_of(t);
+            let cond = condition_of(t);
+            if !cond.is_empty() {
+                if decide(t) == Some(false) {
+                    continue;
+                }
+                if !w.is_empty() && !chosen.iter().any(|(_, ci)| *ci == i) {
+                    continue;
+                }
+            }
+            taken.push(t);
+            out.push((*t).clone());
+        }
+        // the story values this stage sets, for the conditions of the stages after it
+        for t in taken {
+            for e in &t.does {
+                set_running_value(&mut values, e);
             }
         }
     }
@@ -993,7 +1178,7 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
         if plan.iter().any(|(p, s)| p.tag.eq_ignore_ascii_case(&q.tag) && *s >= st) {
             continue;
         }
-        for step in &one_way(&q, st, dark, alignment) {
+        for step in &one_way_in(&q, st, dark, alignment, &story_values(save)) {
             for n in &step.needs {
                 if let (Some(sv), Some(op)) = (n.get("stage").and_then(|v| v.as_array()), n.get("op").and_then(|v| v.as_str())) {
                     if let (Some(nt), Some(nv)) = (sv.first().and_then(|v| v.as_str()), sv.get(1).and_then(|v| v.as_i64())) {
@@ -1015,7 +1200,7 @@ fn apply_partial(save: &mut Save, data: &GameData, m: &serde_json::Value, tag: &
         if now >= *st {
             continue; // the save is there already: nothing given twice
         }
-        for (i, step) in one_way(q, *st, dark, alignment).iter().enumerate() {
+        for (i, step) in one_way_in(q, *st, dark, alignment, &story_values(save)).iter().enumerate() {
             // stages the save has passed already gave their rewards
             let reached = step.does.iter().any(|e| e.get("journal").and_then(|j| j.get(1)).and_then(|v| v.as_i64()).map_or(false, |v| v <= now));
             if reached {
@@ -1471,7 +1656,12 @@ fn recruits_in(save: &mut Save, data: &GameData, m: &serde_json::Value, step: &S
                 r.iter().find(|x| x.get("slot").and_then(|v| v.as_u64()) == Some(slot as u64)).and_then(|x| x.get("template").and_then(|v| v.as_str()).map(|t| t.to_string()))
             })
         };
-        let Some(template) = template else { continue };
+        let Some(template) = template else {
+            // KotOR II's AddAvailableNPCByObject names a creature in the area, and the chapter
+            // has no template for the slot: said, as before, not dropped (second review)
+            notes.push(format!("Left to the game: party member {} joins", slot));
+            continue;
+        };
         // recruit_from_template keeps the same companion and replaces anyone else in the slot
         let module = step.module.clone();
         let utc = (!module.is_empty())
@@ -1610,7 +1800,9 @@ fn close_quests(save: &mut Save, data: &GameData, m: &serde_json::Value, dark: b
         }
         for q in file.quests.iter().filter(|q| q.own) {
             let Some(ending) = milestone_stage(&q.tag).or(q.run_ending) else { continue };
-            for (i, st) in one_way(q, ending, dark, alignment).iter().enumerate() {
+            // no story values: here they stand at the chapter's end already, so tests of what the
+            // chapter's start held would read wrong (2026-11-07 second review)
+            for (i, st) in one_way_in(q, ending, dark, alignment, &[]).iter().enumerate() {
                 let does: Vec<serde_json::Value> = without_star_map_branches(save.game, m, &st.does).into_iter()
                     .filter(|e| e.as_object().and_then(|o| o.keys().next()).map_or(false, |k| STATE.contains(&k.as_str())))
                     .filter(|e| !e.get("journal").and_then(|j| j.get(0)).and_then(|t| t.as_str()).map_or(false, |t| gone(t)))
@@ -2210,7 +2402,7 @@ fn finish_steps(save: &Save, q: &Quest, ending: i64, dark: bool) -> Vec<Step> {
     let after: std::collections::HashSet<i64> = q.stages.iter().filter(|s| s.stage > now || s.stage == ending).map(|s| s.stage).collect();
     let mut trimmed = q.clone();
     trimmed.stages.retain(|s| after.contains(&s.stage));
-    one_way(&trimmed, ending, dark, alignment)
+    one_way_in(&trimmed, ending, dark, alignment, &story_values(save))
 }
 
 /// Whether the side played changes what finishing `tag` at `ending` does from where the save
@@ -2253,11 +2445,37 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
     let xp_of = |t: &str, s: i64| journal.iter().find(|q| q.tag.eq_ignore_ascii_case(t)).and_then(|q| q.stage(s)).map_or(0, |x| x.xp);
     let before: Vec<(String, i64)> = save.quests();
     let was = |t: &str| before.iter().find(|(x, _)| x.eq_ignore_ascii_case(t)).map(|(_, v)| *v);
+    // A quest at an ending already, or at the stage asked, has nothing left to play: finishing
+    // it again gave the ending's items, credits and XP a second time, and an ending of a lower
+    // number moved the journal back (2026-11-07 audit).
+    if let Some(now) = was(tag) {
+        if now == ending {
+            return Err("The quest is at this point already.".into());
+        }
+        let ended = journal.iter().find(|q| q.tag.eq_ignore_ascii_case(tag)).and_then(|q| q.stage(now)).map_or(false, |s| s.end);
+        if ended {
+            return Err("This quest is finished already.".into());
+        }
+    }
     let mut notes = Vec::new();
     let mut reached: Vec<(String, i64)> = Vec::new();
     if let Some((q, _)) = quest(save.game, tag) {
+        // the chapter the quest is in: its star map and the templates of its recruits
+        let chapter = chapter_of_quest(save.game, tag).unwrap_or(serde_json::Value::Null);
+        let mut star_map = false;
         let steps = finish_steps(save, &q, ending, dark);
         for (k, step) in steps.iter().enumerate() {
+            // KotOR's star map script lists all four planets' branches in one step: only this
+            // planet's flag is kept, and the maps are counted the game's way below (2026-11-07
+            // audit: finishing Tatooine's map found all four and opened the Unknown World)
+            let mut step = step.clone();
+            let kept = without_star_map_branches(save.game, &chapter, &step.does);
+            if kept.len() != step.does.len() {
+                star_map = true;
+                step.does = kept;
+            }
+            // companions the step brings or takes, as Skip Ahead does (they were only listed)
+            notes.extend(recruits_in(save, data, &chapter, &step));
             for e in &step.does {
                 if let Some((t, s)) = e.get("journal").and_then(pair).and_then(|(t, s)| s.as_i64().map(|s| (t, s))) {
                     if !reached.iter().any(|(x, y)| x.eq_ignore_ascii_case(&t) && *y == s) {
@@ -2265,6 +2483,15 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
                     }
                 }
                 if let Some(text) = e.get("other").and_then(|v| v.as_str()) {
+                    if text.starts_with("AddAvailableNPCByTemplate(") || text.starts_with("AddAvailableNPCByObject(") {
+                        continue; // done or noted by recruits_in
+                    }
+                    if let Some(slot) = text.strip_prefix("RemoveAvailableNPC(").and_then(|r| r.split(')').next()).and_then(|n| n.trim().parse::<usize>().ok()) {
+                        if save.recruited(slot) && save.set_recruited(slot, false) {
+                            notes.push(format!("Party member {} leaves", slot));
+                        }
+                        continue;
+                    }
                     if !apply_script_line(save, text, &format!("finish.{}.{}.other", tag, k)) {
                         if let Some(line) = only_the_game(text) {
                             notes.push(line);
@@ -2276,6 +2503,9 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
             let mut rest = step.clone();
             rest.does.retain(|e| e.get("other").is_none());
             notes.extend(apply(save, data, &rest, &format!("finish.{}.{}", tag, k)));
+        }
+        if star_map {
+            notes.extend(count_star_maps(save, data, &chapter));
         }
     } else {
         notes.push("The editor has no record of this quest's steps: only the journal and its experience change.".to_string());
@@ -2296,6 +2526,11 @@ pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, da
     }
     notes.dedup();
     Ok(notes)
+}
+
+/// The chapter milestone whose quests include `tag` (its star map, its recruits' templates).
+fn chapter_of_quest(game: Game, tag: &str) -> Option<serde_json::Value> {
+    milestones_ref(game).into_iter().find(|(planet, _)| chapter_quests(game, planet).iter().any(|(t, _)| t.eq_ignore_ascii_case(tag))).map(|(_, m)| m.clone())
 }
 
 /// What a script line the quest data keeps as text does, done where the editor can do it as

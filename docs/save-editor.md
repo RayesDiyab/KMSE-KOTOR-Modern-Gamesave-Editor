@@ -526,6 +526,30 @@ order counts as passed by the same test. Seen in the program on a KotOR save aft
 Leviathan: Carth's stages read ..., "won Carth's full trust", "revenge is complete" (passed),
 "devastated" (current), the three endings.
 
+**Finish Quest, corrected 2026-11-07 (the Windows audit).** The quest data lists every path
+through one conversation line or script as its own step (a reply chosen, a condition met, an
+"otherwise"). Finish Quest applied all of them together, so KotOR II's DroidRetrieval stage 20
+paid Kodin on 63 paths (46,400 credits) and other quests gave rewards two to four times. Now
+(`questdb::one_way_in`) the steps of one way are grouped into sets of alternatives: the same
+line reached the same way, with the same kind of last condition (the node's own script, "before
+this line: ..."; the line's own test, "if ..." or "otherwise"; or the line that follows a
+reply, "line E66"). One step of each set is taken: the first a condition on story values says
+holds ("if DAN_ELISE_PLOT != 0", "if 501_FIRST_ENTER is TRUE"), read from the save as the run
+goes, so a value an earlier stage sets counts; else the first that does something; else the
+first. Steps at different points of a line are all run. A step's `needs` are not read: they
+hold what reaching the line takes, which the run itself sets on the way. A first version of
+this fix took one step per way and was wrong: a second review found it dropped the 110 XP of
+KotOR II's tutorial_3CFD and KotOR's dan_murder; `tests/finish_quest_audit.rs` now checks the
+XP of those stages against values worked out by hand from the data. Steps that are not
+paths of one line are each kept, unless the save says their condition fails. Also: KotOR's star map quests set this planet's map flag
+only, and the maps are counted the game's way (all four were found before); the companions a
+step recruits or lets go (`AddAvailableNPCByTemplate`, `RemoveAvailableNPC`) are recruited or
+let go, as Skip Ahead does (they were only listed); and a quest at an ending already, or at
+the stage asked, is refused (finishing it again gave the rewards twice). Checked by
+`tests/finish_quest_audit.rs`. What stays unverified in the game: the paths taken where the
+save cannot decide (a conversation's local flags, a reply), and whether journal XP reaches the
+party the way the game hands it out (see the audit's remaining issues).
+
 **Finish Quest, as if played** (2026-11-06, the maintainer: "it shouldn't be [optional] ... it
 should give you the exact same items, class, changes, everything ... If there are options
 that you have to pick, then you can pick that as well"). Until then a pop-up listed the endings
@@ -687,6 +711,12 @@ From KSE's issue tracker and the forums ([sources](save-editor-format.md#6-save-
    4. the result is compared with the backup byte for byte and opened as a save.
    Changes not saved are lost, and the pop-up says so. `tests/restore.rs` runs all of this on
    copies, including a file held open part way through the swap.
+   Each backup made since 2026-11-07 has a record beside it, `<backup folder>.source`, naming
+   the save folder it was copied from (by its path inside the folder that holds the backups
+   folder, so a moved game keeps its records; by its full path when it is not in there), so two saves with one folder name (two Steam accounts'
+   cloud saves, a copy kept in the game folder) share a backups folder without seeing each
+   other's backups; backups made before that have no record and are listed for every save of
+   their folder name, as before.
    *Corrected 2026-11-02:* backups were in the folder that holds the save until then, and for a
    KotOR 2 Steam Cloud save in the game's `saves` folder. Steam Cloud syncs all of KotOR 1's
    `Saves`, backups too (`remotecache.vdf` listed them), so they moved out. Backups made before

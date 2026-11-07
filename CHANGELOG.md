@@ -6,6 +6,43 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Windows audit fixes** (2026-11-07, the full audit in
+  [docs/audits/WINDOWS_FULL_AUDIT.md](docs/audits/WINDOWS_FULL_AUDIT.md)).
+  - Finish Quest takes one path through each set of alternatives of a conversation or script,
+    as the game does. The quest data lists every path of a line as its own step, and all were
+    applied together: KotOR II's DroidRetrieval took 46,400 credits, other quests gave rewards
+    several times. Steps at different points of one line (the node's script, the line's own
+    test, the line after a reply) are all run. Conditions on story values are read from the
+    save as the run goes.
+  - Finish Quest on a KotOR star map quest finds that planet's map only. It found all four
+    and opened the Unknown World.
+  - Finish Quest recruits and lets go the companions its steps do (Mandalore in KotOR II's
+    escape_merchant). They were only listed as left to the game.
+  - A quest at an ending already, or at the stage asked, is not finished again: that gave the
+    ending's rewards twice, and moved the journal back.
+  - Each backup records which save it was made from, by its place in the game folder, so a
+    moved game keeps its records. Two saves with one folder name (two Steam accounts' cloud
+    saves, a copy kept in the game folder) no longer see each other's backups in History, and
+    Revert refuses the other's. A backup that cannot be made whole is removed.
+  - A half-written save is told in a pop-up that names its backup, not only in the status line.
+  - Save Changes, Save As and Revert refuse an original Xbox save themselves, as well as in the
+    window.
+  - A link (junction) inside a save folder is never followed by a backup, a copy or a write.
+  - Made-up save files that asked for gigabytes of memory are refused (a GFF field named many
+    times, archive entries covering the whole archive); the save list read every savenfo.res,
+    so one such file stopped the editor each time.
+  - Lowering Constitution (or Wisdom, Charisma, Toughness) keeps a hurt character's Health at
+    1 or more; it went below 0.
+  - Bring from Another Save takes someone else into a slot only from a save at least as far
+    along the story: from an earlier one it put the Endar Spire's Trask in Bastila's place.
+  - After Skip Ahead, Go Back and Finish Quest the member shown is the one picked; Finish
+    Quest reads the party and the map again. The feat and power search is cleared with the
+    box. An old "Saved" line gives way to the change count after the next edit. Closing the
+    window warns again after edits made since the last warning, in this save or another.
+  - The settings file is written beside itself and moved into place, and is never written
+    over when it could not be read. tasklist and explorer are run from the Windows folder by
+    their full path.
+  - pulldown-cmark 0.13.5 to 0.13.6 (RUSTSEC-2026-0433; the editor never parses wiki links).
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

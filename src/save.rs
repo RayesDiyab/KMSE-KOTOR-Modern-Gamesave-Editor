@@ -140,7 +140,16 @@ pub struct Save {
     handed_out: u32,
     /// The backup made (or found the same) when the save was opened, see `back_up`.
     pub backup: Option<PathBuf>,
+    /// Every change counted, the same value changed twice too: `changes` names what changed,
+    /// this tells that something changed again (the close warning, 2026-11-07 audit).
+    pub edits: u64,
+    /// Which opening of a save this is, new each time one is read from disk (a copy made from
+    /// it keeps it): with `edits`, it tells one save's edits from another's, whose count
+    /// starts at 0 again (2026-11-07 second review).
+    pub session: u64,
 }
+
+static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Every file of the save folder: name, size and time, in name order.
 /// Why a save is refused when a write into it was cut off (interrupted_write).
@@ -228,6 +237,8 @@ impl Save {
             on_disk,
             handed_out: 0,
             backup: None,
+            edits: 0,
+            session: SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -423,6 +434,7 @@ impl Save {
 
     pub fn changed(&mut self, key: impl Into<String>) {
         self.changes.insert(key.into());
+        self.edits += 1;
     }
 
     fn loaded(&self, name: &str, kind: u16) -> Option<&Gff> {
@@ -527,6 +539,19 @@ impl Save {
             .loaded(&format!("availnpc{}", npc), RES_TYPE_UTC)
             .ok_or("that save does not have this party member")?
             .clone();
+        // Someone else in the slot: the story moves a slot on from a stand-in to the companion
+        // (KotOR's Endar Spire keeps Trask in slot 0, Taris puts Bastila there), never back.
+        // So another person comes over only from a save at least as far along the story; from
+        // an earlier one it put the stand-in in the companion's place, recruited (2026-11-07
+        // audit). Two saves in one chapter count the same and are allowed (second review).
+        let here = self.creature(Who::Npc(npc)).and_then(|c| c.string("Tag")).filter(|t| !t.trim().is_empty());
+        let there = creature.root.string("Tag").unwrap_or_default();
+        if let Some(here) = here {
+            let progress = |s: &Save| crate::questdb::chapters_played_in(s).iter().filter(|p| **p).count();
+            if !here.eq_ignore_ascii_case(&there) && progress(other) < progress(self) {
+                return Err(format!("that save has someone else in this place ({}), not {}", if there.is_empty() { "no tag" } else { there.as_str() }, here));
+            }
+        }
         // Object ids are each save's own: every item gets a new one, and effects follow.
         let ids: Vec<u32> = (0..crate::area::creature_items_mut(&mut creature.root).len()).map(|_| self.new_object_id()).collect();
         let mut moved: Vec<(i64, u32)> = Vec::new();
@@ -1146,6 +1171,9 @@ impl Save {
         if player_outside_archive(&self.folder) {
             return Err(PLAYER_OUTSIDE_ARCHIVE.into());
         }
+        if is_xbox_save(&self.folder) {
+            return Err(XBOX_SAVE.into());
+        }
         if files_on_disk(&self.folder) != self.on_disk {
             return Err(CHANGED_ON_DISK.into());
         }
@@ -1165,6 +1193,9 @@ impl Save {
     pub fn write_as(&mut self, target: &Path, name: &str) -> Result<()> {
         if player_outside_archive(&self.folder) {
             return Err(PLAYER_OUTSIDE_ARCHIVE.into());
+        }
+        if is_xbox_save(&self.folder) {
+            return Err(XBOX_SAVE.into());
         }
         if files_on_disk(&self.folder) != self.on_disk {
             return Err(CHANGED_ON_DISK.into());
@@ -1330,6 +1361,20 @@ fn replace_all(staged: &[(PathBuf, PathBuf)]) -> Result<()> {
     }
 }
 
+/// Whether `folder` is an original Xbox save (`SaveMeta.xbx` or `SaveImage.xbx` in it). The
+/// Xbox checks a signature over the save, so any change makes it call the save damaged.
+pub fn is_xbox_save(folder: &Path) -> bool {
+    fs::read_dir(folder).map_or(false, |d| {
+        d.filter_map(|e| e.ok()).any(|e| {
+            let n = e.file_name().to_string_lossy().to_ascii_lowercase();
+            n == "savemeta.xbx" || n == "saveimage.xbx"
+        })
+    })
+}
+
+/// Why an Xbox save is never written (checked here as well as in the program, 2026-11-07 audit).
+pub const XBOX_SAVE: &str = "It's an original Xbox save. The Xbox would reject it if changed.";
+
 /// Whether the save has an external player-state file the editor does not write.
 /// KotOR 1's measured arrival autosave has no archived player; Save::open falls back
 /// to pifo.ifo. KotOR 2's measured autosave has both pifo.ifo and archived copies.
@@ -1467,10 +1512,13 @@ pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Resu
     if let Some(left) = interrupted_write(folder) {
         return Err(format!("{} {}", INTERRUPTED, left));
     }
+    if is_xbox_save(folder) || is_xbox_save(backup) {
+        return Err(XBOX_SAVE.into());
+    }
     let canon = |p: &Path| fs::canonicalize(p).map_err(|e| format!("{}: {}", p.display(), e));
     let (cf, cb) = (canon(folder)?, canon(backup)?);
     let own = canon(&backups.join(backup_name(folder)))?;
-    if cb.parent() != Some(own.as_path()) || cb == cf {
+    if cb.parent() != Some(own.as_path()) || cb == cf || !backup_of(backup, folder) {
         return Err("that folder is not one of this save's backups".into());
     }
     let listing = |p: &Path| -> Result<Vec<(String, PathBuf)>> {
@@ -1621,19 +1669,68 @@ pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Resu
 /// save; an error if the copy fails or does not read back the same.
 fn make_backup(backups: &Path, game: Game, folder: &Path) -> Result<PathBuf> {
     let backup = backup_folder(backups, game, folder);
-    copy_dir(folder, &backup).map_err(|e| format!("the backup could not be made: {}", e))?;
+    // a backup that could not be made whole is not left behind (it had no record, so any save
+    // of its folder name would have listed it; second review): the folder is this call's own
+    let failed = |why: String| {
+        let _ = fs::remove_dir_all(&backup);
+        let _ = fs::remove_file(source_record(&backup));
+        Err(format!("the backup could not be made: {}", why))
+    };
+    if let Err(e) = copy_dir(folder, &backup) {
+        return failed(e.to_string());
+    }
     if !same_files(folder, &backup) {
-        return Err(format!("the backup could not be made: the copy in {} does not read back the same as the save", backup.display()));
+        return failed(format!("the copy in {} does not read back the same as the save", backup.display()));
+    }
+    // which save it is a copy of, beside it (not in it, so it stays the save's files alone):
+    // two saves with one folder name share a backups folder (two Steam accounts' cloud saves,
+    // a copy kept inside the game folder), and History must not offer one the other's
+    if let Err(e) = fs::write(source_record(&backup), source_key(folder, &backup)) {
+        return failed(format!("its record could not be written: {}", e));
     }
     Ok(backup)
 }
 
+/// The record of which save a backup was made from: `<backup folder>.source`, beside it.
+fn source_record(backup: &Path) -> PathBuf {
+    let mut name = backup.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    name.push(".source");
+    backup.with_file_name(name)
+}
+
+/// A save folder as the record names it, the same however it was reached: its path inside the
+/// folder that holds the backups folder (the game's folder), so moving the game to another
+/// drive or library keeps the records true (second review); its full path when it is not in
+/// there. `backup` is a backup folder, `<backups>/<save name>/<time>`.
+fn source_key(folder: &Path, backup: &Path) -> String {
+    let plain = |p: &Path| {
+        let p = fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let s = p.to_string_lossy().trim_start_matches("\\\\?\\").to_string();
+        if cfg!(windows) { s.to_lowercase() } else { s }
+    };
+    let save = plain(folder);
+    let base = backup.parent().and_then(Path::parent).and_then(Path::parent).map(plain);
+    match base.and_then(|b| save.strip_prefix(&format!("{}{}", b.trim_end_matches(std::path::MAIN_SEPARATOR), std::path::MAIN_SEPARATOR)).map(str::to_string)) {
+        Some(inside) => format!("in:{}", inside),
+        None => save,
+    }
+}
+
+/// Whether `backup` was made from the save folder `folder`: its record names it, or it has no
+/// record (made before 2026-11-07, when every backup of a folder name was taken as its own).
+fn backup_of(backup: &Path, folder: &Path) -> bool {
+    match fs::read_to_string(source_record(backup)) {
+        Ok(text) => text.trim() == source_key(folder, backup),
+        Err(_) => true,
+    }
+}
+
 /// The backups of the save folder `folder` in `backups`, oldest first (their folder names are
-/// the times they were made).
+/// the times they were made): those made from this save, not another of the same folder name.
 pub fn backup_list(backups: &Path, folder: &Path) -> Vec<PathBuf> {
     let dir = backups.join(backup_name(folder));
     let mut list: Vec<PathBuf> = fs::read_dir(&dir)
-        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir() && backup_of(p, folder)).collect())
         .unwrap_or_default();
     // "2026-11-07 10-00-00", then "... (2)", "... (3)" made in the same second, "(10)" after "(9)"
     list.sort_by_key(|p| {
@@ -1660,6 +1757,10 @@ pub fn same_files(a: &Path, b: &Path) -> bool {
             })
             .map(|e| (e.file_name(), e.path().is_dir()))
             .collect();
+        // a link is never taken as the same: it is not followed (copy_dir refuses it)
+        if fs::read_dir(p).ok()?.filter_map(|e| e.ok()).any(|e| e.file_type().map_or(true, |t| t.is_symlink())) {
+            return None;
+        }
         v.sort();
         Some(v)
     };
@@ -1685,6 +1786,12 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     for e in fs::read_dir(from)? {
         let e = e?;
         let target = to.join(e.file_name());
+        // a link (a symbolic link, a junction) is not followed: a save folder holds none, and
+        // following one copied whatever it points at, or a loop until the program fell over
+        // (2026-11-07 audit)
+        if e.file_type()?.is_symlink() {
+            return Err(io::Error::new(io::ErrorKind::Other, format!("{} is a link to another place, which a save folder does not hold", e.path().display())));
+        }
         if e.path().is_dir() {
             copy_dir(&e.path(), &target)?;
         } else {

@@ -480,6 +480,20 @@ pub fn sync_maxima(c: &mut Struct, game: Game) {
     put_short(c, "MaxForcePoints", fmax);
 }
 
+/// After a change that can lower the maxima (Constitution, Wisdom, Charisma, Toughness or a
+/// Force feat taken away): the current Health kept at 1 or more and Force at 0 or more, and the
+/// stored maxima written as the game writes them. A hurt character's current value falls with
+/// the maximum, and went to 0 or below, as other edits never let it (2026-11-07 audit).
+pub fn keep_in_range(c: &mut Struct, game: Game) {
+    if health(c).0 < 1 {
+        put_health(c, 1);
+    }
+    if force(c, game).0 < 0 {
+        put_force(c, game, 0);
+    }
+    sync_maxima(c, game);
+}
+
 /// Health and Force before a change, to carry the current values across it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pools {

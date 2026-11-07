@@ -54,15 +54,24 @@ impl Erf {
         let localized_offset = u32_at(data, 20)? as usize;
         let keys = u32_at(data, 24)? as usize;
         let list = u32_at(data, 28)? as usize;
-        let localized = data
-            .get(localized_offset..localized_offset + localized_size)
-            .unwrap_or(&[])
-            .to_vec();
+        // an empty block is often given offset 0; a block that is there must fit the file, or
+        // the archive would be written back claiming strings it no longer has
+        let localized = if localized_size == 0 {
+            Vec::new()
+        } else {
+            data.get(localized_offset..localized_offset.saturating_add(localized_size))
+                .ok_or_else(|| GffError("archive description strings run past the end".into()))?
+                .to_vec()
+        };
         // A key takes 24 bytes, so a damaged count cannot ask for more memory than the file holds.
         if count > data.len() / 24 {
             return Err(GffError("archive key list runs past the end".into()));
         }
         let mut resources = Vec::with_capacity(count);
+        // the resources' sizes together: real archives never overlap, so more than the file
+        // holds is a damaged or made-up archive that would copy itself once per entry
+        // (2026-11-07 audit: 3 MB asking for 298 GB)
+        let mut total: usize = 0;
         for i in 0..count {
             let key = data
                 .get(keys + i * 24..keys + i * 24 + 24)
@@ -73,6 +82,10 @@ impl Erf {
             let kind = u16::from_le_bytes(key[20..22].try_into().unwrap());
             let offset = u32_at(data, list + i * 8)? as usize;
             let size = u32_at(data, list + i * 8 + 4)? as usize;
+            total = total.saturating_add(size);
+            if total > data.len() {
+                return Err(GffError("archive entries hold more than the archive does".into()));
+            }
             let body = data
                 .get(offset..offset.saturating_add(size))
                 .ok_or_else(|| GffError(format!("{} runs past the end of the archive", name)))?;

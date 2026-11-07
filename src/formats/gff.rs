@@ -230,6 +230,10 @@ struct Reader<'a> {
     // over and over (a damaged or made-up file) is refused before its copies use up the
     // memory or the time
     visits: usize,
+    // bytes of field data copied so far: fields may share one block of data, so a made-up file
+    // of many fields naming one large block copied it once per field until memory ran out
+    // (2026-11-07 audit: 2 MB asking for 256 GB); a file's own data is copied about once
+    copied: std::cell::Cell<usize>,
 }
 
 fn u32_at(data: &[u8], at: usize) -> Result<u32, GffError> {
@@ -250,6 +254,11 @@ impl<'a> Reader<'a> {
         if offset.checked_add(len).map_or(true, |end| end > self.field_data_len) {
             return err(format!("field data at {} runs past its block", offset));
         }
+        let copied = self.copied.get().saturating_add(len);
+        if copied > self.data.len().saturating_mul(4).saturating_add(1 << 20) {
+            return err("field data named more often than the file holds it");
+        }
+        self.copied.set(copied);
         self.bytes(self.field_data_offset + offset, len)
     }
 
@@ -403,6 +412,7 @@ impl Gff {
             list_indices_len: h(11)?,
             depth: 0,
             visits: 0,
+            copied: std::cell::Cell::new(0),
         };
         let blocks = [
             (reader.struct_offset, reader.struct_count * 12),
