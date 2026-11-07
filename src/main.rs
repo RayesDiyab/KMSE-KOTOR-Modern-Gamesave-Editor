@@ -262,9 +262,6 @@ struct State {
     /// The quest tracker: its tab (0 active, 1 completed, 2 not started) and the quest shown.
     quest_tab: usize,
     quest_pick: Option<String>,
-    /// Branch steps of the picked quest's chain (questdb::path's choices, all endings in
-    /// order) and whether each is chosen for "as if played".
-    chain_choices: Vec<bool>,
     /// The area shown on the Map tab, and what is picked on it.
     map: Option<kse_core::map::Area>,
     map_pick: Option<MapPick>,
@@ -1685,7 +1682,7 @@ fn story_preview_rows(st: &State, after: &Save) -> (Vec<StoryValue>, Vec<Named>)
 
 fn finish_story_preview(ui: &AppWindow, st: &mut State) {
     let result = st.story_result.lock().unwrap().take();
-    if st.story_plan.is_none() || !matches!(ui.global::<App>().get_overlay(), 10 | 11 | 12) { return; }
+    if st.story_plan.is_none() || !matches!(ui.global::<App>().get_overlay(), 8 | 10 | 11 | 12) { return; }
     let Some(result) = result else { return };
     let prepared = match result {
         Ok(p) => p,
@@ -1694,7 +1691,26 @@ fn finish_story_preview(ui: &AppWindow, st: &mut State) {
             return;
         }
     };
-    let (values, grants) = story_preview_rows(st, &prepared.save);
+    let (values, mut grants) = story_preview_rows(st, &prepared.save);
+    // a quest's finish: the journal's changes too (an ending can take other quests out of the
+    // journal: Ithorak's "banished from Manaan" takes five)
+    if matches!(st.story_plan, Some(StoryPlan::Quest { .. })) {
+        let journal = st.journal();
+        let name = |t: &str| journal.iter().find(|q| q.tag.eq_ignore_ascii_case(t)).map(|q| q.name.clone()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| t.to_string());
+        let ended = |t: &str, v: i64| journal.iter().find(|q| q.tag.eq_ignore_ascii_case(t)).and_then(|q| q.stage(v)).map_or(false, |x| x.end);
+        let old = st.save.as_ref().map(|s| s.quests()).unwrap_or_default();
+        let new = prepared.save.quests();
+        for (t, v) in &new {
+            match old.iter().find(|(o, _)| o.eq_ignore_ascii_case(t)).map(|(_, w)| *w) {
+                Some(w) if w == *v => {}
+                Some(_) => grants.push(Named { id: 1, name: s(name(t)), note: s(if ended(t, *v) { "Quest finished" } else { "Quest moves on" }), ..Default::default() }),
+                None => grants.push(Named { id: 1, name: s(name(t)), note: s(if ended(t, *v) { "Quest finished" } else { "Quest begins" }), ..Default::default() }),
+            }
+        }
+        for (t, _) in old.iter().filter(|(o, _)| !new.iter().any(|(n, _)| n.eq_ignore_ascii_case(o))) {
+            grants.push(Named { id: -1, name: s(name(t)), note: s("Quest taken out of the journal"), ..Default::default() });
+        }
+    }
     let old = st.save.as_ref().map(story_preview::accessible_items).unwrap_or_default();
     let mut changes = story_preview::inventory_changes(&old, &story_preview::accessible_items(&prepared.save));
     changes.sort_by_cached_key(|r| st.item_name(&r.item).to_lowercase());
@@ -1709,8 +1725,47 @@ fn finish_story_preview(ui: &AppWindow, st: &mut State) {
     app.set_story_grants(model(grants));
     app.set_story_items(model(items));
     app.set_story_preview_status(s(""));
+    // a quest's finish: what only the game does, said beside what changes
+    app.set_story_notes(s(if matches!(st.story_plan, Some(StoryPlan::Quest { .. })) { prepared.notes.join("\n") } else { String::new() }));
     app.set_story_preview_ready(true);
     st.story_prepared = Some(prepared);
+}
+
+/// The quest finish the pop-up shows: the quest picked, the ending picked and, where it
+/// matters, the side.
+fn current_quest_plan(ui: &AppWindow, st: &State) -> Option<StoryPlan> {
+    let app = ui.global::<App>();
+    let tag = st.quest_pick.clone()?;
+    let endings = app.get_quest_endings();
+    let ending = endings.row_data(app.get_finish_pick().max(0) as usize)?.id as i64;
+    let dark = app.get_quest_side_matters() && app.get_quest_dark() == 1;
+    Some(StoryPlan::Quest { tag, ending, dark })
+}
+
+/// Prepares the quest finish picked on a copy of the save, away from the window; the pop-up
+/// shows what it changes when it is ready (finish_story_preview).
+fn request_quest_preview(ui: &AppWindow, st: &mut State) {
+    clear_story_preview(ui, st);
+    let app = ui.global::<App>();
+    // whether the side changes what this ending does from here
+    if let (Some(tag), Some(save)) = (st.quest_pick.clone(), st.save.as_ref()) {
+        let endings = app.get_quest_endings();
+        let side = endings.row_data(app.get_finish_pick().max(0) as usize).map_or(false, |e| kse_core::questdb::finish_side_matters(save, &tag, e.id as i64));
+        app.set_quest_side_matters(side);
+    }
+    let (Some(plan), Some(before), Some(data)) = (current_quest_plan(ui, st), st.save.as_ref().cloned(), st.data()) else { return };
+    st.story_plan = Some(plan.clone());
+    app.set_story_preview_status(s("Calculating what you receive..."));
+    let result = st.story_result.clone();
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        *result.lock().unwrap() = Some(plan.prepare(&before, &data));
+        let _ = slint::invoke_from_event_loop(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.global::<App>().invoke_story_preview_finished();
+            }
+        });
+    });
 }
 
 fn take_story_preview(ui: &AppWindow, st: &mut State, back: bool) -> Option<PreparedStory> {
@@ -2712,8 +2767,32 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
             app.set_quest_text(s(current.and_then(|v| q.stage(v)).map(|x| x.text.trim().to_string()).unwrap_or_else(|| {
                 "This quest is not in the journal yet. Start it, or put it at any stage below.".to_string()
             })));
-            let stages: Vec<StageRow> = q
-                .stages
+            // The stages in the story's order: by number, except those the game sets out of
+            // number order (questdb::lowered_stages), which go just before the current stage
+            // when the save has been where they are set, else after the others; the endings
+            // last. A stage is passed when its number is below the current one, or, for one set
+            // out of order, when the save has been there. (2026-11-06: by number alone, Carth's
+            // "revenge is complete", set on the Leviathan, came first as the quest's beginning.)
+            let lowered = kse_core::questdb::lowered_stages(st.game, &q.tag);
+            let areas = st.save.as_ref().map(been_areas).unwrap_or_default();
+            // been where it is set: the save keeps the area, or the chapter the area belongs to
+            // is played (a save after the Leviathan no longer keeps the Leviathan's areas)
+            let played = st.save.as_ref().map(kse_core::questdb::chapters_played_in).unwrap_or_default();
+            let game = st.game;
+            let reached = |m: &String| {
+                areas.iter().any(|a| a.eq_ignore_ascii_case(m)) || kse_core::questdb::chapter_of_module(game, m).map_or(false, |c| played.get(c).copied().unwrap_or(false))
+            };
+            let been = |id: i64| lowered.iter().find(|(s, _)| *s == id).map(|(_, m)| m.iter().any(|m| reached(m)));
+            let mut regular: Vec<&kse_core::quests::Stage> = q.stages.iter().filter(|x| !x.end && been(x.id).is_none()).collect();
+            regular.sort_by_key(|x| x.id);
+            for x in q.stages.iter().filter(|x| !x.end && been(x.id).is_some()) {
+                let at = if been(x.id) == Some(true) { current.and_then(|c| regular.iter().position(|r| r.id == c)) } else { None };
+                regular.insert(at.unwrap_or(regular.len()), x);
+            }
+            let mut ends: Vec<&kse_core::quests::Stage> = q.stages.iter().filter(|x| x.end).collect();
+            ends.sort_by_key(|x| x.id);
+            let ordered: Vec<kse_core::quests::Stage> = regular.into_iter().chain(ends).cloned().collect();
+            let stages: Vec<StageRow> = ordered
                 .iter()
                 .map(|x| StageRow {
                     id: x.id as i32,
@@ -2722,9 +2801,11 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
                     end: x.end,
                     // 0 behind, 1 where the quest is, 2 ahead (the journal keeps only the
                     // current stage; an earlier number is taken as passed).
-                    place: match current {
-                        Some(c) if x.id == c => 1,
-                        Some(c) if x.id < c && !x.end => 0,
+                    place: match (current, been(x.id)) {
+                        (Some(c), _) if x.id == c => 1,
+                        (_, Some(true)) => 0,
+                        (_, Some(false)) => 2,
+                        (Some(c), None) if x.id < c && !x.end => 0,
                         _ => 2,
                     },
                 })
@@ -2736,10 +2817,10 @@ fn fill_journal(ui: &AppWindow, st: &mut State) {
                 .map(|x| StageRow { id: x.id as i32, text: s(x.text.trim()), xp: x.xp as i32, end: true, place: 2 })
                 .collect();
             // the stage picked in the list, in full, and what its button does
-            let pick = st.stage_pick.and_then(|id| q.stages.iter().position(|x| x.id == id));
+            let pick = st.stage_pick.and_then(|id| ordered.iter().position(|x| x.id == id));
             app.set_stage_pick(pick.map_or(-1, |k| k as i32));
             if let Some(k) = pick {
-                let x = &q.stages[k];
+                let x = &ordered[k];
                 app.set_stage_text(s(x.text.trim()));
                 app.set_stage_action(if current == Some(x.id) {
                     3
@@ -4020,7 +4101,6 @@ fn main() {
         quest_tags: Vec::new(),
         quest_tab: 0,
         quest_pick: None,
-        chain_choices: Vec::new(),
         map: None,
         map_pick: None,
         saves: Vec::new(),
@@ -4710,113 +4790,44 @@ fn main() {
         set_quest_stage(st, &tag, id as i64);
         refresh_after_edit(&u, st);
     });
-    on!(ui, state, on_finish_quest, |u, st, id: i32| {
-        // refused at once on a save that cannot be changed (it said "Finished" before)
-        if st.read_only {
-            needs_game(&u, st);
+    // Finish Quest: always as if played (2026-11-06, the maintainer: "it shouldn't be
+    // [optional] ... it should give you the exact same items, class, changes, everything"),
+    // the result prepared on a copy and shown first, then taken as it was shown.
+    on!(ui, state, on_finish_quest, |u, st, _id: i32| {
+        // refused at once on a save that cannot be changed, or without the game's files (it
+        // said "Finished" before)
+        if needs_game(&u, st) {
             return;
         }
         let Some(tag) = st.quest_pick.clone() else { return };
-        // As if played: every step on the way to this ending first, then the ending itself.
-        let mut skipped = Vec::new();
-        if u.global::<App>().get_quest_as_played() {
-            if let (Some((q, _)), Some(data)) = (kse_core::questdb::quest(st.game, &tag), st.data()) {
-                // The choices are numbered over every ending in order; find this ending's.
-                let mut first = 0;
-                for e in q.stages.iter().filter(|x| x.end).map(|x| x.stage) {
-                    let (_, c) = kse_core::questdb::path(&q, e);
-                    if e == id as i64 {
-                        break;
-                    }
-                    first += c.iter().filter(|x| x.does.iter().any(|d| !kse_core::questdb::describe(d, &data).is_empty())).count();
-                }
-                let (sure, choices) = kse_core::questdb::path(&q, id as i64);
-                let mut chosen = Vec::new();
-                let mut n = first;
-                for c in choices {
-                    if c.does.iter().all(|d| kse_core::questdb::describe(d, &data).is_empty()) {
-                        continue;
-                    }
-                    if st.chain_choices.get(n).copied().unwrap_or(false) {
-                        chosen.push(c);
-                    }
-                    n += 1;
-                }
-                if let Some(save) = st.save.as_mut() {
-                    for (k, step) in sure.iter().chain(chosen.iter()).enumerate() {
-                        skipped.extend(kse_core::questdb::apply(save, &data, step, &format!("chain.{}.{}", tag, k)));
-                    }
-                }
-            }
+        let plan = current_quest_plan(&u, st);
+        if plan.is_none() || st.story_plan != plan || !u.global::<App>().get_story_preview_ready() {
+            request_quest_preview(&u, st);
+            return;
         }
-        set_quest_stage(st, &tag, id as i64);
+        let Some(prepared) = st.story_prepared.take() else { return };
+        clear_story_preview(&u, st);
+        let party = st.save.as_ref().map(|s| s.party_members());
+        st.save = Some(prepared.save);
+        if st.save.as_ref().map(|s| s.party_members()) != party {
+            update_party_portraits(st);
+        }
+        // the quest's stage XP is the finish's now: stage clicks start counting again
+        st.quest_xp.remove(&tag.to_ascii_lowercase());
         u.global::<App>().set_overlay(0);
         // The quest moves to Completed; the tracker follows it there.
         st.quest_tab = 1;
         refresh_after_edit(&u, st);
-        if !skipped.is_empty() {
-            skipped.dedup();
-            message(&u, "Finished, with some steps left to the game", &skipped.join("\n"));
-        }
+        story_problems(&u, &prepared.notes);
+    });
+    on!(ui, state, on_refresh_quest_preview, |u, st| {
+        request_quest_preview(&u, st);
     });
     on!(ui, state, on_open_finish_quest, |u, st| {
-        // The quest database's steps to each ending, in plain words.
-        let app = u.global::<App>();
-        let (Some(tag), Some(data)) = (st.quest_pick.clone(), st.data()) else { return };
-        let mut lines = Vec::new();
-        st.chain_choices.clear();
-        match kse_core::questdb::quest(st.game, &tag) {
-            Some((q, checked)) => {
-                let endings: Vec<i64> = q.stages.iter().filter(|x| x.end).map(|x| x.stage).collect();
-                for e in endings {
-                    let (sure, choices) = kse_core::questdb::path(&q, e);
-                    for step in &sure {
-                        for d in &step.does {
-                            let text = kse_core::questdb::describe(d, &data);
-                            if !text.is_empty() {
-                                lines.push(ChainLine { ending: e as i32, text: s(text), can: kse_core::questdb::can_apply(d), branch: s(""), choice: -1, on: true });
-                            }
-                        }
-                    }
-                    for step in &choices {
-                        let text: Vec<String> = step.does.iter().map(|d| kse_core::questdb::describe(d, &data)).filter(|t| !t.is_empty()).collect();
-                        if text.is_empty() {
-                            continue;
-                        }
-                        lines.push(ChainLine {
-                            ending: e as i32,
-                            text: s(text.join("; ")),
-                            can: step.does.iter().any(kse_core::questdb::can_apply),
-                            branch: s(step.branch.clone().unwrap_or_default()),
-                            choice: st.chain_choices.len() as i32,
-                            on: false,
-                        });
-                        st.chain_choices.push(false);
-                    }
-                }
-                app.set_quest_has_chain(true);
-                app.set_quest_chain_checked(checked);
-            }
-            None => {
-                app.set_quest_has_chain(false);
-                app.set_quest_chain_checked(false);
-            }
-        }
-        app.set_quest_chain(model(lines));
-        app.set_overlay(8);
-    });
-    on!(ui, state, on_toggle_chain_choice, |u, st, i: i32, on: bool| {
-        if let Some(c) = st.chain_choices.get_mut(i.max(0) as usize) {
-            *c = on;
-        }
-        let app = u.global::<App>();
-        let rows: Vec<ChainLine> = app.get_quest_chain().iter().map(|mut r| {
-            if r.choice == i {
-                r.on = on;
-            }
-            r
-        }).collect();
-        app.set_quest_chain(model(rows));
+        // the pop-up opens on the ending picked and the light side, and asks for its result
+        u.global::<App>().set_quest_dark(0);
+        u.global::<App>().set_overlay(8);
+        request_quest_preview(&u, st);
     });
     on!(ui, state, on_remove_quest, |u, st| {
         let Some(tag) = st.quest_pick.clone() else { return };

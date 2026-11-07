@@ -22,7 +22,6 @@ export struct StoryItem { name: string, icon: image, has-icon: bool, difference:
 export struct StageRow { id: int, text: string, xp: int, end: bool, place: int }
 // One effect of finishing a quest as if played: for which ending, in plain words, whether
 // the editor can write it, and (for a branch) its choice index and whether it is chosen.
-export struct ChainLine { ending: int, text: string, can: bool, branch: string, choice: int, on: bool }
 // A row of a chapter's pop-up on the timeline: one of its quests (depth 1, opens and closes by
 // key) or a quest's stage (2), the chapter's beginning (5) or its end (6). state: 0 the button
 // goes back to it (index: the chapter to go back to), 2 it skips to it (index: the chapter to
@@ -344,12 +343,6 @@ export global App {
     callback set-quest-stage(int);
     callback finish-quest(int);
     callback open-finish-quest();
-    // "As if played": the quest database has this quest's steps.
-    in property <bool> quest-has-chain;
-    in property <bool> quest-chain-checked;
-    in-out property <bool> quest-as-played: true;
-    in property <[ChainLine]> quest-chain;
-    callback toggle-chain-choice(int, bool);
     callback remove-quest();
     callback remove-creature(int);
     callback set-played(string, string);
@@ -426,6 +419,12 @@ export global App {
     in property <[StoryItem]> story-items;
     in property <[Named]> story-grants;
     callback refresh-story-preview();
+    // Finish Quest's preview: what only the game does, in lines; whether the side matters for
+    // the ending picked, and the side (0 light, 1 dark); a new ending or side asks again
+    in property <string> story-notes;
+    in property <bool> quest-side-matters;
+    in-out property <int> quest-dark;
+    callback refresh-quest-preview();
     callback story-preview-finished();
     callback pick-row(int);
     in property <[SkipRow]> skip-rows;

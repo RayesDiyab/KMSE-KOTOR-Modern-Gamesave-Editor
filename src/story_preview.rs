@@ -20,6 +20,13 @@ pub enum Plan {
         prestige: Option<i64>,
         train: bool,
     },
+    /// One quest finished at an ending as if played from where the save stands, on the side
+    /// picked (questdb::finish_quest).
+    Quest {
+        tag: String,
+        ending: i64,
+        dark: bool,
+    },
     Back {
         kept: Vec<serde_json::Value>,
         undo: Vec<serde_json::Value>,
@@ -59,6 +66,7 @@ impl Plan {
             } => questdb::skip_through_with(
                 &mut save, data, chapters, *class, *dark, *prestige, *train,
             )?,
+            Self::Quest { tag, ending, dark } => questdb::finish_quest(&mut save, data, tag, *ending, *dark)?,
             Self::Back {
                 kept,
                 undo,

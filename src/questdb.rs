@@ -2186,6 +2186,185 @@ fn write_cleared(save: &mut Save, data: &GameData, m: &serde_json::Value, trip: 
     notes
 }
 
+// ---- finishing one quest ----
+
+/// The stages of a quest the game sets out of number order: a step whose journal call may
+/// lower the stage (`bAllowOverrideHigher`), with the areas that step runs in. KotOR's Carth
+/// sets stage 3 ("Carth's revenge is complete") on the Leviathan, after stage 65; ordered by
+/// number it came first and read as the quest's beginning (2026-11-06).
+pub fn lowered_stages(game: Game, tag: &str) -> Vec<(i64, Vec<String>)> {
+    let Some((q, _)) = quest(game, tag) else { return Vec::new() };
+    q.stages
+        .iter()
+        .filter(|s| s.steps.iter().any(|t| t.does.iter().any(|e| e.get("other").and_then(|v| v.as_str()).map_or(false, |o| o.contains("may also lower the stage")))))
+        .map(|s| (s.stage, s.steps.iter().map(|t| t.module.to_ascii_lowercase()).filter(|m| !m.is_empty()).collect()))
+        .collect()
+}
+
+/// The steps finishing `tag` at `ending` takes from where the save stands: one way through
+/// each stage after the quest's current stage (`one_way`, the way that suits the side), the
+/// ending's own steps last.
+fn finish_steps(save: &Save, q: &Quest, ending: i64, dark: bool) -> Vec<Step> {
+    let now = save.quests().into_iter().find(|(t, _)| t.eq_ignore_ascii_case(&q.tag)).map(|(_, v)| v).unwrap_or(-1);
+    let alignment = save.player().map(crate::creature::alignment).unwrap_or(50);
+    let after: std::collections::HashSet<i64> = q.stages.iter().filter(|s| s.stage > now || s.stage == ending).map(|s| s.stage).collect();
+    let mut trimmed = q.clone();
+    trimmed.stages.retain(|s| after.contains(&s.stage));
+    one_way(&trimmed, ending, dark, alignment)
+}
+
+/// Whether the side played changes what finishing `tag` at `ending` does from where the save
+/// stands (a light and a dark way through one of its stages).
+pub fn finish_side_matters(save: &Save, tag: &str, ending: i64) -> bool {
+    let Some((q, _)) = quest(save.game, tag) else { return false };
+    let key = |steps: Vec<Step>| steps.iter().map(|s| format!("{:?}{:?}", s.via, s.does)).collect::<Vec<_>>();
+    key(finish_steps(save, &q, ending, false)) != key(finish_steps(save, &q, ending, true))
+}
+
+/// Finishes a quest as if played from where the save stands: the steps the game takes on one
+/// way to `ending` (journal stages, story values, items, credits, XP, alignment, doors and
+/// the flags people read), the journal's own experience for every quest stage those steps
+/// reach that is new to the save (plot.2da `xp` times the stage's `XP_Percentage`, as the
+/// game gives it with the entry; measured on 2026-11-06, the quest database's XP and the
+/// journal's are separate: in KotOR 74 stages give XP by their steps alone, 135 by the
+/// journal alone, 3 both and never the same amount), and the quest at the ending. Returns what
+/// could not be done, in plain words: what only the game can do (a cutscene, a conversation)
+/// and what waits for an area the save has not been to.
+pub fn finish_quest(save: &mut Save, data: &GameData, tag: &str, ending: i64, dark: bool) -> Result<Vec<String>, String> {
+    let journal = crate::quests::all(data);
+    let xp_of = |t: &str, s: i64| journal.iter().find(|q| q.tag.eq_ignore_ascii_case(t)).and_then(|q| q.stage(s)).map_or(0, |x| x.xp);
+    let before: Vec<(String, i64)> = save.quests();
+    let was = |t: &str| before.iter().find(|(x, _)| x.eq_ignore_ascii_case(t)).map(|(_, v)| *v);
+    let mut notes = Vec::new();
+    let mut reached: Vec<(String, i64)> = Vec::new();
+    if let Some((q, _)) = quest(save.game, tag) {
+        let steps = finish_steps(save, &q, ending, dark);
+        for (k, step) in steps.iter().enumerate() {
+            for e in &step.does {
+                if let Some((t, s)) = e.get("journal").and_then(pair).and_then(|(t, s)| s.as_i64().map(|s| (t, s))) {
+                    if !reached.iter().any(|(x, y)| x.eq_ignore_ascii_case(&t) && *y == s) {
+                        reached.push((t, s));
+                    }
+                }
+                if let Some(text) = e.get("other").and_then(|v| v.as_str()) {
+                    if !apply_script_line(save, text, &format!("finish.{}.{}.other", tag, k)) {
+                        if let Some(line) = only_the_game(text) {
+                            notes.push(line);
+                        }
+                    }
+                }
+            }
+            // the script lines are done or told above; the rest as Skip Ahead does it
+            let mut rest = step.clone();
+            rest.does.retain(|e| e.get("other").is_none());
+            notes.extend(apply(save, data, &rest, &format!("finish.{}.{}", tag, k)));
+        }
+    } else {
+        notes.push("The editor has no record of this quest's steps: only the journal and its experience change.".to_string());
+    }
+    if !reached.iter().any(|(x, y)| x.eq_ignore_ascii_case(tag) && *y == ending) {
+        reached.push((tag.to_string(), ending));
+    }
+    // the journal's experience for each stage reached that is new to the save, once
+    let xp: i64 = reached.iter().filter(|(t, s)| was(t).map_or(true, |w| *s > w || (t.eq_ignore_ascii_case(tag) && *s == ending && *s != w))).map(|(t, s)| xp_of(t, *s)).sum();
+    save.set_quest(tag, ending);
+    if xp != 0 {
+        save.edit(Who::Player, &format!("finish.{}.xp", tag), |c| {
+            let now = crate::creature::experience(c);
+            crate::creature::set_experience(c, now + xp);
+        });
+        let pool = save.party_int("PT_XP_POOL").unwrap_or(0);
+        save.set_party_int("PT_XP_POOL", pool + xp);
+    }
+    notes.dedup();
+    Ok(notes)
+}
+
+/// What a script line the quest data keeps as text does, done where the editor can do it as
+/// the script does (2026-11-06, for Finish Quest; counted in the data that day): a journal
+/// quest removed (134 lines), a story counter raised by a number (Carth's, Bastila's, the HK
+/// parts), set to the player's level or to another counter, and XP of the player's level times
+/// a number. Returns whether it was done.
+fn apply_script_line(save: &mut Save, text: &str, key: &str) -> bool {
+    let quoted = |t: &str| t.split('"').nth(1).map(|x| x.to_string());
+    if let Some(rest) = text.strip_prefix("removes the journal quest ") {
+        if let Some(tag) = quoted(rest) {
+            save.remove_quest(&tag);
+            return true;
+        }
+    }
+    let level = save.player().map(crate::creature::level).unwrap_or(1);
+    if let Some(rest) = text.strip_prefix("gives XP to player: (GetHitDice(player) * ") {
+        if let Ok(n) = rest.trim_end_matches(')').trim().parse::<i64>() {
+            let xp = level * n;
+            save.edit(Who::Player, key, |c| {
+                let now = crate::creature::experience(c);
+                crate::creature::set_experience(c, now + xp);
+            });
+            let pool = save.party_int("PT_XP_POOL").unwrap_or(0);
+            save.set_party_int("PT_XP_POOL", pool + xp);
+            return true;
+        }
+    }
+    if let Some(rest) = text.strip_prefix("sets global number ") {
+        let Some((name, how)) = rest.split_once(" to a value that is not constant: ") else { return false };
+        let name = name.trim().to_string();
+        let how = how.trim();
+        let number = |root: &Struct, n: &str| crate::globals::list(root).into_iter().find(|g| g.kind == crate::globals::Kind::Number && g.name.eq_ignore_ascii_case(n));
+        let value_of = |g: &crate::globals::Global| match g.value {
+            crate::globals::GlobalValue::Number(v) => v,
+            _ => 0,
+        };
+        // (GetGlobalNumber("NAME") + N), GetHitDice(player), GetGlobalNumber("OTHER")
+        let plan: Option<Box<dyn Fn(&Struct) -> Option<i64>>> = if let Some(inner) = how.strip_prefix("(GetGlobalNumber(\"").and_then(|x| x.strip_suffix(')')) {
+            let Some((from, Some(add))) = inner.split_once("\") + ").map(|(a, b)| (a.to_string(), b.trim().parse::<i64>().ok())) else { return false };
+            let name = name.clone();
+            if !from.eq_ignore_ascii_case(&name) {
+                return false;
+            }
+            Some(Box::new(move |root: &Struct| number(root, &name).map(|g| value_of(&g) + add)))
+        } else if how == "GetHitDice(player)" {
+            Some(Box::new(move |_: &Struct| Some(level)))
+        } else if let Some(other) = how.strip_prefix("GetGlobalNumber(\"").and_then(|x| x.strip_suffix("\")")) {
+            let other = other.to_string();
+            Some(Box::new(move |root: &Struct| number(root, &other).map(|g| value_of(&g))))
+        } else {
+            None
+        };
+        let Some(plan) = plan else { return false };
+        let mut done = false;
+        save.edit_globals(key, |root| {
+            if let (Some(g), Some(v)) = (number(root, &name), plan(root)) {
+                crate::globals::set_number(root, g.index, v.clamp(0, 255));
+                done = true;
+            }
+        });
+        return done;
+    }
+    false
+}
+
+/// A script line only the game can do, in words a player can use; None for what says nothing to
+/// a player (the quest data's own remarks, faction tags, empty conversation markers, flags
+/// kept on objects, the long "depending on other tests" lists).
+fn only_the_game(text: &str) -> Option<String> {
+    let t = text.trim();
+    const QUIET: [&str; 7] = ["may also lower the stage", "depending on other tests", "changes the faction of", "starts conversation \"\"", "SetLocal", "runs script", "AddPartyMember(GetGlobalNumber"];
+    if t.is_empty() || QUIET.iter().any(|q| t.contains(q)) {
+        return None;
+    }
+    if let Some(movie) = t.strip_prefix("PlayMovie(\"") {
+        return Some(format!("A cutscene plays ({})", movie.split('"').next().unwrap_or_default()));
+    }
+    if let Some(rest) = t.strip_prefix("starts conversation ") {
+        return Some(format!("A conversation starts ({})", rest.trim_matches('"')));
+    }
+    if let Some(rest) = t.strip_prefix("moves the party to module ") {
+        return Some(format!("The party is taken to {}", rest.trim_matches('"')));
+    }
+    Some(format!("Left to the game: {}", t))
+}
+
 /// A chapter's own quests for Skip Ahead's list, in the order a player meets them: the main
 /// story (the milestone's journal) first, then the rest as the quest file lists them. (tag,
 /// main story)

@@ -61,6 +61,92 @@ component Overlay inherits Rectangle {
     }
 }
 
+// What a story change does to the save, measured on a copy: the values before and after, and
+// what is gained and lost (companions, feats, powers). Shared by Skip Ahead, Go Back and
+// Finish Quest (2026-11-06).
+component StoryValues inherits VerticalLayout {
+    in property <bool> compact;
+    spacing: 10px;
+    if !App.story-preview-ready: Note { text: App.story-preview-status; font-size: 14px * Theme.ts; }
+    if App.story-preview-ready: VerticalLayout {
+        spacing: 4px;
+        alignment: start;
+        Label { text: "CHANGES TO YOUR SAVE"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+        HorizontalLayout {
+            height: 26px;
+            Text { width: parent.width * 0.34; text: "CHANGE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+            Text { width: parent.width * 0.43; text: "CURRENT  →  AFTER"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+            Text { text: "DIFFERENCE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
+        }
+        for r in App.story-values: Rectangle {
+            height: root.compact ? 34px : 40px;
+            HorizontalLayout {
+                spacing: 0px;
+                Text { width: parent.width * 0.34; text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; }
+                Text { width: parent.width * 0.43; text: r.changed ? r.before + " → " + r.after : r.before; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; wrap: word-wrap; overflow: elide; }
+                Text { text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+        }
+        for r in App.story-grants: HorizontalLayout {
+            height: 38px;
+            spacing: 10px;
+            Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
+            Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+            Text { text: r.note; font-size: 11px * Theme.ts; color: Theme.soft; vertical-alignment: center; }
+        }
+    }
+}
+
+// The inventory changes of a story change, in a box that scrolls: `rows` rows of items high.
+component StoryItems inherits VerticalLayout {
+    in property <int> rows: 2;
+    spacing: 10px;
+    // the heading on its box, whatever room the pop-up gives
+    alignment: start;
+    if App.story-preview-ready: Label { text: "INVENTORY CHANGES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+    if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
+    if App.story-preview-ready && App.story-items.length > 0: Rectangle {
+        height: root.rows * 76px + 10px;
+        border-width: 1px; border-color: Theme.edge; border-radius: 5px;
+        Scroller {
+            x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
+            content-height: Math.ceil(App.story-items.length / 2) * 76px;
+            Rectangle {
+                x: 0px; y: 0px;
+                width: parent.width - 12px;
+                height: Math.ceil(App.story-items.length / 2) * 76px;
+                for r[i] in App.story-items: Rectangle {
+                    x: Math.mod(i, 2) * self.width;
+                    y: Math.floor(i / 2) * 76px;
+                    width: parent.width / 2;
+                    height: 76px;
+                    Rectangle {
+                        x: 8px; y: 14px; width: 48px; height: 48px;
+                        background: Theme.field; border-width: 1px; border-color: Theme.edge; border-radius: 3px;
+                        if r.has-icon: Image { source: r.icon; image-fit: contain; }
+                    }
+                    VerticalLayout {
+                        x: 66px; width: parent.width - 154px;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: r.name; font-size: 13px * Theme.ts; color: Theme.text; wrap: word-wrap; overflow: elide; max-height: 2.6 * 13px * Theme.ts; }
+                        Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
+                    }
+                    Text {
+                        x: parent.width - 80px; width: 72px; height: parent.height;
+                        text: r.difference; font-size: 13px * Theme.ts;
+                        color: r.gained ? Theme.gain : Theme.danger;
+                        vertical-alignment: center; horizontal-alignment: right;
+                    }
+                    Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
+                    if Math.mod(i, 2) == 1: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.row-line; }
+                }
+            }
+        }
+    }
+}
+
 component StoryPreviewDetails inherits Rectangle {
     property <bool> back: App.overlay == 11 || (App.overlay == 12 && App.pop-action == 2);
     VerticalLayout {
@@ -122,80 +208,14 @@ component StoryPreviewDetails inherits Rectangle {
                     set(v) => { App.back-alignment = v; }
                     committed => { App.refresh-story-preview(); }
                 }
-                if !App.story-preview-ready: Note { text: App.story-preview-status; font-size: 14px * Theme.ts; }
-                if App.story-preview-ready: VerticalLayout {
-                    spacing: 4px;
-                    Label { text: "CHANGES TO YOUR SAVE"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
-                    HorizontalLayout {
-                        height: 26px;
-                        Text { width: parent.width * 0.34; text: "CHANGE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
-                        Text { width: parent.width * 0.43; text: "CURRENT  →  AFTER"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
-                        Text { text: "DIFFERENCE"; font-family: Theme.label-font; font-size: 9px * Theme.ts; color: Theme.soft; }
-                    }
-                    for r in App.story-values: Rectangle {
-                        height: root.back ? 34px : 40px;
-                        HorizontalLayout {
-                            spacing: 0px;
-                            Text { width: parent.width * 0.34; text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; }
-                            Text { width: parent.width * 0.43; text: r.changed ? r.before + " → " + r.after : r.before; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; wrap: word-wrap; overflow: elide; }
-                            Text { text: r.difference; font-size: 13.5px * Theme.ts; color: r.change > 0 ? Theme.gain : r.change < 0 ? Theme.danger : Theme.muted; vertical-alignment: center; }
-                        }
-                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                    }
-                    for r in App.story-grants: HorizontalLayout {
-                        height: 38px;
-                        spacing: 10px;
-                        Text { width: 16px; text: r.id > 0 ? "+" : "-"; font-size: 14px * Theme.ts; color: r.id > 0 ? Theme.gain : Theme.danger; vertical-alignment: center; }
-                        Text { text: r.name; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                        Text { text: r.note; font-size: 11px * Theme.ts; color: Theme.soft; vertical-alignment: center; }
-                    }
-                }
+                StoryValues { compact: root.back; }
             }
         }
-        if App.story-preview-ready: Label { text: "INVENTORY CHANGES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
-        if App.story-preview-ready && App.story-items.length == 0: Note { text: "No inventory changes."; font-size: 13px * Theme.ts; }
-        // two rows, one where the skip asks two questions or more, so the totals above keep
-        // their room (at 1600 by 900 with Large text the skip's choices and a taller box left
-        // the totals out of view); it scrolls
-        if App.story-preview-ready && App.story-items.length > 0: Rectangle {
-            property <int> asks: root.back ? 0 : (App.skip-jedi ? 1 : 0) + (App.skip-side ? 1 : 0) + (App.skip-prestige ? 1 : 0) + (App.skip-train ? 1 : 0);
-            height: (self.asks >= 2 ? 1 : 2) * 76px + 10px;
-            border-width: 1px; border-color: Theme.edge; border-radius: 5px;
-            Scroller {
-                x: 5px; y: 5px; width: parent.width - 10px; height: parent.height - 10px;
-                content-height: Math.ceil(App.story-items.length / 2) * 76px;
-                Rectangle {
-                    x: 0px; y: 0px;
-                    width: parent.width - 12px;
-                    height: Math.ceil(App.story-items.length / 2) * 76px;
-                    for r[i] in App.story-items: Rectangle {
-                        x: Math.mod(i, 2) * self.width;
-                        y: Math.floor(i / 2) * 76px;
-                        width: parent.width / 2;
-                        height: 76px;
-                        Rectangle {
-                            x: 8px; y: 14px; width: 48px; height: 48px;
-                            background: Theme.field; border-width: 1px; border-color: Theme.edge; border-radius: 3px;
-                            if r.has-icon: Image { source: r.icon; image-fit: contain; }
-                        }
-                        VerticalLayout {
-                            x: 66px; width: parent.width - 154px;
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: r.name; font-size: 13px * Theme.ts; color: Theme.text; wrap: word-wrap; overflow: elide; max-height: 2.6 * 13px * Theme.ts; }
-                            Text { text: r.gained ? "Added" : "Removed"; font-size: 11px * Theme.ts; color: Theme.muted; }
-                        }
-                        Text {
-                            x: parent.width - 80px; width: 72px; height: parent.height;
-                            text: r.difference; font-size: 13px * Theme.ts;
-                            color: r.gained ? Theme.gain : Theme.danger;
-                            vertical-alignment: center; horizontal-alignment: right;
-                        }
-                        Rectangle { y: parent.height - 1px; height: 1px; background: Theme.row-line; }
-                        if Math.mod(i, 2) == 1: Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: Theme.row-line; }
-                    }
-                }
-            }
+        StoryItems {
+            // two rows, one where the skip asks two questions or more, so the totals above
+            // keep their room (at 1600 by 900 with Large text the skip's choices and a taller
+            // box left the totals out of view); it scrolls
+            rows: root.back ? 2 : ((App.skip-jedi ? 1 : 0) + (App.skip-side ? 1 : 0) + (App.skip-prestige ? 1 : 0) + (App.skip-train ? 1 : 0)) >= 2 ? 1 : 2;
         }
     }
 }
@@ -775,100 +795,113 @@ export component AppWindow inherits Window {
         }
     }
     // Finish Quest: which ending, with its experience, then confirm.
+    // Finish Quest (2026-11-06, the maintainer): always as if played from where the save
+    // stands. The ending (and, where it changes anything, the side) on the left; on the right
+    // what the save receives, measured on a copy, and what only the game does. Finish takes
+    // exactly what is shown.
     if App.overlay == 8: Overlay {
-        panel-width: 760px;
-        panel-height: 250px + min(App.quest-endings.length, 4) * 96px + (App.quest-has-chain ? (App.quest-as-played ? 260px : 50px) : 0px);
+        panel-width: 1300px;
+        panel-height: 860px;
         property <int> chosen: App.finish-pick;
         VerticalLayout {
-            spacing: 12px;
-            Text { text: "Finish " + App.quest-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            spacing: 10px;
+            Label { text: "FINISH A QUEST"; font-size: 13px * Theme.ts; }
+            Text { text: App.quest-title; font-family: Theme.title-font; font-size: 30px * Theme.ts; color: Theme.text; wrap: word-wrap; }
             Note {
                 font-size: 14px * Theme.ts;
-                text: App.quest-endings.length > 1
-                    ? "This quest has more than one ending. Pick how it ends; the journal shows that ending and you and the party get its experience, as in the game."
-                    : "The journal shows the quest's ending and you and the party get its experience, as in the game.";
+                text: "As if you played it from where the save stands: everything the game does on the way to the ending you pick, and the experience it gives. Nothing is written until Save Changes, and a backup is made first.";
             }
-            if !App.quest-has-chain: Note { font-size: 13px * Theme.ts; text: "What the story's scripts would also have done (items, people, doors) does not happen: the editor has no record of this quest's steps yet."; }
-            // As if played: the steps the game takes on the way to this ending.
-            if App.quest-has-chain: HorizontalLayout {
-                spacing: 12px;
-                Switch { on: App.quest-as-played; toggled(v) => { App.quest-as-played = v; } }
-                Text {
-                    text: "As if played: also do what the game does on the way to this ending" + (App.quest-chain-checked ? "" : " (not yet checked in the game)");
-                    vertical-alignment: center;
-                    wrap: word-wrap;
-                    font-family: Theme.body-font;
-                    font-size: 13.5px * Theme.ts;
-                    color: Theme.text;
-                    horizontal-stretch: 1;
-                }
-            }
-            if App.quest-has-chain && App.quest-as-played: Rectangle {
-                height: min(200px, chain-list.preferred-height + 16px);
-                border-radius: 6px;
-                border-width: 1px;
-                border-color: Theme.edge;
-                background: Theme.field;
-                Flickable {
-                    x: 12px;
-                    y: 8px;
-                    width: parent.width - 24px;
-                    height: parent.height - 16px;
-                    content-height: chain-list.preferred-height;
-                    chain-list := VerticalLayout {
-                        spacing: 4px;
-                        for c in App.quest-chain: HorizontalLayout {
-                            // Only the lines of the ending picked above.
-                            visible: App.quest-endings.length > chosen && c.ending == App.quest-endings[chosen].id;
-                            height: self.visible ? max(22px, line.preferred-height) : 0px;
-                            spacing: 8px;
-                            if c.choice >= 0: Switch { on: c.on; toggled(v) => { App.toggle-chain-choice(c.choice, v); } }
-                            line := Text {
-                                text: (c.branch != "" ? c.branch + ": " : "") + c.text + (c.can ? "" : " (cannot be written into a save)");
-                                wrap: word-wrap;
-                                vertical-alignment: center;
-                                font-family: Theme.body-font;
-                                font-size: 12.5px * Theme.ts;
-                                color: c.can ? Theme.muted : Theme.faint;
-                                horizontal-stretch: 1;
-                            }
-                        }
-                    }
-                }
-            }
-            Scroller {
+            Rectangle { height: 1px; background: Theme.row-line; }
+            HorizontalLayout {
                 vertical-stretch: 1;
-                content-height: App.quest-endings.length * 96px;
+                spacing: 24px;
+                // the ending, and the side where it matters
                 VerticalLayout {
-                    spacing: 8px;
-                    for x[i] in App.quest-endings: Rectangle {
-                        height: 88px;
-                        border-radius: 8px;
-                        border-width: i == chosen ? 2px : 1px;
-                        border-color: i == chosen ? Theme.accent : xt.has-hover ? Theme.soft : Theme.edge;
-                        background: i == chosen ? Theme.selected : Theme.field;
-                        HorizontalLayout {
-                            padding: 14px;
-                            spacing: 14px;
-                            // A round choice mark.
-                            VerticalLayout {
-                                alignment: center;
+                    width: min(460px, parent.width * 0.38);
+                    spacing: 10px;
+                    Label { text: App.quest-endings.length > 1 ? "HOW IT ENDS" : "HOW IT ENDS (ONE ENDING)"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                    Scroller {
+                        vertical-stretch: 1;
+                        content-height: ends.preferred-height;
+                        ends := VerticalLayout {
+                            x: 0px; y: 0px;
+                            width: parent.width - 12px;
+                            spacing: 8px;
+                            for x[i] in App.quest-endings: Rectangle {
+                                // as tall as its words: a long ending was cut and began
+                                // mid-sentence in a box of 88 px
+                                height: max(64px, et.preferred-height + 28px);
+                                border-radius: 8px;
+                                border-width: i == chosen ? 2px : 1px;
+                                border-color: i == chosen ? Theme.accent : xt.has-hover ? Theme.soft : Theme.edge;
+                                background: i == chosen ? Theme.selected : Theme.field;
                                 Rectangle {
-                                    width: 18px;
-                                    height: 18px;
+                                    x: 14px; y: (parent.height - self.height) / 2;
+                                    width: 18px; height: 18px;
                                     border-radius: 9px;
                                     border-width: 2px;
                                     border-color: i == chosen ? Theme.accent : Theme.edge;
                                     if i == chosen: Rectangle { width: 8px; height: 8px; border-radius: 4px; background: Theme.accent; }
                                 }
+                                et := Text {
+                                    x: 46px; y: 14px;
+                                    width: parent.width - 46px - 14px;
+                                    // the words alone: the XP the ending gives in all is on the right (the
+                                    // journal's own XP here read 1,000 where finishing gives 1,050)
+                                    text: x.text != "" ? x.text : "Ending " + x.id;
+                                    wrap: word-wrap;
+                                    font-family: Theme.body-font;
+                                    font-size: 13.5px * Theme.ts;
+                                    color: i == chosen ? Theme.text : Theme.muted;
+                                }
+                                xt := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        if (App.finish-pick != i) {
+                                            App.finish-pick = i;
+                                            App.refresh-quest-preview();
+                                        }
+                                    }
+                                }
                             }
-                            Text { text: x.text != "" ? x.text : "Ending " + x.id; wrap: word-wrap; overflow: elide; vertical-alignment: center; font-family: Theme.body-font; font-size: 13.5px * Theme.ts; color: Theme.muted; horizontal-stretch: 1; }
-                            Text { text: x.xp > 0 ? "+" + x.xp + " XP" : "No XP"; vertical-alignment: center; font-family: Theme.list-font; font-size: 16px * Theme.ts; color: x.xp > 0 ? Theme.gold : Theme.faint; }
                         }
-                        xt := TouchArea { mouse-cursor: pointer; clicked => { chosen = i; } }
+                    }
+                    if App.quest-side-matters: Label { text: "YOUR PATH"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                    if App.quest-side-matters: Choice {
+                        height: 40px;
+                        font-size: 14px * Theme.ts;
+                        options: ["Light side", "Dark side"];
+                        current: App.quest-dark;
+                        picked(k) => { App.quest-dark = k; App.refresh-quest-preview(); }
                     }
                 }
+                Rectangle { width: 1px; background: Theme.edge; }
+                // what the save receives
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 12px;
+                    Scroller {
+                        vertical-stretch: 1;
+                        min-height: 120px;
+                        content-height: receive.preferred-height;
+                        receive := VerticalLayout {
+                            x: 0px; y: 0px;
+                            width: parent.width - 12px;
+                            // its own height: as tall as the scroller it spread its rows apart
+                            height: self.preferred-height;
+                            spacing: 14px;
+                            StoryValues { }
+                            if App.story-preview-ready && App.story-notes != "": VerticalLayout {
+                                spacing: 6px;
+                                Label { text: "WHAT ONLY THE GAME DOES"; font-size: 11px * Theme.ts; letter-spacing: 2px; }
+                                Note { text: App.story-notes; font-size: 13px * Theme.ts; }
+                            }
+                        }
+                    }
+                    StoryItems { rows: 2; }
+                }
             }
+            Rectangle { height: 1px; background: Theme.row-line; }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
@@ -877,6 +910,7 @@ export component AppWindow inherits Window {
                     width: 240px;
                     kind: 0;
                     text: "Finish Quest";
+                    enabled: App.story-preview-ready;
                     clicked => { if (App.quest-endings.length > chosen) { App.finish-quest(App.quest-endings[chosen].id); } }
                 }
             }

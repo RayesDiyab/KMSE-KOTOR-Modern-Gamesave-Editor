@@ -6,6 +6,17 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Finish Quest plays the quest to its end, and shows what you receive first** (2026-11-06,
+  the maintainer). It is always as if played from where the save stands: one way through each
+  stage left, the one that suits the side, with its items, credits, XP, alignment, story values,
+  doors, the journal quests it removes and the counters it raises, and the journal's own XP for
+  each new stage. The pop-up shows the endings in full, asks the side where it changes
+  anything, and on the right lists what the save receives, measured on a copy (values, items,
+  companions, feats, powers, journal changes) and what only the game does; Finish takes exactly
+  that. The "As if played" switch is gone. Quest stages the game sets out of number order
+  (Carth's "revenge is complete", set on the Leviathan) are listed where they happen instead of
+  first, and are no longer offered as the quest's beginning. `tests/finish_quest.rs`: 136
+  finishes on the saves of both games. In the game, **untested**.
 - **Pazaak & Destinations is a tab of its own, and Story is Quests** (2026-11-06, the
   maintainer). The planets the Ebon Hawk can fly to and the Pazaak cards have their own tab
   beside Quests, with its own mark for changes; Quests is the quest tracker alone. On a narrow

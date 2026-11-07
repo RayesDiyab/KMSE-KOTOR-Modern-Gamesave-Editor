@@ -190,7 +190,7 @@ remove cross.
 | Moving within the area | `XPosition`/`YPosition`/`ZPosition` of every player copy, facing the object |
 | Moving to another area | only areas in SAVEGAME.sav; the player goes into that module's `Mod_PlayerList` with that module's player `ObjectId` and `AreaId`, its items new ids from `Mod_NextObjId0`, effects re-pointed; savenfo `LASTMODULE` and `AREANAME` |
 | Spawn a Creature Here | on a picked floor spot in the area the save resumes in: a copy of a creature standing there, or any creature template the game has (its templates and Override, and the area's own module templates), in tabs In This Area, Hostile, Friendly, Other (by `FactionID` in repute.2da); it faces the player; a new one runs its own spawn script when the save loads ([save-editor-format.md](save-editor-format.md), section 5.2) |
-| Finish Quest | the quest's stages with `End` 1 in global.jrl; XP = plot.2da `xp` x the stage's `XP_Percentage`, added to `Experience` and `PT_XP_POOL` when the stage is new |
+| Finish Quest | the quest's stages with `End` 1 in global.jrl; as if played since 2026-11-06 (the quest tracker, below): the steps on one way there, and for each quest stage reached that is new, XP = plot.2da `xp` x the stage's `XP_Percentage`, added to `Experience` and `PT_XP_POOL` |
 
 **Travel and Skip Ahead** (2026-10-23; played by the maintainer in KotOR 1):
 
@@ -510,10 +510,52 @@ the modder sections, and the party list steps aside. Left: the quests in three t
 Completed (the journal entry is one of the quest's endings) and Not Started, each with where it
 stands. Right: the picked quest, its current journal entry in full, and every stage as a
 timeline (earlier stages filled, the current one a gold ring, later ones empty, endings
-tagged, each with its XP); clicking a stage puts the quest there. Finish Quest opens a pop-up
-listing the endings with their XP; the chosen one is set and its XP given to the player and
-the party pool, once. The journal keeps only a quest's current stage, so "earlier" means a
-lower stage number, not a stage the player is known to have seen.
+tagged, each with its XP); clicking a stage puts the quest there. The journal keeps only a
+quest's current stage, so "earlier" means a lower stage number, not a stage the player is known
+to have seen.
+
+**Stage order, corrected 2026-11-06.** The stages were listed by number, and some quests are
+not numbered in story order: KotOR's Carth sets stage 3 ("Carth's revenge is complete, Saul
+Karath is dead") on the Leviathan, after stage 65, with a journal call that may lower the stage
+(`bAllowOverrideHigher`; the quest data keeps that remark on the step). It came first, read
+"The Beginning" and offered "Start the Quest". Such stages (`questdb::lowered_stages`) now go
+just before the current stage when the save has been where they are set (it keeps that area, or
+the chapter the area belongs to is played; a save after the Leviathan no longer keeps the
+Leviathan's areas), else after the other stages; the endings come last, and a stage set out of
+order counts as passed by the same test. Seen in the program on a KotOR save after the
+Leviathan: Carth's stages read ..., "won Carth's full trust", "revenge is complete" (passed),
+"devastated" (current), the three endings.
+
+**Finish Quest, as if played** (2026-11-06, the maintainer: "it shouldn't be [optional] ... it
+should give you the exact same items, class, changes, everything ... If there are options
+that you have to pick, then you can pick that as well"). Until then a pop-up listed the endings
+with their XP, and a switch, "As if played", added the quest data's steps, every way through a
+stage at once and branch steps only when ticked. Now it is always as if played, from where the
+save stands (`questdb::finish_quest`, `story_preview::Plan::Quest`): every stage after the
+quest's current one takes one way, the one that suits the side (`questdb::one_way`, as Skip
+Ahead does), and its steps are done: journal stages, story values, items (credits as the game
+adds them), credits, XP, alignment, doors and the flags people read. The script lines the data
+keeps as text are done where the editor can do them as the script does: a journal quest
+removed, a story counter raised by a number or set to the player's level or another counter, XP
+of the player's level times a number. Each quest stage those steps reach that is new to the
+save gives the journal's own experience (plot.2da `xp` times the stage's `XP_Percentage`); the
+quest data's XP and the journal's are separate (measured that day: in KotOR 74 stages give XP
+by their steps alone, 135 by the journal alone, 3 both, never the same amount), so both are
+given. The quest then stands at the ending.
+
+The pop-up shows the endings in full on the left (a long one began mid-sentence in a box of
+88 px), and "Your path", light or dark, where the side changes what this ending does from where
+the save stands (`questdb::finish_side_matters`; in the data, 28 of KotOR's 101 quests and 26
+of KotOR II's 112 play differently by side). On the right, the result is prepared on a copy and
+measured as Skip Ahead's is: the values before and after, what is gained and lost (companions,
+feats, powers, journal quests finished, begun, moved on or taken out), the inventory changes,
+and what only the game does (a cutscene, a conversation, people leaving an area the save has
+not been to). Finish Quest takes exactly that result. Checked by `tests/finish_quest.rs`: every
+quest under way in three saves of each game, finished at each ending on both sides (84 in
+KotOR, 52 in KotOR II), stands at the ending, never loses XP, and leaves the save it was
+prepared from untouched. Seen in the program: Genoharadan: Ithorak's "bounty collected" ending
+gives 1,000 XP and the GenoHaradan Power Gloves; a KotOR II bonus quest 1,050 XP (1,000 from
+its script, 50 from the journal). **In the game, untested.**
 
 **Removing what was spawned** (2026-10-22): a creature the editor spawned, picked on the map,
 offers Remove This Creature; the area's own creatures do not (Advanced, Creatures still lists
