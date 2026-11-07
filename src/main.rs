@@ -4449,10 +4449,15 @@ fn main() {
         let Some(c) = st.save.as_ref().and_then(|s| s.creature(st.who())).cloned() else { return };
         let have: Vec<i64> = creature::classes(&c).iter().map(|(id, _)| *id).collect();
         let droid = have.iter().any(|id| cat.class(*id).map_or(false, |k| k.droid));
+        // The game gives the player Force only while the newest class is a Jedi class: a Jedi
+        // player who added Soldier lost every Force point (2026-11-07 audit, E-3). So a player
+        // with a Jedi class is offered only Jedi classes; a party member's Force does not
+        // follow that rule.
+        let jedi_player = creature::uses_level_records(&c) && have.iter().any(|id| cat.class(*id).map_or(false, |k| k.force_die > 0));
         let rows = cat
             .classes
             .iter()
-            .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty())
+            .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty() && !(jedi_player && k.force_die == 0))
             .map(|k| {
                 let note = if k.force_die > 0 {
                     format!("Jedi class: {} Health and {} Force a level", k.hit_die, k.force_die)
@@ -5017,10 +5022,14 @@ fn main() {
         let Some(c) = st.save.as_ref().and_then(|s| s.creature(st.who())).cloned() else { return };
         let have: Vec<i64> = creature::classes(&c).iter().map(|(id, _)| *id).collect();
         let droid = have.iter().any(|id| cat.class(*id).map_or(false, |k| k.droid));
+        // the player's newest class, with a Jedi class before it: only a Jedi class keeps the
+        // Force the other one gives (the game reads Force from the newest class; E-3)
+        let i = index.max(0) as usize;
+        let newest_after_jedi = creature::uses_level_records(&c) && i + 1 == have.len() && have.iter().take(i).any(|id| cat.class(*id).map_or(false, |k| k.force_die > 0));
         let rows: Vec<Named> = cat
             .classes
             .iter()
-            .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty())
+            .filter(|k| !have.contains(&k.id) && k.droid == droid && !k.name.is_empty() && !(newest_after_jedi && k.force_die == 0))
             .map(|k| row(k.id, &k.name, format!("{} Health{} a level", k.hit_die, if k.force_die > 0 { format!(" and {} Force", k.force_die) } else { String::new() })))
             .collect();
         open_list(&u, st, Target::ChangeClass(index.max(0) as usize), "Change Class", "Replaces the class at the same level. Health and Force follow the new class. Leaving a Force class removes its powers.", rows);
@@ -5110,6 +5119,26 @@ fn main() {
         refresh_after_edit(&u, st);
     });
     on!(ui, state, on_remove_creature, |u, st, index: i32| {
+        // a party member's own copy in the area (the Ebon Hawk holds them) is never removed by
+        // one click: the party table would still list them (2026-11-07 audit, W-2)
+        if let Some(save) = st.save.as_ref() {
+            let theirs = save
+                .area_git()
+                .and_then(|g| g.root.list(area::CREATURES))
+                .and_then(|l| l.get(index.max(0) as usize))
+                .map(|c| (c.string("Tag").unwrap_or_default(), creature::classes(c)));
+            if let Some((tag, classes)) = theirs {
+                let member = save.npcs().into_iter().find(|n| {
+                    save.recruited(*n)
+                        && save.creature(Who::Npc(*n)).map_or(false, |m| !tag.is_empty() && m.string("Tag").map_or(false, |t| t.eq_ignore_ascii_case(&tag)) && creature::classes(m) == classes)
+                });
+                if let Some(n) = member {
+                    let name = st.creature_name(Who::Npc(n));
+                    message(&u, "That is a party member", &format!("{} stands here as a member of your party. Take them out of the party first.", if name.is_empty() { tag } else { name }));
+                    return;
+                }
+            }
+        }
         if let Some(save) = st.save.as_mut() {
             save.edit_area(&format!("creature{}", index), |git| area::remove_creature(git, index.max(0) as usize));
         }
@@ -5743,8 +5772,18 @@ fn main() {
     });
     on!(ui, state, on_revert, |u, st| {
         if let Some(folder) = st.save.as_ref().map(|s| s.folder.clone()) {
-            st.save = Save::open(&folder).ok();
-            st.original = Save::open(&folder).ok();
+            // read again first: a save that no longer opens (moved, locked, damaged) left no
+            // save open and every tab out of date (2026-11-07 audit, U-8); now the changes
+            // stay and it says why
+            let (fresh, orig) = match (Save::open(&folder), Save::open(&folder)) {
+                (Ok(a), Ok(b)) => (a, b),
+                (Err(e), _) | (_, Err(e)) => {
+                    message(&u, "The save could not be read again", &format!("{} The changes are still here.", e));
+                    return;
+                }
+            };
+            st.save = Some(fresh);
+            st.original = Some(orig);
             st.quest_xp.clear();
             st.status = (String::new(), false);
             st.map = None;

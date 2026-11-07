@@ -108,7 +108,7 @@ No row is VERIFIED for gameplay: nothing was loaded in a game (section E).
 | Window at 1600x900 and 1280x780, 100% | PARTIAL | PARTIAL | seen in the program this session (Finish Quest, travel, History) |
 | Window at 150% scaling on 1920x1080 | FAILED | FAILED | U-6: minimum height 780 logical px, more than the 720 the screen has (by reading `app.slint`; not run) |
 | 1920x1080, 2560x1440, 3840x2160, 125%, 200% | NOT TESTED | NOT TESTED | not run this session |
-| Loading edited saves in the game | BLOCKED | BLOCKED | section E |
+| Loading edited saves in the game | PARTIAL | NOT TESTED | section E: two Finish Quest saves loaded and played in KotOR; nine more made for the maintainer |
 
 ## D. Save integrity
 
@@ -153,9 +153,40 @@ In every case the save is byte for byte as it was, nothing of the write is left 
 
 ## E. Gameplay verification
 
-**Nothing was loaded in KotOR or KotOR II during this audit.** AGENTS.md leaves checks in the game to the maintainer, and this session did not drive the games.
+**First pass (no game run).** Every gameplay claim rested on the save data, the game's own
+files, the quest database and the tests.
 
-Every gameplay claim here therefore rests on the save data, the game's own files (2DA, GFF templates, journal), the quest database and the tests above. These remain unverified in the game:
+**Second pass, 2026-11-07 afternoon, at the maintainer's request ("run the game yourself").**
+KotOR (Steam, with KMRP installed) was driven with KMRP's own live harness
+(`testing/controller/live_harness.py`, `live_session.py`): a virtual pad only, the open
+screens read from the game's memory, frames taken with ffmpeg's `ddagrab`.
+
+| Save, made by `examples/ingame_fixture.rs` | Loaded | Result |
+| --- | --- | --- |
+| BOS_SAVE + Finish Quest, Genoharadan: Ithorak ending 99 | 4.4 s | the HUD in play on the Ebon Hawk, Carth there, the game still running 15 s later; the frame read |
+| BOS_SAVE + Finish Quest, Star Map: Manaan ending 40 | 4.6 s | the same; one map added (the fixture's read-back), not four |
+
+Three things were learnt about running the game this way:
+- KMRP's test copy (`build/verify/steam`) does not start: Steam refuses it ("Application load
+  error 5:0000065434"). The real install starts.
+- Steam starts `swkotor.exe` again under a new process id. The harness kept the first id and
+  sent nothing; a wrapper in the session's scratch folder follows the new one.
+- The game's Load Game list is in slot order with the Auto Save first, not newest first.
+  KMRP's `load_newest_save` therefore loaded the Auto Save. That is in `sle_m30aa` of the
+  Sleheyron mod, which the game left at once (no crash report).
+
+Seven more loads failed before reaching the list: the pad presses landed on the intro
+movies, or the game was not in front. They are not results.
+
+At the maintainer's request ("I will test myself"), nine test saves were then made from two
+saves the game wrote: "test" (Game23, the Endar Spire, level 1) and "Trial succcess" (Game22,
+Manaan; game-written, but level 40 with 99,919,498 credits). They are in the real `Saves` as
+"KMSE ..." slots: Finish Quest (Attack on the Endar Spire; Missing Selkath), Skip Ahead to
+Dantooine, Go Back from it, level 10, a lightsaber added, travel to the Dantooine Enclave,
+Carth from a Taris save, and a revert. Each was read back by the editor's code: values as
+intended. Loading them in the game is the maintainer's. KotOR II was not run.
+
+These remain unverified in the game:
 - whether the path Finish Quest takes, where the save cannot decide, is one a player can reach;
 - how journal XP reaches the party (S-6);
 - what the engine does with the state Skip Ahead and Go Back write in KotOR II (the maintainer's notes say KotOR II's story was never played through);
@@ -211,17 +242,17 @@ Not fixed. Each was checked against the code, and none is P0 or P1.
 | S-7 | P2 | both | "Happens in the game" lists events (a cutscene, a conversation) the game may never run once the journal is past them | wording change wants the maintainer's say |
 | S-8 | P2 | both | Go Back removes by resref every item a chapter's rewards list, bought ones too; companions' XP is not rewound while the text says XP goes back | needs a rule for which items to keep |
 | S-9, S-10, S-11 | P3 | both | Skip/back previews show no notes; a panic in the preview worker leaves "Calculating"; script line clamp 0..255 against globals' -128..127 | small; listed |
-| E-3 | P2 | both | Add a Class lets a Jedi player take a non-Jedi newest class, which sets Force to 0 | the engine rule is known; the dialog change wants the maintainer's say |
-| E-4 | P2 | both | Classes no player can get (Minion; K2 Tech Specialist, Bounty Hunter; prestige classes at any level) are offered | unverified whether classes.2da has a column to filter by |
+| E-3 | P2 | both | ~~Add a Class lets a Jedi player take a non-Jedi newest class, which sets Force to 0~~ | **fixed** in the second pass: only Jedi classes are offered then, in Add a Class and in Change Class of the newest class |
+| E-4 | P2 | both | Classes no player can get (Minion; K2 Tech Specialist, Bounty Hunter; prestige classes at any level) are offered | no game data tells them apart: `classes.2da` `playerclass` is 1 for Minion in both games and for KotOR II's "BountyHunter(CUT!!!)" (read 2026-11-07) |
 | E-5..E-15 | P3 | both | `MClassLevUpIn` left after removing a class; party leader flag; story lock on "With you"; equip checks in the backend; feat prerequisites; class change keeps granted feats; three classes from a damaged rewind; companion rename language; portrait changes gender; XP display above 2^31 | small or need a design choice |
 | W-1 | P2 | both | Stored area copies drop each door's and trigger's own `Tag` | needs a check against game GIT files |
-| W-2 | P2 | both | Advanced, Creatures removes any creature with one click, party copies included | needs a confirmation pop-up (a design change) |
+| W-2 | P2 | both | ~~Advanced, Creatures removes any creature with one click, party copies included~~ | **fixed** in part: a recruited member's own copy is refused, with the reason; other creatures still go with one click (a confirmation is a design change) |
 | W-3 | P2 | both | A spawned copy of a party member is edited along with them | |
 | W-4 | P2 | both | A clicked floor spot is not checked against transition triggers or placeables | |
 | W-5 | P2 | both | Moving to another module leaves the current-planet values as they were (unverified) | |
 | W-14 | P2 | both | Two installs of one game: the first found supplies the data, not the one holding the save | |
 | U-6 | P2 | both | Minimum window height 780 does not fit 150% scaling on 1920x1080 | a layout change at smaller heights wants a mockup first (AGENTS.md) |
-| U-8..U-11 | P3 | both | Revert asks nothing and can leave no save open if the reopen fails; a story result applied over edits made after it was asked for; fixed widths at 1280; an old install's item list after changing the game folder at start | |
+| U-8..U-11 | P3 | both | Revert asks nothing (the failed reopen leaving no save open is **fixed**); a story result applied over edits made after it was asked for; fixed widths at 1280; an old install's item list after changing the game folder at start | |
 | W-6..W-12, W-15, W-18..W-21 | P3 | | as reported in the world and filesystem review: counters on module moves, `spawned.txt` matching, galaxy bits, module names with `:`, map indexes, work on the window's thread, backups inside the game folder, UNC paths, old Steam library format, save list details | |
 | F-3..F-5, F-7, F-8 | P3 | | game files sized before checking (BIF, RIM), Latin-1 labels written as UTF-8, more than 64 localized substrings cut, a Screen.tga up to about 768 MB, `:` in a module name | game files, not saves; or no real file is affected |
 | Clippy | P3 | | Strict lints (unwrap, indexing, arithmetic) give 26,000 warnings, mostly in tests and checked code; the default lints show only style and performance notes | not defects; kept as a list |

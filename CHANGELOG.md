@@ -43,6 +43,13 @@ CHANGELOG.
     over when it could not be read. tasklist and explorer are run from the Windows folder by
     their full path.
   - pulldown-cmark 0.13.5 to 0.13.6 (RUSTSEC-2026-0433; the editor never parses wiki links).
+  - Add a Class offers a Jedi player only Jedi classes, and Change Class of a player's newest
+    class after a Jedi class only Jedi classes: the game reads Force from the newest class,
+    so Soldier added to a Jedi set Force to 0.
+  - Revert keeps the open save, changes and all, when the save cannot be read again (no save
+    was left open). Advanced, Creatures does not remove a party member's own copy in the area.
+  - `examples/ingame_fixture.rs` makes one edited save in a new slot of a game's saves folder,
+    for checks in the game.
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple
   language"). About 75 descriptions, notes and messages are rewritten to say the same in
   fewer, plainer words: the History and pop-up notes, the save and folder messages, the

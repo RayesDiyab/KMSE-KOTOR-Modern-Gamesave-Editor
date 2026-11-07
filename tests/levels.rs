@@ -144,7 +144,9 @@ fn computed_maxima_match_what_the_game_wrote() {
         }
         for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
-            if name.contains("KMRP") || kse_core::save::summary(&folder.path).map_or(false, |s| s.name.contains("KMRP")) {
+            // and the in-game test saves of 2026-11-07, named "KMSE ...": made by the editor
+            // from such saves, they carry their stale maxima along
+            if name.contains("KMRP") || kse_core::save::summary(&folder.path).map_or(false, |s| s.name.contains("KMRP") || s.name.starts_with("KMSE ")) {
                 continue;
             }
             let save = Save::open(&folder.path).unwrap();
