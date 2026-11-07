@@ -650,7 +650,10 @@ Story Dialog): a framed dialog, a gold title, framed panels with lit section hea
 change table with an icon on each row. The icons are the games' notification icons traced
 into vector outlines (XP, credits, level, the journal, an item received or taken, KotOR II's
 party; alignment is the dark side's icon and the light side's, half each), drawn sharp at any
-size in the open game's colours; nothing is read from the game for them. The pop-ups are sized
+size in the open game's colours; nothing is read from the game for them. Health, Force,
+influence, class, attributes, skills and components show the game's own icons, read from the
+open game (`game_icon` in main.rs: the Cure power's, the Force and influence gain and loss
+icons, KotOR's Force Sensitivity icon, the Character, Abilities and Inventory menu icons). The pop-ups are sized
 for a window of 1600 by 900 and grow in step with a larger one. "What only the game does" is now **Happens in the Game** (the
 maintainer found it unclear): what the game does itself when it gets there. Looked at in the
 program in both games at 1600 by 900 and in KotOR at 1280 by 780.

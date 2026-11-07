@@ -84,6 +84,11 @@ CHANGELOG.
     of ordinary enemies); KotOR II's Tech Specialist, Bao-Dur's class, to party members only;
     a prestige class only to a player with one Jedi class at level 15 or above, as Kreia
     offers it, with its side in the note. Party members get no prestige class.
+  - Every row of the story pop-ups' change table has an icon. The new ones are the game's own,
+    read from the open game: Health the Cure power's, Force KotOR II's gain and loss icons
+    (KotOR's Force Sensitivity icon), influence KotOR II's gain and loss icons, and class,
+    attributes, skills, components and chemicals the game's Character, Abilities and
+    Inventory menu icons.
   - Checked in KotOR II: quest XP Finish Quest puts in the party's pool reaches the
     companions, as in KotOR. The game raises them to 80% of the pool when the save loads.
 - **Shorter, plainer text everywhere** (2026-11-07, the maintainer: "short, clear, simple

@@ -321,7 +321,8 @@ export component Scroller inherits Rectangle {
 // layer per colour on a 32-unit box: the black under everything, the game's colour, white.
 // The shapes are KotOR's (XP, credits, level, the journal, an item received or taken; the
 // party is KotOR II's), in the open game's colours (Theme.icon-*). Alignment is the dark
-// side's icon and the light side's, half each.
+// side's icon and the light side's, half each. The other rows show the game's own icons, read from
+// the game (main.rs game_icon), not this.
 export component ChangeIcon inherits Rectangle {
     in property <string> kind;
     width: 30px;

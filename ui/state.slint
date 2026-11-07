@@ -17,7 +17,8 @@ export struct BoxRow { index: int, name: string, note: string }
 export struct PortraitRow { id: int, image: image, female: bool, current: bool }
 export struct ClassRow { index: int, name: string, level: int, maximum: int, can-remove: bool }
 // kind: the row's icon (xp, credits, level, party, align), or none
-export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool, kind: string }
+// kind: the row's icon (ChangeIcon); picture: the game's own icon for it where the game has one (has-picture)
+export struct StoryValue { label: string, before: string, after: string, difference: string, change: int, changed: bool, kind: string, picture: image, has-picture: bool }
 export struct StoryItem { name: string, icon: image, has-icon: bool, difference: string, gained: bool }
 // One backup of the open save in the history pop-up: when it was made, where the save stood
 // then, and whether it is the one this session's saving checks.

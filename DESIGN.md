@@ -316,8 +316,16 @@ Engraved-caption buttons in the Menu Medium cut, never animated.
   even-odd layer per colour on a 32-unit box. The shapes are KotOR's lbl_iplotxp,
   lbl_icredits, lbl_levelup, lbl_iquest, lbl_ireceive and lbl_itaken, KotOR II's
   lbl_icn_prty2 for the party, and alignment as lbl_idside's left half beside lbl_ilside's
-  right half; the colours are the open game's icon tokens. Nothing is read from the game for
-  them.
+  right half. The colours are the open game's icon tokens. Nothing is read from the game for
+  them. The other rows show the game's own icons, read from the open game like the item and
+  feat icons (2026-11-07, the maintainer: "just use the original games icons"; `game_icon` in
+  main.rs): Health the Cure power's (ip_cure, a bust with a cross); Force KotOR II's gain and
+  loss icons (lbl_force_pos/neg, the loss one when the value falls) and KotOR's Force
+  Sensitivity feat icon (i_forcesn); influence KotOR II's gain and loss icons
+  (lbl_influ_pos/neg); the class and attributes, the skills, and components and chemicals the
+  Character, Abilities and Inventory menu icons (KotOR II's stone lbl_icn_char2, lbl_icn_abi2,
+  lbl_icn_inv2; KotOR's green lbl_icn_char3, lbl_icn_abi3, lbl_icn_inv3). A game without the
+  texture leaves the row without an icon.
 
 ### Named Rules
 **The Rounded Gradient Rule** (2026-11-07). The software renderer rounds only a solid fill; a

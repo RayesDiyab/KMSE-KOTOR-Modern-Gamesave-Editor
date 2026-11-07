@@ -1668,21 +1668,28 @@ fn request_story_preview(ui: &AppWindow, st: &mut State, back: bool) {
 fn number_preview(rows: &mut Vec<StoryValue>, label: &str, before: i64, after: i64, always: bool) {
     if !always && before == after { return; }
     let difference = after - before;
-    // the row's icon in the preview: the games' notification icons, drawn by the program
-    let kind = match label {
-        "Experience" | "Party experience" => "xp",
+    // the row's icon in the preview: the games' own art traced, drawn by the program; a
+    // companion's rows are "Name: what"; Force and influence have a gain and a loss icon
+    let what = label.rsplit_once(": ").map_or(label, |(_, w)| w);
+    let kind = match what {
+        "Experience" | "experience" | "Party experience" => "xp",
         "Credits" => "credits",
-        "Level" => "level",
+        "Level" | "level" => "level",
         "Companions" => "party",
         "Alignment" => "align",
-        _ if label.ends_with(": experience") => "xp",
-        _ if label.ends_with(": level") => "level",
+        "Health" | "Max Health" => "health",
+        "Force" | "Max Force" if difference < 0 => "force-down",
+        "Force" | "Max Force" => "force-up",
+        "influence" if difference < 0 => "influence-down",
+        "influence" => "influence-up",
+        "Components" | "Chemicals" => "goods",
+        "Strength" | "Dexterity" | "Constitution" | "Intelligence" | "Wisdom" | "Charisma" => "character",
         _ => "",
     };
     rows.push(StoryValue {
         label: s(label), before: s(thousands(before)), after: s(thousands(after)),
         difference: s(if difference == 0 { String::new() } else { format!("{}{}", if difference > 0 { "+" } else { "" }, thousands(difference)) }),
-        change: difference.signum() as i32, changed: difference != 0, kind: s(kind),
+        change: difference.signum() as i32, changed: difference != 0, kind: s(kind), ..Default::default()
     });
 }
 
@@ -1738,13 +1745,18 @@ fn story_preview_rows(st: &State, after: &Save) -> (Vec<StoryValue>, Vec<Named>)
         let class_names = |c: &Struct| creature::classes(c).into_iter().map(|(id, _)| cat.class_name(id)).collect::<Vec<_>>().join(" / ");
         let (old_class, new_class) = (class_names(a), class_names(b));
         if old_class != new_class {
-            rows.push(StoryValue { label: s(format!("{}Class", prefix)), before: s(old_class), after: s(new_class), changed: true, ..Default::default() });
+            rows.push(StoryValue { label: s(format!("{}Class", prefix)), before: s(old_class), after: s(new_class), changed: true, kind: s("character"), ..Default::default() });
         }
         for (label, field) in [("Strength", "Str"), ("Dexterity", "Dex"), ("Constitution", "Con"), ("Intelligence", "Int"), ("Wisdom", "Wis"), ("Charisma", "Cha")] {
             number_preview(&mut rows, &format!("{}{}", prefix, label), creature::attribute(a, field), creature::attribute(b, field), false);
         }
         for (i, skill) in cat.skills.iter().enumerate() {
+            let shown = rows.len();
             number_preview(&mut rows, &format!("{}{}", prefix, skill.name), creature::skill(a, i), creature::skill(b, i), false);
+            // a skill's name is the game's own (and its language), so its icon is set here
+            if let Some(r) = rows.get_mut(shown) {
+                r.kind = s("skill");
+            }
         }
         for (old, new, power) in [(creature::feats(a), creature::feats(b), false), (creature::powers(a), creature::powers(b), true)] {
             for (ids, other, sign) in [(&new, &old, 1), (&old, &new, -1)] {
@@ -1758,6 +1770,29 @@ fn story_preview_rows(st: &State, after: &Save) -> (Vec<StoryValue>, Vec<Named>)
     (rows, grants)
 }
 
+/// The game's own icon for a change row that has no notification icon (2026-11-07, the maintainer: "just use the
+/// original games icons"), read from the open game (Override first) like the item and feat icons: Health is the Cure
+/// power's (a bust with a cross); Force is KotOR II's Force gain or loss icon, KotOR's Force Sensitivity feat icon;
+/// influence KotOR II's gain or loss icon; the class and attributes, skills, and components the games' Character,
+/// Abilities and Inventory menu icons (KotOR II's stone ones, KotOR's green ones).
+fn game_icon(kind: &str, k2: bool) -> Option<&'static str> {
+    Some(match (kind, k2) {
+        ("health", _) => "ip_cure",
+        ("force-up", true) => "lbl_force_pos",
+        ("force-down", true) => "lbl_force_neg",
+        ("force-up" | "force-down", false) => "i_forcesn",
+        ("influence-up", true) => "lbl_influ_pos",
+        ("influence-down", true) => "lbl_influ_neg",
+        ("character", true) => "lbl_icn_char2",
+        ("character", false) => "lbl_icn_char3",
+        ("skill", true) => "lbl_icn_abi2",
+        ("skill", false) => "lbl_icn_abi3",
+        ("goods", true) => "lbl_icn_inv2",
+        ("goods", false) => "lbl_icn_inv3",
+        _ => return None,
+    })
+}
+
 fn finish_story_preview(ui: &AppWindow, st: &mut State) {
     let result = st.story_result.lock().unwrap().take();
     if st.story_plan.is_none() || !matches!(ui.global::<App>().get_overlay(), 8 | 10 | 11 | 12) { return; }
@@ -1769,7 +1804,14 @@ fn finish_story_preview(ui: &AppWindow, st: &mut State) {
             return;
         }
     };
-    let (values, mut grants) = story_preview_rows(st, &prepared.save);
+    let (mut values, mut grants) = story_preview_rows(st, &prepared.save);
+    let k2 = st.save.as_ref().map_or(false, |s| s.game == Game::K2);
+    for v in values.iter_mut() {
+        if let Some(img) = game_icon(&v.kind, k2).and_then(|name| st.icon(name, name)) {
+            v.picture = img;
+            v.has_picture = true;
+        }
+    }
     // a quest's finish: the journal's changes too (an ending can take other quests out of the
     // journal: Ithorak's "banished from Manaan" takes five)
     if matches!(st.story_plan, Some(StoryPlan::Quest { .. })) {

@@ -237,7 +237,10 @@ component StoryValues inherits VerticalLayout {
         // what goes down red, the value after the change gold, what stays the same plain.
         for r in App.story-values: Rectangle {
             height: root.compact ? 34px * Theme.ts : 36px * Theme.ts;
-            if r.kind != "": ChangeIcon { x: 6px; kind: r.kind; width: min(32px, parent.height - 4px); }
+            // the game's own icon where it has one for the row (Health, Force, influence, class, skills,
+            // components), else the notification icon drawn by the program
+            if r.has-picture: Image { x: 6px; source: r.picture; width: min(32px, parent.height - 4px); height: self.width; image-fit: contain; }
+            if !r.has-picture && r.kind != "": ChangeIcon { x: 6px; kind: r.kind; width: min(32px, parent.height - 4px); }
             Text {
                 x: root.lead; width: root.at-current - root.lead - 10px; height: parent.height;
                 text: r.label; font-size: 13.5px * Theme.ts; color: Theme.text; vertical-alignment: center; overflow: elide;
