@@ -17,18 +17,18 @@ path = "src/lib.rs"
 
 [dependencies]
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-software", "unstable-winit-030"] }
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
+rfd = { version = "0.16", default-features = false, features = ["xdg-portal", "tokio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # the quest databases are carried deflated (build.rs); already in the tree through png
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 
 [build-dependencies]
 slint-build = "1.18"
-miniz_oxide = "0.8"
+miniz_oxide = "0.9"
 
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
