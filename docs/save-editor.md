@@ -165,6 +165,26 @@ modded game shows its mods.
 When `PARTYTABLE.res` changes, savenfo's `TIMEPLAYED`, `CHEATUSED` and (KotOR 2) `PCNAME`
 are written from it again, so the Load screen agrees with the save.
 
+**A save without a picture** (since 2026-11-08, the maintainer). Save Changes, Save as a New
+Save, Copy and the saves page's rename give a save that has no `Screen.tga` one: the load
+screen of the module it will load in. That is the module of a trip a story move or Travel
+Here queued, else `LASTMODULE`. The picture is the game's texture `load_<module>`, else
+`load_default` (Override, the GUI texture pack, then the archives). It is made 256 x 256 with
+a box filter and written as the game writes the file
+([format, 1.6](save-editor-format.md#16-screentga-save-thumbnail-file)): the same 18 header
+bytes as the game's, 196,626 bytes. A save that has a picture keeps its own; the editor never
+replaces one.
+
+It is written only after the write went through: staged as `Screen.kmrp-new`, flushed, moved
+in, no file replaced. If that step fails, the save is as the write left it. A write that is
+refused adds nothing. A revert to a backup without a picture takes it away again.
+
+Measured: every KotOR and KotOR 2 area read has `LoadScreenID` 0 (`LOAD_DEFAULT`), so the
+`.are` field is not used. Each module's own texture exists in both games' GUI pack
+(`load_end_m01aa`, `load_203TEL`). Checked by `tests/save_picture.rs` on copies of real saves
+of both games, and by looking at the pictures made for `end_m01aa` and `203tel`. Not yet
+seen on the game's Load screen.
+
 ## 3a. What KSE edits, and where it is here
 
 Taken from KSE 3.3.7's readme (its list of editable fields), not from its code.

@@ -152,6 +152,9 @@ pub struct Save {
     /// this area" has the member's tag and classes, and an edit of the member left it alone
     /// only by these (2026-11-07 audit, W-3).
     pub spawned: Vec<u32>,
+    /// A Screen.tga to give the save after its next write, if it still has none
+    /// (give_picture_if_missing; crate::picture makes one from the game's load screen).
+    picture_if_missing: Option<Vec<u8>>,
 }
 
 static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -256,6 +259,7 @@ impl Save {
             edits: 0,
             session: SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             spawned: Vec::new(),
+            picture_if_missing: None,
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -1337,16 +1341,56 @@ impl Save {
         result
     }
 
+    /// After the next write that goes through, the save gets `tga` as its Screen.tga if it
+    /// has none: the picture of its Load screen entry and of the editor's list (2026-11-08,
+    /// the maintainer: saves made from KMRP's test saves had none). Only a 256 by 256 TGA
+    /// is taken. Nothing is replaced: a save with a picture keeps its own.
+    pub fn give_picture_if_missing(&mut self, tga: Vec<u8>) {
+        let fits = tga::decode(&tga).map_or(false, |i| i.width == crate::picture::SIZE && i.height == crate::picture::SIZE);
+        self.picture_if_missing = fits.then_some(tga);
+    }
+
+    /// Writes the picture given (give_picture_if_missing) into a save that has none, once a
+    /// write has gone through: staged, flushed and moved in like any other file, no file
+    /// replaced. A picture that cannot be written leaves the save as the write left it.
+    fn add_missing_picture(&mut self) {
+        let Some(tga) = self.picture_if_missing.take() else { return };
+        if file_ci(&self.folder, "Screen.tga").is_some() || is_xbox_save(&self.folder) {
+            return;
+        }
+        let place = self.folder.join("Screen.tga");
+        let tmp = place.with_extension("kmrp-new");
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(&tga)?;
+            f.sync_all()
+        });
+        if written.is_err() || place.exists() || fs::rename(&tmp, &place).is_err() {
+            let _ = fs::remove_file(&tmp);
+            return;
+        }
+        sync_dir(&self.folder);
+    }
+
     /// Copies the save folder `folder` as it is on disk into `target` (a folder beside it that
     /// does not exist yet) and names the copy `name` on the game's Load screen; nothing else
     /// in it changes.
     pub fn copy_save(folder: &Path, target: &Path, name: &str) -> Result<()> {
+        Self::copy_save_with_picture(folder, target, name, None)
+    }
+
+    /// copy_save, the copy given `picture` as its Screen.tga if the save has none
+    /// (give_picture_if_missing).
+    pub fn copy_save_with_picture(folder: &Path, target: &Path, name: &str, picture: Option<Vec<u8>>) -> Result<()> {
         if target.exists() {
             return Err(format!("{} already exists", target.display()));
         }
         let result = copy_dir(folder, target).map_err(|e| format!("the save could not be copied: {}", e)).and_then(|()| {
             let mut copy = Save::open(target)?;
             copy.rename(name);
+            if let Some(p) = picture {
+                copy.give_picture_if_missing(p);
+            }
             copy.write_files()
         });
         if result.is_err() {
@@ -1419,6 +1463,7 @@ impl Save {
         }
         replace_all(&staged)?;
         sync_dir(&self.folder);
+        self.add_missing_picture();
         self.dirty.clear();
         self.dirty_archive.clear();
         self.archive_dirty = false;

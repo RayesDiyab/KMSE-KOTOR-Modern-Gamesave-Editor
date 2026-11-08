@@ -150,7 +150,7 @@ were made on the Windows PC. They open, back up, write and revert on copies here
 | --- | --- | --- |
 | Baseline at `47a2433` | `CARGO_TARGET_DIR=build/target-tests cargo test --profile tests --no-fail-fast` | 142 passed, 4 failed. No install was found, so most game tests passed without checking |
 | Installs found, before the test fixes | same | 144 passed, 15 failed: 13 took an incomplete Steam Cloud save as their fixture (one of them, `edits_survive_a_write`, then failed on the order assumption S-2), 1 took a hand-made save, 1 found a defect (S-1) |
-| Final | `sh build-macos.sh` (runs the same tests first) | **164 passed, 0 failed** |
+| Final | `sh build-macos.sh` (runs the same tests first) | **164 passed, 0 failed**; with the save pictures (R-3) **168 passed, 0 failed** |
 | Windows type check | `cargo check --target x86_64-pc-windows-msvc --all-targets` | passed, no warnings. Not run on Windows: CI runs the Windows tests |
 | Linux type check | `cargo check --target x86_64-unknown-linux-gnu --all-targets` | **blocked**: needs Linux's fontconfig. CI covers it |
 | Independent review | a second reviewer, read only, given the code and the layouts but not these conclusions | no P0. Its P1 (Wine) and P2s (cloudsaves, language, a lookup that fails counting as not running) are fixed with tests. Its P3s are fixed: `otool` for both halves, Spotlight cached, one name per closed container |
@@ -171,7 +171,7 @@ game.
 | --- | --- | --- | --- |
 | R-1 | P2 | The GUI pass of D, and saves loaded in the game | needs a person at the Mac, or desktop control |
 | R-2 | P2 | KotOR App Store saves sit in a container macOS closes to other programs. The editor says so; whether macOS asks the player, and where the grant is shown, was not seen | needs the GUI run with the player present |
-| R-3 | P3 | Saves made from `000900 - KMRPTest` have no `Screen.tga`, so they show an empty picture in the editor and the game. The editor's Copy, Save As and Save Changes keep a picture byte for byte (`save_picture.rs`). These saves never had one | left for the maintainer to decide |
+| R-3 | P3 | ~~Saves made from `000900 - KMRPTest` have no `Screen.tga`, so they show an empty picture in the editor and the game. The editor's Copy, Save As and Save Changes keep a picture byte for byte (`save_picture.rs`). These saves never had one~~ | **fixed** (2026-11-08, the maintainer chose it): a save without a picture gets its module's load screen when the editor writes it ([save-editor.md, section 3](../save-editor.md#3-every-value-the-editor-writes)); `save_picture.rs`, 5 tests. Not yet seen on the game's Load screen or clicked in the window |
 | R-4 | P3 | A log out while changes are not saved is interrupted by the close check | the same check as Command-Q; chosen over losing changes |
 | R-5 | P3 | `backup_root` folds case on macOS, so two folders differing only in case on a case-sensitive volume share a backups root | as on Windows; no such install seen |
 | R-6 | P3 | Settings and `spawned.txt` written by two copies of the editor at once | as on Windows |
@@ -199,7 +199,7 @@ game.
 
 The blocking issues are verification not yet done. There is no known defect:
 - no P0 or P1 is open. Every P1 and P2 found is fixed and tested;
-- 164 tests pass on this Mac against real installs and saves of both games;
+- 168 tests pass on this Mac against real installs and saves of both games;
 - the app builds, signs ad hoc, installs from its DMG, runs from any folder and in both
   architectures, and shows both games' saves.
 
@@ -212,7 +212,8 @@ ID signing and notarization.
 ### Reproducible build
 
 The release program was built twice from the same sources, the second time after deleting
-both architectures' release build folders. The two builds were byte for byte the same:
+both architectures' release build folders. The two builds (of commit `7ff2412`, before the
+save pictures) were byte for byte the same:
 `dist/KMSE.app/Contents/MacOS/KMSE`, 29,886,384 bytes, SHA-256
 `dd22b752c9f5873da785770724dd17e6b918d781c653882d5381b9f0e0f5ee07`. The DMG and ZIP carry
 time stamps, so their hashes differ between builds. The program built here contains the

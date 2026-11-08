@@ -3706,6 +3706,15 @@ fn backups_of(st: &State) -> PathBuf {
     }
 }
 
+/// The picture a save with none gets when the editor writes it (Save::give_picture_if_missing):
+/// the load screen of the module its next load is in (a trip queued by a story move or Travel
+/// Here, else the module it was saved in), from the game's own files. None without them.
+fn picture_for(st: &State, save: &Save) -> Option<Vec<u8>> {
+    let data = st.games.get(&save.game).map(|g| g.data.clone())?;
+    let module = save.queued_trip().unwrap_or_else(|| save.module_name().to_string());
+    kse_core::picture::for_module(&data, &module)
+}
+
 /// Whether files can be made in `dir` (made first if it is not there).
 fn writable(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {
@@ -5914,6 +5923,9 @@ fn main() {
             return;
         }
         let backups = backups_of(st);
+        if let Some(p) = st.save.as_ref().and_then(|sv| picture_for(st, sv)) {
+            st.save.as_mut().unwrap().give_picture_if_missing(p);
+        }
         let result = st.save.as_mut().unwrap().write(&backups);
         match result {
             Ok(backup) => {
@@ -6087,9 +6099,12 @@ fn main() {
             message(&u, "Nothing was copied", "No free save slot was found beside this save.");
             return;
         };
+        // the copy's picture where the save has none: of the save on disk, which is what is copied
+        st.ensure_game(game);
+        let picture = Save::open(&folder).ok().and_then(|sv| picture_for(st, &sv));
         // from the saves page: the copy is picked in the list
         if u.global::<App>().get_page() == 0 {
-            match Save::copy_save(&folder, &target, &name) {
+            match Save::copy_save_with_picture(&folder, &target, &name, picture.clone()) {
                 Ok(()) => {
                     add_beside(st, &folder, &target);
                     fill_saves(&u, st);
@@ -6099,7 +6114,7 @@ fn main() {
             }
             return;
         }
-        match Save::copy_save(&folder, &target, &name) {
+        match Save::copy_save_with_picture(&folder, &target, &name, picture.clone()) {
             Ok(()) => {
                 add_beside(st, &folder, &target);
                 let keep = (st.tab, st.story, st.who);
@@ -6138,8 +6153,12 @@ fn main() {
         let backups = save::backup_root(&folder, root.as_deref());
         // the editor's own folder where the game's cannot be written, as backups_of (W-18)
         let backups = if writable(&backups) { backups } else { games::data_dir().join("backups").join(st.game.title()) };
+        st.ensure_game(st.game);
         let result = Save::open(&folder).and_then(|mut s| {
             s.rename(&name);
+            if let Some(p) = picture_for(st, &s) {
+                s.give_picture_if_missing(p);
+            }
             s.write(&backups).map(|_| ())
         });
         match result {
@@ -6172,6 +6191,9 @@ fn main() {
             return;
         };
         let source = st.save.as_ref().unwrap().folder.clone();
+        if let Some(p) = st.save.as_ref().and_then(|sv| picture_for(st, sv)) {
+            st.save.as_mut().unwrap().give_picture_if_missing(p);
+        }
         let result = st.save.as_mut().unwrap().write_as(&target, &name);
         match result {
             Ok(()) => {

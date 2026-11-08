@@ -6,6 +6,11 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **A save without a picture gets one** (2026-11-08, the maintainer: saves made from KMRP's
+  test saves showed an empty picture). When the editor writes a save that has no
+  `Screen.tga` (Save Changes, Save as a New Save, Copy, rename), it adds the game's own load
+  screen of the module the save loads in, at the game's size and format. A save with a
+  picture keeps its own.
 - **macOS port** (2026-11-08, the audit in
   [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md)).
   - KotOR and KotOR II are found inside their Mac apps (Steam's and the Mac App Store's),

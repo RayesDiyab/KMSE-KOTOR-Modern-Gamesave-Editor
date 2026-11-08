@@ -9,6 +9,7 @@ pub mod creature;
 pub mod formats;
 pub mod gamedata;
 pub mod map;
+pub mod picture;
 pub mod quests;
 pub mod questdb;
 pub mod games;
