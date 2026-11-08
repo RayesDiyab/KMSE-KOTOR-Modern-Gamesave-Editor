@@ -72,13 +72,20 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 source file while it runs.
 
 ```sh
-# Linux and macOS: tests, then the release build, into dist/.
+# macOS: tests, then dist/KMSE.app (Universal 2), dist/KMSE-<version>-macOS.dmg and .zip.
+sh build-macos.sh            # --arm64-only, --no-tests
+```
+
+```sh
+# Linux: tests, then dist/kotor-modern-gamesave-editor (on macOS it runs build-macos.sh).
 sh build.sh
 ```
 
-On macOS, `build.sh` makes `dist/KOTOR Modern Gamesave Editor.app`; on Linux,
-`dist/kotor-modern-gamesave-editor`. Neither has been built on a Linux or Mac machine by
-the maintainer. The GitHub workflow (`.github/workflows/build.yml`) is set up to test and
+`build-macos.sh` needs the Rust targets `aarch64-apple-darwin` and `x86_64-apple-darwin` and
+Xcode's command line tools. It signs ad hoc unless `KMSE_SIGN_IDENTITY` names a Developer ID,
+and it notarizes only when `KMSE_NOTARY_PROFILE` is set too. It was first run on 2026-11-08
+([macOS audit](docs/audits/MACOS_PORT_AUDIT.md)). The Linux build has not been run on a Linux
+machine by the maintainer. The GitHub workflow (`.github/workflows/build.yml`) is set up to test and
 build on Windows, Linux and macOS; it has not run in this repository yet (2026-10-24).
 
 ### Reproducible builds

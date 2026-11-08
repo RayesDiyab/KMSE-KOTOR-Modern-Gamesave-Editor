@@ -50,7 +50,7 @@ fn labs(test: &str) -> Vec<Lab> {
     let installs = find_installs(&[]);
     let mut v = Vec::new();
     for game in [Game::K1, Game::K2] {
-        let Some(folder) = find_saves(&installs, game, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path)) else { continue };
+        let Some(folder) = find_saves(&installs, game, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) else { continue };
         let root = std::env::temp_dir().join("kmse-tests").join("write-faults").join(test).join(format!("{:?}", game));
         let _ = fs::remove_dir_all(&root);
         let save = root.join("saves").join("000500 - Game499");

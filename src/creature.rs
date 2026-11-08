@@ -47,14 +47,22 @@ pub fn stored_name(c: &Struct) -> String {
 /// (dialog.tlk), and English, where only English was written and a German or French game could
 /// find none for itself (2026-11-07 audit, E-13).
 pub fn set_name(c: &mut Struct, text: &str, language: u32) {
+    set_name_in(c, text, &[language]);
+}
+
+/// set_name, the name written for each of `languages` (and English) where it had no text of
+/// its own (GameData::name_languages says which).
+pub fn set_name_in(c: &mut Struct, text: &str, languages: &[u32]) {
     let bytes = crate::text::encode(text);
     for label in ["FirstName", "Mod_FirstName"] {
         if let Some(Value::LocString(l)) = c.get_mut(label) {
             l.strref = u32::MAX;
             if l.strings.is_empty() {
                 l.strings.push((0, bytes.clone()));
-                if language != 0 {
-                    l.strings.push((language * 2, bytes.clone()));
+                for &language in languages.iter().filter(|l| **l != 0) {
+                    if !l.strings.iter().any(|(id, _)| *id == language * 2) {
+                        l.strings.push((language * 2, bytes.clone()));
+                    }
                 }
             } else {
                 for s in l.strings.iter_mut() {

@@ -22,7 +22,8 @@ bugs they reported. Untested parts are marked **untested** where they are descri
 | Source | this repository (Rust 2021, Slint 1.18 with its software renderer and the winit backend) |
 | Toolchain | rustc 1.99.1 (2026-10-13), cargo 1.99.1 |
 | Windows build | `dist\KOTOR Modern Gamesave Editor.exe` from `build.ps1` (size and SHA-256 printed by the script) |
-| Linux and macOS builds | `build.sh`; **not built or run yet** (no Linux or Mac machine here) |
+| macOS build | `dist/KMSE.app` from `build-macos.sh` (Universal 2); built and run on an Apple M5 Mac, macOS 27.0.1, 2026-11-08 ([macOS audit](audits/MACOS_PORT_AUDIT.md)). *Corrected 2026-11-08:* until then this row said the Linux and macOS builds were not built or run |
+| Linux build | `build.sh`; **not built or run yet** (no Linux machine here) |
 | Fonts | the KMRP Original HD fonts (KMRP's [fonts/](https://github.com/RayesDiyab/KMRP-KOTOR-Modern-Restoration-Patch/blob/master/fonts/README.md), SIL OFL 1.1, [licence](../fonts/OFL.txt)): Menu, MenuMedium, MenuSmallB and Descriptions, committed in `fonts/` and embedded at build time ([build.rs](../build.rs)). *Corrected 2026-10-22:* until then they were the traced OTFs from `tools/build_hd_original_otf.py`, made from the game's atlases and never committed |
 | KotOR 1 tested | Steam, `swkotor`, with KMRP and K1CP 1.10.0; and a KOTOR Patch Manager test copy of the game in KMRP's build folder |
 | KotOR 2 tested | Steam, German release, TSLRCM 1.8.6, saves in `cloudsaves\<account>` |
@@ -58,12 +59,20 @@ folder) and remembers it.
 | KotOR 1 Steam Cloud | Steam syncs `<game>/saves` itself; nothing separate | yes (no separate folder exists) |
 | GOG and the discs | registry: GOG ids 1207666283 and 1421404581; `BioWare\SW\KOTOR`, `LucasArts\KotOR2` | **untested** |
 | Windows VirtualStore | `%LOCALAPPDATA%\VirtualStore\<path without C:\>\saves` for a game under Program Files | **untested** |
-| Aspyr ports | KotOR 1 Mac: `~/Library/Application Support/Knights of the Old Republic/saves` and the App Store container; KotOR 2 Linux: `~/.local/share/aspyr-media/kotor2/saves`; KotOR 2 Mac: two Application Support paths | **untested**; paths from Aspyr's FAQ ([save-editor-format.md](save-editor-format.md), section 6) |
+| Aspyr ports | KotOR 1 Mac: `~/Library/Application Support/Knights of the Old Republic/saves` and the App Store container; KotOR 2 Linux: `~/.local/share/aspyr-media/kotor2/saves`; KotOR 2 Mac: two Application Support paths | KotOR 1 Mac (Steam): **yes**, 2026-11-08. The rest **untested**; paths from Aspyr's FAQ ([save-editor-format.md](save-editor-format.md), section 6) |
+| Mac App Store containers | `~/Library/Containers/<id>/Data/Library/Application Support/<any>/saves`, ids `com.aspyr.kotor`, `com.aspyr.kotor2.appstore`, `com.aspyr.kotor2` | **blocked**: macOS closes another app's container; the editor names such a folder in a pop-up ([macOS audit](audits/MACOS_PORT_AUDIT.md), F) |
+| Beside a Mac app | `saves` and `cloudsaves/<account>/` in the folder that holds the game's app (Steam's KotOR II keeps `cloudsaves` beside `KOTOR2.app`) | **yes**, KotOR 2 Steam, 6 saves, 2026-11-08 |
+| Mac installs | Steam libraries as above; `/Applications`, `~/Applications`, and Spotlight by bundle id `com.aspyr.kotor*`. An app stands for `Contents/Assets`, `Contents/GameData` or `Contents/KOTOR Data` | **yes**: all four Mac copies (KotOR and KotOR 2, Steam and App Store), 2026-11-08 |
 | Phone, Switch, another PC | Add a Save Folder | **untested** (no such saves here) |
 | Original Xbox | recognised by `SaveMeta.xbx` or `SaveImage.xbx`; opened to look at, never written (section 6) | **untested** |
 
-Which game a folder holds: its executable or ini (`swkotor2.*` is KotOR 2), else the size of
-`chitin.key`; which game a save belongs to: KotOR 2's `savenfo.res` has `PCNAME`,
+Which game a folder holds: its executable or ini (`swkotor2.*` is KotOR 2), else the bundle
+id of the Mac app it is in (`com.aspyr.kotor2*` is KotOR 2), else its first module
+(`end_m01aa` KotOR 1, `001ebo` KotOR 2); a folder counts as a game only with a KEY
+`chitin.key`, a TLK `dialog.tlk` (the App Store KotOR 2's is `Localized/English/dialog.tlk`)
+and a `modules` folder. *Corrected 2026-11-08:* the last step was the size of `chitin.key`
+(KotOR 2 above 700,000 bytes), which took the Mac App Store's KotOR 2 (406,035 bytes) for
+KotOR 1. Which game a save belongs to: KotOR 2's `savenfo.res` has `PCNAME`,
 `STORYHINT0` or `TIMESTAMP`, KotOR 1's never does. When both games are installed the list
 opens on the one used last, and one button switches; KotOR 2 then gets its own colours.
 
@@ -155,6 +164,26 @@ modded game shows its mods.
 
 When `PARTYTABLE.res` changes, savenfo's `TIMEPLAYED`, `CHEATUSED` and (KotOR 2) `PCNAME`
 are written from it again, so the Load screen agrees with the save.
+
+**A save without a picture** (since 2026-11-08, the maintainer). Save Changes, Save as a New
+Save, Copy and the saves page's rename give a save that has no `Screen.tga` one: the load
+screen of the module it will load in. That is the module of a trip a story move or Travel
+Here queued, else `LASTMODULE`. The picture is the game's texture `load_<module>`, else
+`load_default` (Override, the GUI texture pack, then the archives). It is made 256 x 256 with
+a box filter and written as the game writes the file
+([format, 1.6](save-editor-format.md#16-screentga-save-thumbnail-file)): the same 18 header
+bytes as the game's, 196,626 bytes. A save that has a picture keeps its own; the editor never
+replaces one.
+
+It is written only after the write went through: staged as `Screen.kmrp-new`, flushed, moved
+in, no file replaced. If that step fails, the save is as the write left it. A write that is
+refused adds nothing. A revert to a backup without a picture takes it away again.
+
+Measured: every KotOR and KotOR 2 area read has `LoadScreenID` 0 (`LOAD_DEFAULT`), so the
+`.are` field is not used. Each module's own texture exists in both games' GUI pack
+(`load_end_m01aa`, `load_203TEL`). Checked by `tests/save_picture.rs` on copies of real saves
+of both games, and by looking at the pictures made for `end_m01aa` and `203tel`. Not yet
+seen on the game's Load screen.
 
 ## 3a. What KSE edits, and where it is here
 

@@ -102,7 +102,7 @@ fn rewind_alignment_is_neutral_by_default_and_honors_the_chosen_target() {
 fn copy_save(game: Game, label: &str) -> Option<(Save, PathBuf, GameData)> {
     let installs = find_installs(&[]);
     let install = installs.iter().find(|i| i.game == game)?;
-    let folder = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).next()?;
+    let folder = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).next()?;
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

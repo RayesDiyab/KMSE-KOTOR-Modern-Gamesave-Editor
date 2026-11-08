@@ -6,6 +6,44 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **A save without a picture gets one** (2026-11-08, the maintainer: saves made from KMRP's
+  test saves showed an empty picture). When the editor writes a save that has no
+  `Screen.tga` (Save Changes, Save as a New Save, Copy, rename), it adds the game's own load
+  screen of the module the save loads in, at the game's size and format. A save with a
+  picture keeps its own.
+- **macOS port** (2026-11-08, the audit in
+  [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md)).
+  - KotOR and KotOR II are found inside their Mac apps (Steam's and the Mac App Store's),
+    in `/Applications`, `~/Applications` and wherever Spotlight knows of them. Settings' game
+    folder takes the app itself, the folder Steam keeps it in, or the folder of game files.
+    A folder without the game's files (a KEY, a TLK and `modules`) is refused when it is
+    picked, not later.
+  - Which game a folder holds is told by its program, its ini, its app's bundle id, or its
+    first module. The size of `chitin.key` decided before and took the Mac App Store's
+    KotOR II for KotOR.
+  - KotOR II Steam's `cloudsaves` beside `KOTOR2.app` are listed. The Mac App Store's
+    KotOR II, which keeps a `dialog.tlk` per language, is read in English, and a renamed
+    companion's name is written in English.
+  - When macOS will not let the editor read a copy's saves (the Mac App Store's KotOR keeps
+    them in its own container), a pop-up lists every copy found: a green check where its
+    saves are read (with how many), a grey question mark where there are no saves yet, a red
+    cross where they cannot be read. Choose the Folder opens macOS's folder panel there, and
+    a folder picked that can then be read is added; Open Settings opens Privacy & Security,
+    Full Disk Access; Not Now stops the question for those folders (kept as `quiet=`).
+  - The game is seen running on macOS by its app (`AppBundleExe`, `KOTOR_Exe`, `KOTOR2`),
+    and the Windows game under Wine or CrossOver by its arguments. When the editor cannot
+    tell, it does not write.
+  - Finder's `.DS_Store` and `._` files in a save folder no longer stop Save Changes as "the
+    save changed on disk", and are not copied into backups.
+  - Command-Q and the Dock's Quit go through the window's check for changes not saved. They
+    ended the program at once before.
+  - Folders are flushed after a write's renames, and backups before the save is written
+    over (macOS and Linux).
+  - `build-macos.sh` makes `dist/KMSE.app` (Apple silicon and Intel), a DMG and a ZIP;
+    `build.sh` runs it on macOS.
+  - Go Back no longer changes the party table before refusing a save whose level history is
+    damaged (both games; the window works on a copy, so no save took it).
+  - KotOR II's Override subfolders are read in the order Windows lists them on every disk.
 - **Windows audit fixes** (2026-11-07, the full audit in
   [docs/audits/WINDOWS_FULL_AUDIT.md](docs/audits/WINDOWS_FULL_AUDIT.md)).
   - Finish Quest takes one path through each set of alternatives of a conversation or script,

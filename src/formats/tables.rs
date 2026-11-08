@@ -45,7 +45,8 @@ pub fn read_at(path: &Path, offset: u64, size: usize) -> Option<Vec<u8>> {
 
 impl Key {
     pub fn open(game: &Path) -> Option<Key> {
-        let data = fs::read(game.join("chitin.key")).ok()?;
+        // CHITIN.KEY on a case-sensitive disk is the same file to the game
+        let data = fs::read(find_case_insensitive(game, "chitin.key")?).ok()?;
         if data.get(0..8)? != b"KEY V1  " {
             return None;
         }

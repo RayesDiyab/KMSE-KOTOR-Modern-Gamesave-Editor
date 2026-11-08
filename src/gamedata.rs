@@ -23,8 +23,14 @@ pub struct GameData {
 
 fn collect_overrides(dir: &Path, recurse: bool, out: &mut HashMap<String, PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
+    // in the order Windows lists a folder (by name, case aside): the first of two files of one
+    // name wins, so the order decides between KotOR 2's Override subfolders. NTFS lists by
+    // name; APFS and ext4 in no set order, which made the winner differ between runs on a Mac
+    // (macOS port, 2026-11-08)
+    let mut entries: Vec<fs::DirEntry> = entries.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| (e.file_name().to_string_lossy().to_uppercase(), e.file_name()));
     let mut subdirs = Vec::new();
-    for e in entries.filter_map(|e| e.ok()) {
+    for e in entries {
         let path = e.path();
         if path.is_dir() {
             if recurse {
@@ -46,12 +52,19 @@ impl GameData {
         if let Some(dir) = find_case_insensitive(root, "override") {
             collect_overrides(&dir, game == Game::K2, &mut overrides);
         }
+        // the Mac App Store's KotOR II: the language folder's own Override, for what the
+        // main one does not have (which of the two the game prefers was not seen)
+        if let Some(dir) = crate::games::localized_dir(root).and_then(|d| find_case_insensitive(&d, "override")) {
+            collect_overrides(&dir, game == Game::K2, &mut overrides);
+        }
         // KotOR 2's Steam Workshop mods load beside Override:
         // <library>/steamapps/workshop/content/208580/<item>/.
         if game == Game::K2 {
+            // the steamapps folder above the install: two up on Windows and Linux, more on
+            // macOS, whose game files are inside KOTOR2.app/Contents/GameData
             let workshop = root
-                .parent()
-                .and_then(|common| common.parent())
+                .ancestors()
+                .find(|a| a.file_name().map_or(false, |n| n.eq_ignore_ascii_case("steamapps")))
                 .map(|steamapps| steamapps.join("workshop").join("content").join("208580"));
             if let Some(dir) = workshop.filter(|d| d.is_dir()) {
                 collect_overrides(&dir, true, &mut overrides);
@@ -61,7 +74,7 @@ impl GameData {
             game,
             root: root.to_path_buf(),
             key: Key::open(root),
-            tlk: find_case_insensitive(root, "dialog.tlk").and_then(|p| Tlk::open(&p)),
+            tlk: crate::games::tlk_path(root).and_then(|p| Tlk::open(&p)),
             overrides,
             tables: Mutex::new(HashMap::new()),
             gui_textures: Mutex::new(None),
@@ -131,11 +144,23 @@ impl GameData {
     pub fn language(&self) -> u32 {
         use std::io::Read;
         let mut head = [0u8; 12];
-        find_case_insensitive(&self.root, "dialog.tlk")
+        crate::games::tlk_path(&self.root)
             .and_then(|p| std::fs::File::open(p).ok())
             .and_then(|mut f| f.read_exact(&mut head).ok())
             .filter(|_| &head[0..8] == b"TLK V3.0")
             .map_or(0, |_| u32::from_le_bytes([head[8], head[9], head[10], head[11]]))
+    }
+
+    /// The languages a name written by the editor is given (creature::set_name_in): the
+    /// game's own, read from its dialog.tlk. Where the game keeps one per language and the
+    /// editor cannot tell which it shows (games::localized_dir), English (the maintainer's
+    /// choice, 2026-11-08).
+    pub fn name_languages(&self) -> Vec<u32> {
+        if crate::games::file_ci_pub(&self.root, "dialog.tlk").is_none() && crate::games::localized_dir(&self.root).is_some() {
+            vec![0]
+        } else {
+            vec![self.language()]
+        }
     }
 
     pub fn string(&self, strref: u32) -> Option<String> {

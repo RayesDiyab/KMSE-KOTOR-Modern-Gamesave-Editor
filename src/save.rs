@@ -152,6 +152,9 @@ pub struct Save {
     /// this area" has the member's tag and classes, and an edit of the member left it alone
     /// only by these (2026-11-07 audit, W-3).
     pub spawned: Vec<u32>,
+    /// A Screen.tga to give the save after its next write, if it still has none
+    /// (give_picture_if_missing; crate::picture makes one from the game's load screen).
+    picture_if_missing: Option<Vec<u8>>,
 }
 
 static SESSIONS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -185,12 +188,23 @@ pub fn interrupted_write(folder: &Path) -> Option<String> {
     (!left.is_empty()).then(|| left.join(", "))
 }
 
+/// Files macOS's Finder writes into a folder it shows, which are no part of a save and which
+/// the game never reads: `.DS_Store` (the window's layout) and AppleDouble `._<name>` files
+/// (another file's metadata, on disks without extended attributes). Finder makes them in a
+/// save folder the player looks at, including through the editor's own Show Folder; counted
+/// as save files, one made after opening refused the next write as "changed on disk" (macOS
+/// port, 2026-11-08). They are left out of that check, of the backup check, of the copies
+/// and of a revert; nothing else changes.
+pub fn is_system_litter(name: &str) -> bool {
+    name == ".DS_Store" || name.starts_with("._")
+}
+
 fn files_on_disk(folder: &Path) -> Vec<(String, u64, Option<std::time::SystemTime>)> {
     let mut files: Vec<_> = fs::read_dir(folder)
         .map(|d| {
             d.filter_map(|e| e.ok())
                 .filter_map(|e| Some((e.file_name().to_string_lossy().to_string(), e.metadata().ok()?)))
-                .filter(|(n, m)| m.is_file() && !n.ends_with(".kmrp-new") && !n.ends_with(".kmrp-old"))
+                .filter(|(n, m)| m.is_file() && !n.ends_with(".kmrp-new") && !n.ends_with(".kmrp-old") && !is_system_litter(n))
                 .map(|(n, m)| (n, m.len(), m.modified().ok()))
                 .collect()
         })
@@ -245,6 +259,7 @@ impl Save {
             edits: 0,
             session: SESSIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             spawned: Vec::new(),
+            picture_if_missing: None,
         };
         save.load_module();
         for r in save.archive.resources.iter() {
@@ -1326,16 +1341,56 @@ impl Save {
         result
     }
 
+    /// After the next write that goes through, the save gets `tga` as its Screen.tga if it
+    /// has none: the picture of its Load screen entry and of the editor's list (2026-11-08,
+    /// the maintainer: saves made from KMRP's test saves had none). Only a 256 by 256 TGA
+    /// is taken. Nothing is replaced: a save with a picture keeps its own.
+    pub fn give_picture_if_missing(&mut self, tga: Vec<u8>) {
+        let fits = tga::decode(&tga).map_or(false, |i| i.width == crate::picture::SIZE && i.height == crate::picture::SIZE);
+        self.picture_if_missing = fits.then_some(tga);
+    }
+
+    /// Writes the picture given (give_picture_if_missing) into a save that has none, once a
+    /// write has gone through: staged, flushed and moved in like any other file, no file
+    /// replaced. A picture that cannot be written leaves the save as the write left it.
+    fn add_missing_picture(&mut self) {
+        let Some(tga) = self.picture_if_missing.take() else { return };
+        if file_ci(&self.folder, "Screen.tga").is_some() || is_xbox_save(&self.folder) {
+            return;
+        }
+        let place = self.folder.join("Screen.tga");
+        let tmp = place.with_extension("kmrp-new");
+        let written = fs::File::create(&tmp).and_then(|mut f| {
+            use std::io::Write;
+            f.write_all(&tga)?;
+            f.sync_all()
+        });
+        if written.is_err() || place.exists() || fs::rename(&tmp, &place).is_err() {
+            let _ = fs::remove_file(&tmp);
+            return;
+        }
+        sync_dir(&self.folder);
+    }
+
     /// Copies the save folder `folder` as it is on disk into `target` (a folder beside it that
     /// does not exist yet) and names the copy `name` on the game's Load screen; nothing else
     /// in it changes.
     pub fn copy_save(folder: &Path, target: &Path, name: &str) -> Result<()> {
+        Self::copy_save_with_picture(folder, target, name, None)
+    }
+
+    /// copy_save, the copy given `picture` as its Screen.tga if the save has none
+    /// (give_picture_if_missing).
+    pub fn copy_save_with_picture(folder: &Path, target: &Path, name: &str, picture: Option<Vec<u8>>) -> Result<()> {
         if target.exists() {
             return Err(format!("{} already exists", target.display()));
         }
         let result = copy_dir(folder, target).map_err(|e| format!("the save could not be copied: {}", e)).and_then(|()| {
             let mut copy = Save::open(target)?;
             copy.rename(name);
+            if let Some(p) = picture {
+                copy.give_picture_if_missing(p);
+            }
             copy.write_files()
         });
         if result.is_err() {
@@ -1407,6 +1462,8 @@ impl Save {
             staged.push((tmp, path.clone()));
         }
         replace_all(&staged)?;
+        sync_dir(&self.folder);
+        self.add_missing_picture();
         self.dirty.clear();
         self.dirty_archive.clear();
         self.archive_dirty = false;
@@ -1414,6 +1471,44 @@ impl Save {
         self.on_disk = files_on_disk(&self.folder);
         Ok(())
     }
+}
+
+/// Flushes a folder's own entries (the names its renames changed) to the disk, on macOS and
+/// Linux, which keep them apart from the files' data. On macOS Rust's sync_all is
+/// F_FULLFSYNC, which also empties the drive's cache. Windows has no such call for a folder
+/// through this API (the 2026-11-07 audit, section D): nothing there. A failure is not an
+/// error: the data was flushed before the renames, and the next open finds a cut-off write.
+fn sync_dir(dir: &Path) {
+    #[cfg(unix)]
+    if let Ok(d) = fs::File::open(dir) {
+        let _ = d.sync_all();
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+/// A backup's files and folder flushed to the disk before the save is written over (macOS and
+/// Linux; on APFS a copy is a clone, whose new blocks are only promised once flushed).
+fn sync_tree(dir: &Path) {
+    #[cfg(unix)]
+    {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for e in entries.filter_map(|e| e.ok()) {
+                let p = e.path();
+                if p.is_dir() {
+                    sync_tree(&p);
+                } else if let Ok(f) = fs::File::open(&p) {
+                    let _ = f.sync_all();
+                }
+            }
+        }
+        sync_dir(dir);
+        if let Some(parent) = dir.parent() {
+            sync_dir(parent);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
 }
 
 /// Puts each new file in place of its old one. Each old file waits under a second name until
@@ -1538,7 +1633,10 @@ pub fn backup_root(folder: &Path, game_root: Option<&Path>) -> PathBuf {
         let p = fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         p.to_string_lossy().trim_start_matches("\\\\?\\").to_ascii_lowercase()
     };
-    if let Some(root) = game_root {
+    // never inside a macOS app bundle: the game's files are in one there, and a folder added
+    // to a signed bundle breaks its seal (the save would not be in one either; this guards it)
+    let in_bundle = |p: &Path| p.ancestors().any(|a| a.extension().map_or(false, |x| x.eq_ignore_ascii_case("app")) && a.is_dir());
+    if let Some(root) = game_root.filter(|r| !in_bundle(r)) {
         if folder.ancestors().any(|a| plain(a) == plain(root)) {
             return root.join("Save Editor Backup");
         }
@@ -1557,6 +1655,10 @@ pub fn backup_root(folder: &Path, game_root: Option<&Path>) -> PathBuf {
             at = a.parent().unwrap_or(a);
             break;
         }
+    }
+    // inside a macOS app bundle: beside the bundle instead (Steam's install folder)
+    if let Some(app) = at.ancestors().filter(|a| a.extension().map_or(false, |x| x.eq_ignore_ascii_case("app")) && a.is_dir()).last() {
+        at = app.parent().unwrap_or(app);
     }
     at.join("Save Editor Backup")
 }
@@ -1626,6 +1728,9 @@ pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Resu
         for e in fs::read_dir(p).map_err(|e| format!("{}: {}", p.display(), e))? {
             let e = e.map_err(|e| e.to_string())?;
             let name = e.file_name().to_string_lossy().to_string();
+            if is_system_litter(&name) {
+                continue; // Finder's, not the save's: neither put back nor taken away
+            }
             if e.path().is_dir() {
                 return Err(format!("{} has a folder inside it ({}), which a save does not", p.display(), name));
             }
@@ -1759,6 +1864,7 @@ pub fn restore(folder: &Path, backup: &Path, backups: &Path, game: Game) -> Resu
             let _ = fs::remove_file(old_of(cur));
         }
     }
+    sync_dir(folder);
     if !same_files(folder, backup) || Save::open(folder).is_err() {
         return Err(format!("{}. The reverted save doesn't match the backup. Copy the files of {} over the save folder to put it back.", HALF_WRITTEN, before.display()));
     }
@@ -1782,6 +1888,7 @@ fn make_backup(backups: &Path, game: Game, folder: &Path) -> Result<PathBuf> {
     if !same_files(folder, &backup) {
         return failed(format!("the copy in {} does not read back the same as the save", backup.display()));
     }
+    sync_tree(&backup);
     // which save it is a copy of, beside it (not in it, so it stays the save's files alone):
     // two saves with one folder name share a backups folder (two Steam accounts' cloud saves,
     // a copy kept inside the game folder), and History must not offer one the other's
@@ -1853,12 +1960,12 @@ pub fn same_files(a: &Path, b: &Path) -> bool {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let n = e.file_name().to_string_lossy().to_ascii_lowercase();
-                !n.ends_with(".kmrp-old") && !n.ends_with(".kmrp-new")
+                !n.ends_with(".kmrp-old") && !n.ends_with(".kmrp-new") && !is_system_litter(&e.file_name().to_string_lossy())
             })
             .map(|e| (e.file_name(), e.path().is_dir()))
             .collect();
         // a link is never taken as the same: it is not followed (copy_dir refuses it)
-        if fs::read_dir(p).ok()?.filter_map(|e| e.ok()).any(|e| e.file_type().map_or(true, |t| t.is_symlink())) {
+        if fs::read_dir(p).ok()?.filter_map(|e| e.ok()).filter(|e| !is_system_litter(&e.file_name().to_string_lossy())).any(|e| e.file_type().map_or(true, |t| t.is_symlink())) {
             return None;
         }
         v.sort();
@@ -1885,6 +1992,9 @@ fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
     fs::create_dir_all(to)?;
     for e in fs::read_dir(from)? {
         let e = e?;
+        if is_system_litter(&e.file_name().to_string_lossy()) {
+            continue;
+        }
         let target = to.join(e.file_name());
         // a link (a symbolic link, a junction) is not followed: a save folder holds none, and
         // following one copied whatever it points at, or a loop until the program fell over

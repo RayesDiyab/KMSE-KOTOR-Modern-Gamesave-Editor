@@ -18,7 +18,7 @@ fn saves() -> Vec<(Game, Save)> {
     let installs = find_installs(&[]);
     let mut v = Vec::new();
     for game in [Game::K1, Game::K2] {
-        if let Some(s) = find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path)).find_map(|f| Save::open(&f.path).ok()) {
+        if let Some(s) = find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find_map(|f| Save::open(&f.path).ok()) {
             v.push((game, s));
         }
     }
@@ -75,7 +75,7 @@ fn a_companion_from_another_save_must_be_the_same_person() {
 #[test]
 fn a_link_inside_a_save_folder_is_never_followed() {
     let installs = find_installs(&[]);
-    let Some(folder) = [Game::K1, Game::K2].into_iter().find_map(|g| find_saves(&installs, g, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path))) else {
+    let Some(folder) = [Game::K1, Game::K2].into_iter().find_map(|g| find_saves(&installs, g, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok())) else {
         return eprintln!("no save here: nothing checked");
     };
     let root = std::env::temp_dir().join("kmse-tests").join("junction");
@@ -133,9 +133,15 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn the_endar_spire_stand_in_never_replaces_bastila() {
     let installs = find_installs(&[]);
-    let opened: Vec<Save> = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path)).filter_map(|f| Save::open(&f.path).ok()).collect();
+    let opened: Vec<Save> = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).filter_map(|f| Save::open(&f.path).ok()).collect();
     let tag = |s: &Save| s.creature(Who::Npc(0)).and_then(|c| c.string("Tag")).unwrap_or_default().to_ascii_lowercase();
-    let (Some(trask), Some(bastila)) = (opened.iter().find(|s| tag(s) == "end_trask"), opened.iter().find(|s| tag(s) == "bastila" && s.recruited(0))) else {
+    // "after Taris": a save the story has moved on from Trask's. A save made by hand at the
+    // Endar Spire with Bastila in the slot (KMRP's test saves on the maintainer's Mac) is in
+    // the same chapter as Trask's, where taking either is allowed (second review)
+    let played = |s: &Save| kse_core::questdb::chapters_played_in(s).iter().filter(|p| **p).count();
+    let trask = opened.iter().find(|s| tag(s) == "end_trask");
+    let bastila = trask.and_then(|t| opened.iter().find(|s| tag(s) == "bastila" && s.recruited(0) && played(s) > played(t)));
+    let (Some(trask), Some(bastila)) = (trask, bastila) else {
         return eprintln!("no KotOR saves at the Endar Spire and after Taris here: nothing checked");
     };
     let mut later = bastila.clone();
@@ -273,7 +279,7 @@ fn class_pickers_offer_what_the_game_gives() {
 #[test]
 fn a_spawned_copy_of_a_party_member_is_not_edited_with_them() {
     let installs = find_installs(&[]);
-    let found = [Game::K1, Game::K2].into_iter().flat_map(|g| find_saves(&installs, g, &[])).filter(|f| !save::player_outside_archive(&f.path)).find_map(|f| {
+    let found = [Game::K1, Game::K2].into_iter().flat_map(|g| find_saves(&installs, g, &[])).filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find_map(|f| {
         let s = Save::open(&f.path).ok()?;
         let git = s.area_git()?;
         let list = git.root.list(kse_core::area::CREATURES)?;

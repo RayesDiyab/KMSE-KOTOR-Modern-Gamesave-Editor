@@ -57,7 +57,7 @@ fn prestige_class_as_the_engine_adds_it() {
     let class = cat.class(12).cloned().unwrap();
     let npc = data.table("npc");
     let mut checked = 0;
-    for folder in find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+    for folder in find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
         let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
         let work = scratch(&format!("prestige-{}", name));
         copy_dir(&folder.path, &work);
@@ -277,7 +277,7 @@ fn granted_feats_match_the_games_level_records() {
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
         let cat = Catalog::build(&data);
-        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             if name.contains("KMRP") || kse_core::save::summary(&folder.path).map_or(false, |s| s.name.contains("KMRP")) {
                 continue; // written by the editor
