@@ -126,7 +126,8 @@ The one thing this program must never do is damage a player's save.
   size and SHA-256. It stops if either fails.
 - Tests alone: `cargo test --profile tests` (set `CARGO_TARGET_DIR` to
   `build\target-tests` as `build.ps1` does, so the release build is left alone).
-- Linux and macOS: `sh build.sh` (runs `cargo test --release`, then the release build).
+- macOS: `sh build-macos.sh` (the tests as `build.ps1` runs them, then `dist/KMSE.app`, a DMG
+  and a ZIP). Linux: `sh build.sh` (runs `cargo test --release`, then the release build).
 - Documentation links: `python .github/scripts/check_links.py`.
 - The tests that read real saves find none on a PC without the games, and on GitHub's
   runners, and then pass without checking anything. Say so when that is what happened.

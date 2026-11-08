@@ -1,7 +1,7 @@
 #!/bin/sh
-# Builds the KOTOR Modern Gamesave Editor for Linux or macOS into dist/ beside this file:
-#   Linux:  dist/kotor-modern-gamesave-editor
-#   macOS:  dist/KOTOR Modern Gamesave Editor.app
+# Builds the KOTOR Modern Gamesave Editor for Linux into dist/ beside this file:
+#   dist/kotor-modern-gamesave-editor
+# On macOS it runs build-macos.sh instead (dist/KMSE.app, a DMG and a ZIP; see there).
 #
 #   sh build.sh
 #
@@ -10,31 +10,12 @@
 # needs the usual X11/Wayland and fontconfig development packages.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
+if [ "$(uname)" = "Darwin" ]; then
+    exec sh "$here/build-macos.sh" "$@"
+fi
 cd "$here"
 cargo test --release
 cargo build --release
 mkdir -p "$here/dist"
-bin="$here/build/target/release/kotor-modern-gamesave-editor"
-if [ "$(uname)" = "Darwin" ]; then
-    app="$here/dist/KOTOR Modern Gamesave Editor.app"
-    rm -rf "$app"
-    mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-    cp "$bin" "$app/Contents/MacOS/kotor-modern-gamesave-editor"
-    cat > "$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleName</key><string>KOTOR Modern Gamesave Editor</string>
-<key>CFBundleDisplayName</key><string>KOTOR Modern Gamesave Editor</string>
-<key>CFBundleIdentifier</key><string>com.raymangt.kotor-modern-gamesave-editor</string>
-<key>CFBundleExecutable</key><string>kotor-modern-gamesave-editor</string>
-<key>CFBundleShortVersionString</key><string>1.0</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>NSHighResolutionCapable</key><true/>
-</dict></plist>
-PLIST
-    echo "$app"
-else
-    cp "$bin" "$here/dist/kotor-modern-gamesave-editor"
-    echo "$here/dist/kotor-modern-gamesave-editor"
-fi
+cp "$here/build/target/release/kotor-modern-gamesave-editor" "$here/dist/kotor-modern-gamesave-editor"
+echo "$here/dist/kotor-modern-gamesave-editor"

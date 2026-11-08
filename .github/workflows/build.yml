@@ -35,6 +35,20 @@ jobs:
         run: cargo test --release
       - name: Build
         run: cargo build --release
+      # macOS: the app as a player gets it (Universal 2, ad hoc signed, not notarized; no
+      # KotOR on the runner, so no Yavin Station picture), from the same script as a release
+      - name: macOS app
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          sh build-macos.sh --no-tests
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'macOS'
+        with:
+          name: KMSE-macOS
+          path: |
+            dist/KMSE-*-macOS.dmg
+            dist/KMSE-*-macOS.zip
       - uses: actions/upload-artifact@v7
         with:
           name: kotor-modern-gamesave-editor-${{ runner.os }}

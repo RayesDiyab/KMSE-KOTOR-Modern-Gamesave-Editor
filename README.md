@@ -103,14 +103,20 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 ```sh
-# Linux and macOS: tests, then dist/kotor-modern-gamesave-editor
-# or dist/KOTOR Modern Gamesave Editor.app.
+# macOS: tests, then dist/KMSE.app (Apple silicon and Intel), a DMG and a ZIP.
+sh build-macos.sh
+```
+
+```sh
+# Linux: tests, then dist/kotor-modern-gamesave-editor.
 sh build.sh
 ```
 
 On Linux the window also needs the usual X11, Wayland and fontconfig development packages;
-the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux and macOS builds have not
-been run by the maintainer yet.
+the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux build has not been run by the
+maintainer yet. The macOS build and what was tested on a Mac are in
+[docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md). The app it makes is
+signed ad hoc, not with a Developer ID, so it is not ready to hand out yet.
 
 The window is set in the KMRP Original HD fonts: the four it uses are in `fonts/`, copies
 of KMRP's own, under the SIL Open Font License 1.1 ([fonts/OFL.txt](fonts/OFL.txt)). A

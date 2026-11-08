@@ -6,6 +6,35 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **macOS port** (2026-11-08, the audit in
+  [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md)).
+  - KotOR and KotOR II are found inside their Mac apps (Steam's and the Mac App Store's),
+    in `/Applications`, `~/Applications` and wherever Spotlight knows of them. Settings' game
+    folder takes the app itself, the folder Steam keeps it in, or the folder of game files.
+    A folder without the game's files (a KEY, a TLK and `modules`) is refused when it is
+    picked, not later.
+  - Which game a folder holds is told by its program, its ini, its app's bundle id, or its
+    first module. The size of `chitin.key` decided before and took the Mac App Store's
+    KotOR II for KotOR.
+  - KotOR II Steam's `cloudsaves` beside `KOTOR2.app` are listed. The Mac App Store's
+    KotOR II, which keeps a `dialog.tlk` per language, is read in English, and a renamed
+    companion's name is written in English.
+  - A save folder macOS will not let the editor read (another app's container) is named in a
+    pop-up, not skipped with no word.
+  - The game is seen running on macOS by its app (`AppBundleExe`, `KOTOR_Exe`, `KOTOR2`),
+    and the Windows game under Wine or CrossOver by its arguments. When the editor cannot
+    tell, it does not write.
+  - Finder's `.DS_Store` and `._` files in a save folder no longer stop Save Changes as "the
+    save changed on disk", and are not copied into backups.
+  - Command-Q and the Dock's Quit go through the window's check for changes not saved. They
+    ended the program at once before.
+  - Folders are flushed after a write's renames, and backups before the save is written
+    over (macOS and Linux).
+  - `build-macos.sh` makes `dist/KMSE.app` (Apple silicon and Intel), a DMG and a ZIP;
+    `build.sh` runs it on macOS.
+  - Go Back no longer changes the party table before refusing a save whose level history is
+    damaged (both games; the window works on a copy, so no save took it).
+  - KotOR II's Override subfolders are read in the order Windows lists them on every disk.
 - **Windows audit fixes** (2026-11-07, the full audit in
   [docs/audits/WINDOWS_FULL_AUDIT.md](docs/audits/WINDOWS_FULL_AUDIT.md)).
   - Finish Quest takes one path through each set of alternatives of a conversation or script,
