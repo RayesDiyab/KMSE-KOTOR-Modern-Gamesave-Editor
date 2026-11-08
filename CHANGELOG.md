@@ -6,6 +6,12 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Character and Map tidied** (2026-11-08, the maintainer). An attribute's modifier has room
+  for three characters at every text size ("+22" showed as "+2."). The level records' warning
+  under Heal Everyone, one orange line cut off, is an orange "i" in a circle that shows the
+  whole text in a box on hover. The Map's frame takes the map's own shape, so the picture
+  fills it with no black bands beside it.
+
 - **A save without a picture gets one** (2026-11-08, the maintainer: saves made from KMRP's
   test saves showed an empty picture). When the editor writes a save that has no
   `Screen.tga` (Save Changes, Save as a New Save, Copy, rename), it adds the game's own load

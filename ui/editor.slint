@@ -6,7 +6,7 @@ import { Theme } from "theme.slint";
 // written by build.rs: Yavin Station, made from the player's game
 import { TimelineArt } from "timeline-art.slint";
 import { App, Stat, Named, ItemRow, NpcRow, GlobalRow, DoorRow, BoxRow, Toggle, MapMark, AreaRow, SlotRow, TimelineNode, TimelineSave, TimelineGroup, GalaxyStop, GalaxyLane, StageRow } from "state.slint";
-import { Button, Stepper, Field, Switch, Label, Note, Scroller, Cross, Sign, BackArrow, Choice, Link, CopyButton, RoundFill } from "widgets.slint";
+import { Button, Stepper, Field, Switch, Label, Note, Scroller, Cross, Sign, BackArrow, Choice, Link, CopyButton, RoundFill, InfoDot } from "widgets.slint";
 
 component Line inherits Rectangle {
     height: 56px;
@@ -47,8 +47,10 @@ component StatLine inherits Line {
                 set(v) => { root.set(v); }
             }
         }
+        // room for the longest modifier, three characters (+45, -5), at every text size: in 34 px
+        // "+22" showed as "+2." (2026-11-08, the maintainer)
         if stat.mod != "": Text {
-            width: 34px;
+            width: 40px * Theme.ts;
             text: stat.mod;
             horizontal-alignment: right;
             vertical-alignment: center;
@@ -359,15 +361,6 @@ component CharacterTab inherits Rectangle {
             Text { text: "Cannot die"; vertical-alignment: center; font-family: Theme.body-font; font-size: 14px * Theme.ts; color: Theme.muted; }
         }
         property <length> shift: heal-wide ? 0px : 40px;
-        if App.records-warning != "": Text {
-            x: 0; y: 194px + shift;
-            width: parent.width;
-            text: App.records-warning;
-            font-family: Theme.body-font;
-            font-size: 12.5px * Theme.ts;
-            color: Theme.changed;
-            overflow: elide;
-        }
         Label { x: 0; y: 214px + shift; text: "LOOK AND VOICE"; }
         Rectangle {
             x: 0; y: 246px + shift;
@@ -408,6 +401,15 @@ component CharacterTab inherits Rectangle {
                     }
                 }
             }
+        }
+        // the level records' warning: an orange "i" at the end of the Cannot die line, the whole
+        // text on hover (it was one orange line, cut off: 2026-11-08, the maintainer). Last in
+        // the column, so its box draws over Look and Voice.
+        if App.records-warning != "": InfoDot {
+            x: parent.width - self.width;
+            y: heal-wide ? 152px + (38px - self.height) / 2 : 198px + (30px - self.height) / 2;
+            text: App.records-warning;
+            box-width: min(parent.width, 360px * Theme.ts);
         }
     }
 }
@@ -2398,11 +2400,13 @@ component MapTab inherits Rectangle {
             property <length> ch: self.cw / App.map-aspect;
             property <length> ox: self.width / 2 - cx * self.cw;
             property <length> oy: self.height / 2 - cy * self.ch;
-            x: 0;
+            // The frame is the map's own shape, as large as fits and centred, so the picture fills
+            // it with no black bands beside it (2026-11-08, the maintainer); room for the key
+            // below it; the zoom buttons sit inside, on its right.
+            x: (parent.width - self.width) / 2;
             y: 0;
-            // Room for the key below it; the zoom buttons sit inside, on its right.
-            width: parent.width;
-            height: parent.height - 50px;
+            width: App.has-map ? min(parent.width, (parent.height - 50px) * App.map-aspect) : parent.width;
+            height: App.has-map ? min(parent.height - 50px, parent.width / App.map-aspect) : parent.height - 50px;
             border-radius: 6px;
             border-width: 1px;
             border-color: Theme.edge;
@@ -2533,7 +2537,7 @@ component MapTab inherits Rectangle {
             Rectangle { x: 11px; y: 1px; width: 2px; height: 22px; background: Theme.accent; }
             Rectangle { x: 1px; y: 11px; width: 22px; height: 2px; background: Theme.accent; }
         }
-        // Zoom: + and - inside the map on its right, in the dark beside the picture.
+        // Zoom: + and - inside the map on its right, over the picture.
         Rectangle {
             property <length> half: 40px;
             x: frame.x + frame.width - self.width - 12px;

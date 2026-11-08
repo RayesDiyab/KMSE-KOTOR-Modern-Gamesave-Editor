@@ -279,6 +279,54 @@ export component Switch inherits Rectangle {
 }
 
 // The spaced capital labels over each section ("ATTRIBUTES").
+// A note too long for its place: an "i" in a circle, its text in a box of as many lines as it
+// needs while the pointer is over it (2026-11-08, the maintainer: the orange line under Heal
+// Everyone was cut off). The box opens down and to the left, so a dot at a column's right edge
+// keeps it in the column. Put the dot last among its siblings: what comes after it draws over.
+export component InfoDot inherits Rectangle {
+    in property <string> text;
+    in property <length> box-width: 320px;
+    in property <brush> tone: Theme.changed;
+    width: 22px * Theme.ts;
+    height: self.width;
+    border-radius: self.width / 2;
+    border-width: 1.5px;
+    border-color: root.tone;
+    background: touch.has-hover ? Theme.hover : transparent;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: "i";
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        font-family: Theme.body-font;
+        font-size: 14px * Theme.ts;
+        font-weight: 700;
+        color: root.tone;
+    }
+    touch := TouchArea { }
+    if touch.has-hover: Rectangle {
+        x: root.width - self.width;
+        y: root.height + 6px;
+        width: root.box-width;
+        height: body.preferred-height + 24px;
+        background: Theme.panel;
+        border-width: 1px;
+        border-color: root.tone;
+        border-radius: 6px;
+        body := Text {
+            x: 12px;
+            y: 12px;
+            width: parent.width - 24px;
+            text: root.text;
+            wrap: word-wrap;
+            font-family: Theme.body-font;
+            font-size: 13.5px * Theme.ts;
+            color: Theme.text;
+        }
+    }
+}
+
 export component Label inherits Text {
     font-family: Theme.label-font;
     font-size: 15px * Theme.ts;
