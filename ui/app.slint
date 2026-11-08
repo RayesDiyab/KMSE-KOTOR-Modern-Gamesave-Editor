@@ -762,6 +762,25 @@ export component AppWindow inherits Window {
         }
     }
 
+    // A saves folder macOS keeps closed (the Mac App Store's KotOR keeps its saves in its own
+    // container): Open Settings opens Full Disk Access, Not Now stops the question for those
+    // folders (2026-11-08, the maintainer approved the mock-up).
+    if App.overlay == 20: Overlay {
+        panel-width: 640px;
+        panel-height: 330px;
+        VerticalLayout {
+            spacing: 14px;
+            Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            MessageText { }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: end;
+                Button { width: 200px; text: "Not Now"; clicked => { App.blocked-not-now(); } }
+                Button { width: 220px; kind: 0; text: "Open Settings"; clicked => { App.open-privacy-settings(); } }
+            }
+        }
+    }
+
     // History (2026-11-07, the maintainer): every backup of the open save, oldest first.
     if App.overlay == 16: GameDialog {
         panel-width: 860px;

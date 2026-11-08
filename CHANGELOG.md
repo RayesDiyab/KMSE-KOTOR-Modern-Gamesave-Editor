@@ -25,7 +25,9 @@ CHANGELOG.
     KotOR II, which keeps a `dialog.tlk` per language, is read in English, and a renamed
     companion's name is written in English.
   - A save folder macOS will not let the editor read (another app's container) is named in a
-    pop-up, not skipped with no word.
+    pop-up, not skipped with no word. Its Open Settings button opens Privacy & Security, Full
+    Disk Access, where the player can turn KMSE on; Not Now stops the question for that
+    folder (kept in the settings as `quiet=`).
   - The game is seen running on macOS by its app (`AppBundleExe`, `KOTOR_Exe`, `KOTOR2`),
     and the Windows game under Wine or CrossOver by its arguments. When the editor cannot
     tell, it does not write.

@@ -520,6 +520,9 @@ export global App {
     in property <string> message-title;
     in property <string> message-body;
     callback close-overlay();
+    // overlay 20, a saves folder macOS keeps closed: not asked again, or System Settings opened
+    callback blocked-not-now();
+    callback open-privacy-settings();
     callback search-picker(string);
     callback pick(int);
     callback pick-save(int);

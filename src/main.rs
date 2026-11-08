@@ -153,6 +153,9 @@ struct Settings {
     /// never written over at exit, which would have put the defaults in place of the player's
     /// added folders and game folders (2026-11-07 audit).
     unreadable: bool,
+    /// Save folders macOS keeps closed that the player said Not Now to: not asked about again
+    /// (`quiet=` lines; an older build drops them, and then asks once more).
+    quiet: Vec<PathBuf>,
 }
 
 impl Settings {
@@ -179,6 +182,8 @@ impl Settings {
                     s.k2 = true;
                 } else if line == "theme=light" {
                     s.light = true;
+                } else if let Some(p) = line.strip_prefix("quiet=") {
+                    s.quiet.push(PathBuf::from(p));
                 } else if let Some(n) = line.strip_prefix("textsize=") {
                     s.text_size = n.parse::<i32>().unwrap_or(1).clamp(0, 2);
                 }
@@ -200,6 +205,9 @@ impl Settings {
         text.push_str(if self.k2 { "game=k2\n" } else { "game=k1\n" });
         text.push_str(if self.light { "theme=light\n" } else { "theme=dark\n" });
         text.push_str(&format!("textsize={}\n", self.text_size));
+        for q in &self.quiet {
+            text.push_str(&format!("quiet={}\n", q.display()));
+        }
         if self.unreadable {
             return;
         }
@@ -685,23 +693,43 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
 
 /// The save folders the system keeps the editor out of (games::blocked_save_folders), said
 /// once each while the editor runs: on macOS the Mac App Store copies keep their saves in
-/// their own containers, which another app may read only with the player's leave.
+/// their own containers, which another app may read only with the player's leave. macOS shows
+/// no prompt for it, and an app cannot ask for it: the player turns the editor on under Full
+/// Disk Access. On macOS the pop-up opens that page (Open Settings) or stops asking about these
+/// folders (Not Now, kept in the settings); elsewhere it only says so.
 fn tell_blocked_folders(ui: &AppWindow, st: &State) {
-    static TOLD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
     let blocked = games::blocked_save_folders(&st.installs, st.game);
-    let mut told = TOLD.lock().unwrap();
-    let new: Vec<PathBuf> = blocked.into_iter().filter(|p| !told.contains(p)).collect();
+    let mut told = BLOCKED_TOLD.lock().unwrap();
+    let new: Vec<PathBuf> = blocked.into_iter().filter(|p| !told.contains(p) && !st.settings.quiet.contains(p)).collect();
     if new.is_empty() {
         return;
     }
     told.extend(new.iter().cloned());
+    *BLOCKED_ASKED.lock().unwrap() = new.clone();
     let list: Vec<String> = new.iter().map(|p| p.display().to_string()).collect();
-    let how = if cfg!(target_os = "macos") {
-        "macOS did not let the editor read it, so saves there are not listed. If macOS asked whether the editor may access data from other apps, allow it and open the editor again; or allow it in System Settings, Privacy & Security; or use Add a Save Folder and pick the saves folder yourself."
+    let title = format!("{} saves the editor cannot read", st.game.title());
+    if cfg!(target_os = "macos") {
+        let app = ui.global::<App>();
+        app.set_message_title(s(&title));
+        app.set_message_body(s(format!(
+            "{}\n\nThe Mac App Store's {} keeps its saves here. macOS lets another app read them only with your permission, and it does not ask by itself. In System Settings, under Full Disk Access, turn KMSE on (add it with + if it is not listed), then open KMSE again.",
+            list.join("\n"),
+            st.game.title()
+        )));
+        app.set_overlay(20);
     } else {
-        "The system did not let the editor read it, so saves there are not listed. Use Add a Save Folder to pick the saves folder, or give your account access to it."
-    };
-    message(ui, &format!("{} saves the editor cannot read", st.game.title()), &format!("{}\n\n{}", list.join("\n"), how));
+        message(ui, &title, &format!("{}\n\nThe system did not let the editor read it, so saves there are not listed. Use Add a Save Folder to pick the saves folder, or give your account access to it.", list.join("\n")));
+    }
+}
+
+/// The closed save folders told about this run, and those the pop-up on screen names.
+static BLOCKED_TOLD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+static BLOCKED_ASKED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// System Settings at Privacy & Security, Full Disk Access, where the player can turn the
+/// editor on. By the full path of `open`; nothing is changed by the editor itself.
+fn open_full_disk_access() {
+    let _ = std::process::Command::new("/usr/bin/open").arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles").spawn();
 }
 
 /// Counts the save lists filled, so a picture knows when its row number has gone out of date.
@@ -6267,6 +6295,21 @@ fn main() {
     });
 
     // ---- pop-ups ----
+    on!(ui, state, on_blocked_not_now, |u, st| {
+        let asked = std::mem::take(&mut *BLOCKED_ASKED.lock().unwrap());
+        for p in asked {
+            if !st.settings.quiet.contains(&p) {
+                st.settings.quiet.push(p);
+            }
+        }
+        st.settings.store();
+        u.global::<App>().set_overlay(0);
+    });
+    on!(ui, state, on_open_privacy_settings, |u, _st| {
+        BLOCKED_ASKED.lock().unwrap().clear();
+        open_full_disk_access();
+        u.global::<App>().set_overlay(0);
+    });
     on!(ui, state, on_close_overlay, |u, st| {
         clear_story_preview(&u, st);
         st.target = Target::None;
