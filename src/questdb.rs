@@ -2876,8 +2876,6 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
     let is_unfinished = |p: &str| unfinished.iter().any(|u| u.eq_ignore_ascii_case(p));
     if !(0..=100).contains(&alignment) { return Err("Alignment must be between 0 and 100.".into()); }
     let first = undo.first().cloned().ok_or("nothing to go back over")?;
-    // the player leads at the earlier point of the story (Save::release_controlled_npc)
-    save.release_controlled_npc();
     let asked = undo;
     let (kept, undo) = fourth_planet_with_the_leviathan(save, kept, undo);
     let dark = save.player().map_or(false, |p| crate::creature::alignment(p) < 50);
@@ -2901,6 +2899,11 @@ pub fn go_back_part_played(save: &mut Save, data: &GameData, kept: &[serde_json:
     }
     let cat = crate::catalog::Catalog::build(data);
     crate::creature::validate_rewind_prefix(save.player().ok_or("This save has no player to rewind.")?, target, &cat)?;
+    // the player leads at the earlier point of the story (Save::release_controlled_npc). Not
+    // before the checks above: a refused Go Back changed the party table first (found on the
+    // maintainer's Mac, 2026-11-08, story_safety.rs; the window works on a copy, so no save
+    // took it)
+    save.release_controlled_npc();
     let before = Before::of(save);
     let recruited_before: Vec<usize> = save.npcs().into_iter().filter(|i| save.recruited(*i)).collect();
     for m in undo.iter().rev() {
