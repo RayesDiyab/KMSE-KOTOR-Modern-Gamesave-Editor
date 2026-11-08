@@ -14,6 +14,9 @@ export struct NpcRow {
 export struct GlobalRow { index: int, name: string, kind: int, on: bool, number: int, text: string, changed: bool, other: string }
 export struct DoorRow { index: int, tag: string, note: string, locked: bool, open: bool, changed: bool }
 export struct BoxRow { index: int, name: string, note: string }
+// A copy of a game in the list of copies (overlay 20): state 0 its saves can be read, 1 no saves
+// yet (nothing checked), 2 cannot be read.
+export struct CopyRow { name: string, note: string, state: int }
 export struct PortraitRow { id: int, image: image, female: bool, current: bool }
 export struct ClassRow { index: int, name: string, level: int, maximum: int, can-remove: bool }
 // kind: the row's icon (xp, credits, level, party, align), or none
@@ -521,7 +524,9 @@ export global App {
     in property <string> message-body;
     callback close-overlay();
     // overlay 20, a saves folder macOS keeps closed: not asked again, or System Settings opened
+    in property <[CopyRow]> copy-rows;
     callback blocked-not-now();
+    callback blocked-choose-folder();
     callback open-privacy-settings();
     callback search-picker(string);
     callback pick(int);

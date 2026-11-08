@@ -875,3 +875,109 @@ pub fn running_games() -> Option<Vec<Game>> {
     }
     Some(found)
 }
+
+/// How a copy of a game stands, for the list of copies the editor shows when one of them
+/// cannot be read (2026-11-08, the maintainer's design).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CopyState {
+    /// Its saves can be read: this many.
+    Saves(usize),
+    /// Its folders can be read and hold no saves, so nothing of it was checked.
+    NoSaves,
+    /// A folder of its saves cannot be read (macOS keeps another app's container closed).
+    Blocked,
+}
+
+/// A copy of a game: one distribution (Steam, the Mac App Store, GOG...) of KotOR or KotOR II,
+/// with its saves' folders. Two installs of one distribution share their save folders (the Mac
+/// App Store copies all save in one container) and are one copy.
+#[derive(Clone, Debug)]
+pub struct GameCopy {
+    pub game: Game,
+    /// "Steam", "App Store", "GOG"...
+    pub source: String,
+    pub state: CopyState,
+    /// The folders of it that cannot be read.
+    pub blocked: Vec<PathBuf>,
+}
+
+impl GameCopy {
+    /// "Steam KotOR", "App Store KotOR II".
+    pub fn name(&self) -> String {
+        format!("{} {}", self.source, self.game.title())
+    }
+}
+
+/// The folders an install's saves are in, and the folders to check can be read: its own
+/// (save_roots); on macOS a Mac App Store copy's container and its folders, and for any other
+/// Mac or Linux copy the port's own save folders outside a container.
+fn copy_folders(install: &Install) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut roots: Vec<PathBuf> = save_roots(install).into_iter().map(|(p, _)| p).collect();
+    let mut guards: Vec<PathBuf> = Vec::new();
+    let app_store = install.source == "Mac App Store";
+    if app_store {
+        for c in mac_containers(install.game) {
+            guards.push(c.join("Data"));
+        }
+    }
+    for r in port_save_roots(install.game) {
+        let in_container = r.components().any(|c| c.as_os_str() == "Containers");
+        if in_container == app_store && !roots.contains(&r) {
+            roots.push(r);
+        }
+    }
+    guards.extend(roots.iter().cloned());
+    (roots, guards)
+}
+
+/// Every copy of the games found, with how its saves stand. `added` are the folders the player
+/// added: a folder picked inside a closed container (Choose the Folder) that can be read now
+/// opens that copy, and its saves count for it.
+pub fn game_copies(installs: &[Install], added: &[PathBuf]) -> Vec<GameCopy> {
+    let denied = |p: &Path| matches!(fs::read_dir(p), Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied);
+    // one copy per game and distribution, its folders merged
+    let mut groups: Vec<(Game, String, Vec<PathBuf>, Vec<PathBuf>)> = Vec::new();
+    for install in installs {
+        let source = match install.source.as_str() {
+            "Mac App Store" => "App Store".to_string(),
+            s => s.to_string(),
+        };
+        let (roots, guards) = copy_folders(install);
+        match groups.iter_mut().find(|g| g.0 == install.game && g.1 == source) {
+            Some(g) => {
+                g.2.extend(roots.into_iter().filter(|r| !g.2.contains(r)).collect::<Vec<_>>());
+                g.3.extend(guards.into_iter().filter(|r| !g.3.contains(r)).collect::<Vec<_>>());
+            }
+            None => groups.push((install.game, source, roots, guards)),
+        }
+    }
+    let mut out = Vec::new();
+    for (game, source, roots, guards) in groups {
+        let opened = |g: &Path| added.iter().any(|a| a.starts_with(g) && fs::read_dir(a).is_ok());
+        let mut blocked: Vec<PathBuf> = Vec::new();
+        for g in &guards {
+            if denied(g) && !opened(g) && !blocked.iter().any(|b| g.starts_with(b)) {
+                blocked.retain(|b| !b.starts_with(g));
+                blocked.push(g.clone());
+            }
+        }
+        let places: Vec<&PathBuf> = roots.iter().chain(guards.iter()).collect();
+        let saves = find_saves(installs, game, added).into_iter().filter(|f| places.iter().any(|p| f.path.starts_with(p))).count();
+        let state = if !blocked.is_empty() {
+            CopyState::Blocked
+        } else if saves > 0 {
+            CopyState::Saves(saves)
+        } else {
+            CopyState::NoSaves
+        };
+        out.push(GameCopy { game, source, state, blocked });
+    }
+    // what works first, what cannot be read last; KotOR before KotOR II
+    let rank = |c: &GameCopy| match c.state {
+        CopyState::Saves(_) => 0,
+        CopyState::NoSaves => 1,
+        CopyState::Blocked => 2,
+    };
+    out.sort_by_key(|c| (rank(c), c.game == Game::K2));
+    out
+}

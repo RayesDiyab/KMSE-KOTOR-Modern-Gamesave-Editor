@@ -12,7 +12,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Sel};
 use objc2::{msg_send, sel, MainThreadMarker};
 use objc2_app_kit::{NSApplication, NSModalResponseOK, NSOpenPanel, NSWindow};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSString, NSURL};
 use std::path::PathBuf;
 
 /// Shows the panel with `message` and returns what was picked, or None if it was cancelled
@@ -33,6 +33,38 @@ pub fn pick_game_or_folder(message: &str) -> Option<PathBuf> {
         panel.setCanCreateDirectories(false);
         panel.setMessage(Some(&NSString::from_str(message)));
         panel.setPrompt(Some(&NSString::from_str("Choose")));
+        if panel.runModal() == NSModalResponseOK {
+            panel.URL().and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string()))
+        } else {
+            None
+        }
+    };
+    if let Some(w) = key {
+        w.makeKeyAndOrderFront(None);
+    }
+    picked
+}
+
+/// The system's folder panel opened at `start` (Choose the Folder, for a copy whose saves
+/// macOS keeps closed). The panel is the system's own and may show a closed folder; the folder
+/// the player picks there is their leave for the editor to read it. None if cancelled.
+pub fn pick_folder_at(message: &str, start: &std::path::Path) -> Option<PathBuf> {
+    let mtm = MainThreadMarker::new()?;
+    let app = NSApplication::sharedApplication(mtm);
+    let key: Option<Retained<NSWindow>> = app.keyWindow();
+    let picked = {
+        let panel = NSOpenPanel::openPanel(mtm);
+        panel.setCanChooseFiles(false);
+        panel.setCanChooseDirectories(true);
+        panel.setAllowsMultipleSelection(false);
+        panel.setResolvesAliases(true);
+        panel.setCanCreateDirectories(false);
+        panel.setMessage(Some(&NSString::from_str(message)));
+        panel.setPrompt(Some(&NSString::from_str("Choose")));
+        if let Some(text) = start.to_str() {
+            let url = NSURL::fileURLWithPath_isDirectory(&NSString::from_str(text), true);
+            panel.setDirectoryURL(Some(&url));
+        }
         if panel.runModal() == NSModalResponseOK {
             panel.URL().and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string()))
         } else {

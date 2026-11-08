@@ -762,20 +762,72 @@ export component AppWindow inherits Window {
         }
     }
 
-    // A saves folder macOS keeps closed (the Mac App Store's KotOR keeps its saves in its own
-    // container): Open Settings opens Full Disk Access, Not Now stops the question for those
-    // folders (2026-11-08, the maintainer approved the mock-up).
+    // A copy whose saves macOS keeps closed (the Mac App Store's KotOR keeps them in its own
+    // container), shown with every copy found so the player sees what works: a green check
+    // (its saves read), a grey question mark (no saves yet, nothing checked) or a red cross.
+    // Not Now stops the question for those folders, Choose the Folder opens the system's panel
+    // there, Open Settings opens Full Disk Access (2026-11-08, the maintainer approved the
+    // mock-ups).
     if App.overlay == 20: Overlay {
-        panel-width: 640px;
-        panel-height: 330px;
+        panel-width: 820px;
+        panel-height: 270px + App.copy-rows.length * 40px;
         VerticalLayout {
             spacing: 14px;
             Text { text: App.message-title; font-family: Theme.title-font; font-size: 28px * Theme.ts; color: Theme.text; wrap: word-wrap; }
+            VerticalLayout {
+                for row[i] in App.copy-rows: VerticalLayout {
+                    HorizontalLayout {
+                        height: 38px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 12px;
+                            background: row.state == 0 ? Theme.good : row.state == 2 ? Theme.danger : Theme.faint;
+                            if row.state == 0: Path {
+                                width: 24px; height: 24px;
+                                viewbox-width: 24; viewbox-height: 24;
+                                commands: "M 6.5 12.5 L 10.5 16.5 L 17.5 8";
+                                stroke: Theme.panel; stroke-width: 3px;
+                            }
+                            if row.state == 2: Path {
+                                width: 24px; height: 24px;
+                                viewbox-width: 24; viewbox-height: 24;
+                                commands: "M 8 8 L 16 16 M 16 8 L 8 16";
+                                stroke: Theme.panel; stroke-width: 3px;
+                            }
+                            if row.state == 1: Text {
+                                text: "?";
+                                font-family: Theme.title-font; font-size: 17px; font-weight: 700;
+                                color: Theme.panel;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                        }
+                        Text {
+                            text: row.name;
+                            font-family: Theme.list-font; font-size: 19px * Theme.ts;
+                            color: Theme.text;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                        Text {
+                            text: row.note;
+                            font-family: Theme.body-font; font-size: 15px * Theme.ts;
+                            color: row.state == 2 ? Theme.danger : Theme.muted;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                        }
+                    }
+                    if i < App.copy-rows.length - 1: Rectangle { height: 1px; background: Theme.row-line; }
+                }
+            }
             MessageText { }
             HorizontalLayout {
                 spacing: 14px;
                 alignment: end;
-                Button { width: 200px; text: "Not Now"; clicked => { App.blocked-not-now(); } }
+                Button { width: 170px; text: "Not Now"; clicked => { App.blocked-not-now(); } }
+                Button { width: 300px; text: "Choose the Folder"; clicked => { App.blocked-choose-folder(); } }
                 Button { width: 220px; kind: 0; text: "Open Settings"; clicked => { App.open-privacy-settings(); } }
             }
         }

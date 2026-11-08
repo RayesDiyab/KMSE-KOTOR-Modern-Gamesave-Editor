@@ -691,34 +691,77 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     tell_blocked_folders(ui, st);
 }
 
-/// The save folders the system keeps the editor out of (games::blocked_save_folders), said
-/// once each while the editor runs: on macOS the Mac App Store copies keep their saves in
-/// their own containers, which another app may read only with the player's leave. macOS shows
-/// no prompt for it, and an app cannot ask for it: the player turns the editor on under Full
-/// Disk Access. On macOS the pop-up opens that page (Open Settings) or stops asking about these
-/// folders (Not Now, kept in the settings); elsewhere it only says so.
+/// The copies of the games whose saves the system keeps the editor out of, said once each
+/// while the editor runs, with every copy found so the player sees what works
+/// (games::game_copies; 2026-11-08, the maintainer's design). On macOS the Mac App Store
+/// copies keep their saves in their own containers, which another app may read only with the
+/// player's leave; macOS shows no prompt for it here, and an app cannot ask for Full Disk
+/// Access itself. A copy the player said Not Now to (`quiet=` in the settings) is not asked
+/// about again.
 fn tell_blocked_folders(ui: &AppWindow, st: &State) {
-    let blocked = games::blocked_save_folders(&st.installs, st.game);
+    let copies = games::game_copies(&st.installs, &st.settings.added);
     let mut told = BLOCKED_TOLD.lock().unwrap();
-    let new: Vec<PathBuf> = blocked.into_iter().filter(|p| !told.contains(p) && !st.settings.quiet.contains(p)).collect();
+    let new: Vec<PathBuf> = copies
+        .iter()
+        .flat_map(|c| c.blocked.iter().cloned())
+        .filter(|p| !told.contains(p) && !st.settings.quiet.contains(p))
+        .collect();
     if new.is_empty() {
         return;
     }
     told.extend(new.iter().cloned());
     *BLOCKED_ASKED.lock().unwrap() = new.clone();
-    let list: Vec<String> = new.iter().map(|p| p.display().to_string()).collect();
-    let title = format!("{} saves the editor cannot read", st.game.title());
-    if cfg!(target_os = "macos") {
-        let app = ui.global::<App>();
-        app.set_message_title(s(&title));
-        app.set_message_body(s(format!(
-            "{}\n\nThe Mac App Store's {} keeps its saves here. macOS lets another app read them only with your permission, and it does not ask by itself. In System Settings, under Full Disk Access, turn KMSE on (add it with + if it is not listed), then open KMSE again.",
-            list.join("\n"),
-            st.game.title()
-        )));
-        app.set_overlay(20);
+    show_copies(ui, &copies);
+}
+
+/// Overlay 20: every copy with its state, why the red ones cannot be read, and the buttons.
+fn show_copies(ui: &AppWindow, copies: &[games::GameCopy]) {
+    use games::CopyState;
+    let rows: Vec<CopyRow> = copies
+        .iter()
+        .map(|c| CopyRow {
+            name: s(c.name()),
+            note: s(match c.state {
+                CopyState::Saves(1) => "1 save".to_string(),
+                CopyState::Saves(n) => format!("{} saves", n),
+                CopyState::NoSaves => "no saves yet".to_string(),
+                CopyState::Blocked => "cannot be read".to_string(),
+            }),
+            state: match c.state {
+                CopyState::Saves(_) => 0,
+                CopyState::NoSaves => 1,
+                CopyState::Blocked => 2,
+            },
+        })
+        .collect();
+    let red: Vec<&games::GameCopy> = copies.iter().filter(|c| c.state == CopyState::Blocked).collect();
+    let names: Vec<String> = red.iter().map(|c| format!("The {}", c.name().replacen("App Store", "App Store's", 1))).collect();
+    let app_store = red.iter().all(|c| c.source == "App Store");
+    let body = if cfg!(target_os = "macos") && app_store {
+        format!(
+            "{} keeps its saves in its own folder, which macOS lets another app read only with your permission, and it does not ask by itself. Choose the folder to let KMSE in now, or in System Settings, under Full Disk Access, turn KMSE on (add it with + if it is not listed), then open KMSE again.",
+            names.join(" and ")
+        )
+    } else if cfg!(target_os = "macos") {
+        "macOS did not let KMSE read where these saves are. Choose the folder to let KMSE in now, or in System Settings, under Full Disk Access, turn KMSE on (add it with + if it is not listed), then open KMSE again.".to_string()
     } else {
-        message(ui, &title, &format!("{}\n\nThe system did not let the editor read it, so saves there are not listed. Use Add a Save Folder to pick the saves folder, or give your account access to it.", list.join("\n")));
+        "The system did not let KMSE read where these saves are. Choose the folder, or give your account access to it.".to_string()
+    };
+    let app = ui.global::<App>();
+    app.set_copy_rows(model(rows));
+    app.set_message_title(s("Some saves cannot be read"));
+    app.set_message_body(s(body));
+    app.set_overlay(20);
+}
+
+/// Where the folder panel opens for a closed folder: inside a container, its Application
+/// Support folder, where the game keeps its own folder with `saves` in it.
+fn panel_start(blocked: &Path) -> PathBuf {
+    let support = blocked.join("Library").join("Application Support");
+    if blocked.file_name().map_or(false, |n| n == "Data") {
+        support
+    } else {
+        blocked.to_path_buf()
     }
 }
 
@@ -6304,6 +6347,44 @@ fn main() {
         }
         st.settings.store();
         u.global::<App>().set_overlay(0);
+    });
+    on!(ui, state, on_blocked_choose_folder, |u, st| {
+        let Some(first) = BLOCKED_ASKED.lock().unwrap().first().cloned() else {
+            u.global::<App>().set_overlay(0);
+            return;
+        };
+        u.global::<App>().set_overlay(0);
+        let start = panel_start(&first);
+        let ask = "Choose the game's saves folder, or the folder that holds it";
+        #[cfg(target_os = "macos")]
+        let picked = macos::pick_folder_at(ask, &start);
+        #[cfg(not(target_os = "macos"))]
+        let picked = { let _ = &start; pick_folder(&u, ask) };
+        let Some(picked) = picked else { return };
+        // the game's own folder holds `saves`: that is the one to add
+        let folder = std::fs::read_dir(&picked)
+            .ok()
+            .and_then(|d| d.filter_map(|e| e.ok()).find(|e| e.file_name().to_string_lossy().eq_ignore_ascii_case("saves") && e.path().is_dir()).map(|e| e.path()))
+            .unwrap_or(picked.clone());
+        if std::fs::read_dir(&folder).is_err() {
+            message(&u, "KMSE still cannot read it", "macOS did not let KMSE read the folder you chose. In System Settings, under Full Disk Access, turn KMSE on (add it with + if it is not listed), then open KMSE again.");
+            return;
+        }
+        if !st.settings.added.contains(&folder) {
+            st.settings.added.push(folder.clone());
+            st.settings.store();
+        }
+        BLOCKED_ASKED.lock().unwrap().clear();
+        st.installs = installs_for(&st.settings);
+        fill_saves(&u, st);
+        // the list again, the copy now green, so the player sees it worked
+        let copies = games::game_copies(&st.installs, &st.settings.added);
+        show_copies(&u, &copies);
+        let app = u.global::<App>();
+        if copies.iter().all(|c| c.state != games::CopyState::Blocked) {
+            app.set_message_title(s("Every copy can be read"));
+            app.set_message_body(s(format!("KMSE can read {} now. It is kept in Settings under the folders you added.", folder.display())));
+        }
     });
     on!(ui, state, on_open_privacy_settings, |u, _st| {
         BLOCKED_ASKED.lock().unwrap().clear();

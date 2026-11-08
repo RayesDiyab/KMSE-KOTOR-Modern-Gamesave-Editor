@@ -461,3 +461,72 @@ fn a_game_with_a_text_per_language_is_read_in_english() {
     fs::write(files.join("dialog.tlk"), b"TLK V3.0\x02\0\0\0").unwrap();
     assert_eq!(games::tlk_path(&files), Some(files.join("dialog.tlk")));
 }
+
+/// The copies on this Mac and how each stands, as the pop-up lists them: every copy found is
+/// one row (the Mac App Store copies Spotlight finds in other folders share one container, so
+/// one row), a closed container is a red row, and the Steam copies' saves are counted.
+#[cfg(target_os = "macos")]
+#[test]
+fn each_copy_on_this_mac_is_one_row() {
+    let installs = games::find_installs(&[]);
+    let copies = games::game_copies(&installs, &[]);
+    for c in &copies {
+        println!("{:<22} {:?} {:?}", c.name(), c.state, c.blocked);
+    }
+    let mut names: Vec<String> = copies.iter().map(|c| c.name()).collect();
+    names.sort();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(names.len(), before, "one row per copy");
+    for c in &copies {
+        assert_eq!(c.state == games::CopyState::Blocked, !c.blocked.is_empty(), "{}", c.name());
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        let container = home.join("Library/Containers/com.aspyr.kotor/Data");
+        let closed = matches!(fs::read_dir(&container), Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied);
+        if closed && installs.iter().any(|i| i.game == Game::K1 && i.source == "Mac App Store") {
+            let row = copies.iter().find(|c| c.name() == "App Store KotOR").expect("the App Store KotOR row");
+            assert_eq!(row.state, games::CopyState::Blocked);
+            assert!(row.blocked.contains(&container));
+        }
+    }
+}
+
+/// A folder inside a closed place that was picked and can be read now (Choose the Folder)
+/// opens that copy: its row is no longer red, and the saves there count for it.
+#[cfg(unix)]
+#[test]
+fn a_picked_folder_opens_a_closed_copy() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = temp("copies");
+    let files = bundle(&dir.join("KOTOR2.app"), "com.aspyr.kotor2", "GameData");
+    game_files(&files, "chitin.key", "001ebo");
+    let cloud = dir.join("cloudsaves");
+    let account = cloud.join("1");
+    fs::create_dir_all(&account).unwrap();
+    let install = games::Install { game: Game::K2, path: files.clone(), source: "Steam".into() };
+    // no saves yet: grey
+    let rows = games::game_copies(&[install.clone()], &[]);
+    let row = rows.iter().find(|c| c.name() == "Steam KotOR II").unwrap();
+    assert_eq!(row.state, games::CopyState::NoSaves);
+    // closed: red
+    fs::set_permissions(&account, fs::Permissions::from_mode(0o000)).unwrap();
+    let closed = fs::read_dir(&account).is_err();
+    let rows = games::game_copies(&[install.clone()], &[]);
+    fs::set_permissions(&account, fs::Permissions::from_mode(0o755)).unwrap();
+    if closed {
+        let row = rows.iter().find(|c| c.name() == "Steam KotOR II").unwrap();
+        assert_eq!(row.state, games::CopyState::Blocked);
+        assert_eq!(row.blocked, vec![account.clone()]);
+    }
+    // a save there, the folder picked and readable: counted, not red
+    let save = account.join("000001 - Game0");
+    fs::create_dir_all(&save).unwrap();
+    let mut root = kse_core::formats::gff::Struct::new(u32::MAX);
+    root.fields.push(("SAVEGAMENAME".into(), kse_core::formats::gff::Value::String(b"T".to_vec())));
+    root.fields.push(("PCNAME".into(), kse_core::formats::gff::Value::String(b"Exile".to_vec())));
+    fs::write(save.join("savenfo.res"), kse_core::formats::gff::Gff { file_type: *b"NFO ", root }.write()).unwrap();
+    let rows = games::game_copies(&[install], &[account.clone()]);
+    let row = rows.iter().find(|c| c.name() == "Steam KotOR II").unwrap();
+    assert_eq!(row.state, games::CopyState::Saves(1));
+}

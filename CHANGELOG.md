@@ -24,10 +24,12 @@ CHANGELOG.
   - KotOR II Steam's `cloudsaves` beside `KOTOR2.app` are listed. The Mac App Store's
     KotOR II, which keeps a `dialog.tlk` per language, is read in English, and a renamed
     companion's name is written in English.
-  - A save folder macOS will not let the editor read (another app's container) is named in a
-    pop-up, not skipped with no word. Its Open Settings button opens Privacy & Security, Full
-    Disk Access, where the player can turn KMSE on; Not Now stops the question for that
-    folder (kept in the settings as `quiet=`).
+  - When macOS will not let the editor read a copy's saves (the Mac App Store's KotOR keeps
+    them in its own container), a pop-up lists every copy found: a green check where its
+    saves are read (with how many), a grey question mark where there are no saves yet, a red
+    cross where they cannot be read. Choose the Folder opens macOS's folder panel there, and
+    a folder picked that can then be read is added; Open Settings opens Privacy & Security,
+    Full Disk Access; Not Now stops the question for those folders (kept as `quiet=`).
   - The game is seen running on macOS by its app (`AppBundleExe`, `KOTOR_Exe`, `KOTOR2`),
     and the Windows game under Wine or CrossOver by its arguments. When the editor cannot
     tell, it does not write.
