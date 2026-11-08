@@ -26,6 +26,13 @@ miniz_oxide = "0.9"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
 
+# macOS: the open panel that takes a game's app bundle (src/macos.rs). The same crates
+# and versions rfd already uses there, so nothing new is downloaded or built.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSURL", "NSArray"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSOpenPanel", "NSSavePanel", "NSPanel", "NSWindow", "NSResponder", "NSView", "NSControl", "NSButton"] }
+
 [build-dependencies]
 slint-build = "1.18"
 miniz_oxide = "0.9"

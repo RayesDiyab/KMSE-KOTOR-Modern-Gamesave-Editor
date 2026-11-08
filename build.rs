@@ -41,6 +41,9 @@ fn kotor_dir() -> Option<PathBuf> {
     ];
     for s in steam {
         tries.push(s.join("steamapps/common/swkotor"));
+        // macOS: the files are inside the app (Aspyr's port; its live_1c.bik is the same shot
+        // at 640 x 272, and the committed outline fits it, checked 2026-11-08)
+        tries.push(s.join("steamapps/common/swkotor/Knights of the Old Republic.app/Contents/Assets"));
         if let Ok(vdf) = std::fs::read_to_string(s.join("steamapps/libraryfolders.vdf")) {
             for line in vdf.lines() {
                 let line = line.trim();
@@ -52,6 +55,7 @@ fn kotor_dir() -> Option<PathBuf> {
         }
     }
     tries.push(PathBuf::from(r"C:\GOG Games\Star Wars - KotOR"));
+    tries.push(PathBuf::from("/Applications/Knights of the Old Republic.app/Contents/Assets"));
     tries.into_iter().find(|d| movie(d))
 }
 

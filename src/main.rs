@@ -6,6 +6,9 @@
 
 slint::include_modules!();
 
+#[cfg(target_os = "macos")]
+mod macos;
+
 use kse_core::area;
 use kse_core::catalog::{self, Catalog, ItemTemplate};
 use kse_core::creature;
@@ -127,32 +130,11 @@ fn open_path(path: &Path) {
     let _ = std::process::Command::new(program).arg(path).spawn();
 }
 
-/// Whether the game is running, so a save is not changed under it.
+/// Whether the game is running, so a save is not changed under it (games::game_running: on
+/// Windows tasklist, on macOS the programs' paths and bundles, elsewhere pgrep; a check that
+/// fails counts as running).
 fn game_running(game: Game) -> bool {
-    let names: &[&str] = match game {
-        Game::K1 => &["swkotor.exe", "KOTOR", "swkotor"],
-        Game::K2 => &["swkotor2.exe", "KOTOR2", "swkotor2"],
-    };
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: no console flashes up.
-        // By its full path: a bare name is looked for in the program's own folder first, so a
-        // tasklist.exe beside the editor (in Downloads) would have run (2026-11-07 audit).
-        let out = std::process::Command::new(windows_tool("System32\\tasklist.exe"))
-            .args(["/FI", &format!("IMAGENAME eq {}", names[0]), "/NH"])
-            .creation_flags(0x0800_0000)
-            .output();
-        // A check that failed says nothing, so it counts as running: nothing is written.
-        return out.map_or(true, |o| !o.status.success() || String::from_utf8_lossy(&o.stdout).to_ascii_lowercase().contains(names[0]));
-    }
-    #[cfg(not(windows))]
-    {
-        // Under Proton the process is swkotor.exe. pgrep exits 1 for no match, above that it failed.
-        return names.iter().any(|n| {
-            std::process::Command::new("pgrep").args(["-x", n]).output().map_or(true, |o| o.status.code() != Some(1))
-        });
-    }
+    games::game_running(game)
 }
 
 // ---- settings, kept beside the backups ----
@@ -698,6 +680,28 @@ fn fill_saves(ui: &AppWindow, st: &mut State) {
     app.set_selected_save(st.selected as i32);
     fill_preview(ui, st);
     load_shots(ui, st);
+    tell_blocked_folders(ui, st);
+}
+
+/// The save folders the system keeps the editor out of (games::blocked_save_folders), said
+/// once each while the editor runs: on macOS the Mac App Store copies keep their saves in
+/// their own containers, which another app may read only with the player's leave.
+fn tell_blocked_folders(ui: &AppWindow, st: &State) {
+    static TOLD: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    let blocked = games::blocked_save_folders(&st.installs, st.game);
+    let mut told = TOLD.lock().unwrap();
+    let new: Vec<PathBuf> = blocked.into_iter().filter(|p| !told.contains(p)).collect();
+    if new.is_empty() {
+        return;
+    }
+    told.extend(new.iter().cloned());
+    let list: Vec<String> = new.iter().map(|p| p.display().to_string()).collect();
+    let how = if cfg!(target_os = "macos") {
+        "macOS did not let the editor read it, so saves there are not listed. If macOS asked whether the editor may access data from other apps, allow it and open the editor again; or allow it in System Settings, Privacy & Security; or use Add a Save Folder and pick the saves folder yourself."
+    } else {
+        "The system did not let the editor read it, so saves there are not listed. Use Add a Save Folder to pick the saves folder, or give your account access to it."
+    };
+    message(ui, &format!("{} saves the editor cannot read", st.game.title()), &format!("{}\n\n{}", list.join("\n"), how));
 }
 
 /// Counts the save lists filled, so a picture knows when its row number has gone out of date.
@@ -3914,6 +3918,27 @@ macro_rules! on {
 /// A folder picked in the system's dialog, which belongs to the window: the window takes no
 /// clicks while it is open (a click on a save row could otherwise wait and land on a list the
 /// dialog's result has changed).
+/// A game or a folder picked: on macOS the game's app bundle can be picked as well as a folder
+/// (macos.rs; a folder picker cannot select an app), elsewhere the folder dialog. Anything
+/// else picked (a single file) is said and comes back as None.
+fn pick_game_place(ui: &AppWindow, title: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = ui;
+        let picked = macos::pick_game_or_folder(title)?;
+        if picked.is_dir() {
+            return Some(picked);
+        }
+        message(ui, "That is not a folder", "Pick a folder, or the game's app (Knights of the Old Republic or KOTOR2).");
+        None
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        pick_folder(ui, title)
+    }
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn pick_folder(ui: &AppWindow, title: &str) -> Option<PathBuf> {
     use slint::winit_030::WinitWindowAccessor;
     let owned = ui.window().with_winit_window(|w| rfd::FileDialog::new().set_parent(w).set_title(title).pick_folder());
@@ -4367,6 +4392,8 @@ fn report_panics() {
 fn main() {
     report_panics();
     let ui = AppWindow::new().expect("the window could not be made");
+    #[cfg(target_os = "macos")]
+    macos::route_quit_through_close();
     ui.global::<App>().set_gm_glow(glow_image());
     {
         // A mouse press anywhere first takes the focus out of a text box, so a number typed
@@ -4514,13 +4541,13 @@ fn main() {
         }
     });
     on!(ui, state, on_add_save_folder, |u, st| {
-        if let Some(folder) = pick_folder(&u, "Pick a save, a saves folder or a game folder") {
+        if let Some(folder) = pick_game_place(&u, "Pick a save, a saves folder or a game folder") {
             if !st.settings.added.contains(&folder) {
                 st.settings.added.push(folder.clone());
                 st.settings.store();
             }
             st.installs = installs_for(&st.settings);
-            if let Some(g) = games::identify(&folder).or_else(|| save::peek_game(&folder)) {
+            if let Some(g) = games::resource_root(&folder).and_then(|r| games::identify(&r)).or_else(|| save::peek_game(&folder)) {
                 st.game = g;
             }
             fill_saves(&u, st);
@@ -4528,7 +4555,19 @@ fn main() {
     });
 
     on!(ui, state, on_choose_game_folder, |u, st| {
-        let Some(folder) = pick_folder(&u, "Pick the game's folder (the one with chitin.key)") else { return };
+        let title = if cfg!(target_os = "macos") { "Pick the game's app, or the folder with chitin.key" } else { "Pick the game's folder (the one with chitin.key)" };
+        let Some(picked) = pick_game_place(&u, title) else { return };
+        // on macOS the app bundle (or the folder Steam keeps it in) stands for the game files
+        // inside it; a folder whose files are not all there is refused here, not later
+        let Some(folder) = games::resource_root(&picked) else {
+            let note = if cfg!(target_os = "macos") {
+                "No game files were found there: KotOR's chitin.key, dialog.tlk and modules folder. Pick Knights of the Old Republic.app or KOTOR2.app, the folder Steam keeps it in, or the folder that holds chitin.key."
+            } else {
+                "Pick the folder that holds chitin.key, dialog.tlk and the modules folder."
+            };
+            message(&u, "That is not a KotOR folder", note);
+            return;
+        };
         match games::identify(&folder) {
             Some(game) => {
                 // a folder the install list leaves out (game files but no program the editor
@@ -4541,7 +4580,7 @@ fn main() {
                 }
                 let same = |p: &Path| std::fs::canonicalize(p).ok() == std::fs::canonicalize(&folder).ok();
                 if !installs_for(&trial).iter().any(|i| i.game == game && same(&i.path)) {
-                    message(&u, "That folder could not be used", &format!("It has {}'s files, but not the game's program for Windows, so the editor cannot tell which game it is or read it the game's way. Pick the folder with swkotor{}.exe.", game.title(), if game == Game::K2 { "2" } else { "" }));
+                    message(&u, "That folder could not be used", &format!("It has {}'s files, but the editor cannot read them as an install of the game. Pick the folder with swkotor{}.exe, or on a Mac the game's app.", game.title(), if game == Game::K2 { "2" } else { "" }));
                     return;
                 }
                 match game {
@@ -4559,7 +4598,7 @@ fn main() {
                 st.selected = 0;
                 fill_saves(&u, st);
             }
-            None => message(&u, "That is not a KotOR folder", "Pick the folder that holds chitin.key and the game's program."),
+            None => message(&u, "That is not a KotOR folder", "Its game files do not say which KotOR they are. Pick the folder that holds chitin.key and the game's program, or on a Mac the game's app."),
         }
     });
 
@@ -4632,9 +4671,9 @@ fn main() {
         }
         let t = text.to_string();
         let who = st.who();
-        let language = st.data().map_or(0, |d| d.language());
+        let languages = st.data().map_or(vec![0], |d| d.name_languages());
         if let Some(save) = st.save.as_mut() {
-            save.edit(who, "name", |c| creature::set_name(c, &t, language));
+            save.edit(who, "name", |c| creature::set_name_in(c, &t, &languages));
             let bytes = kse_core::text::encode(&t);
             if who == Who::Player && save.party.root.get("PT_PCNAME").is_some() {
                 save.edit_party_table("name", |p| p.set("PT_PCNAME", Value::String(bytes.clone())));
