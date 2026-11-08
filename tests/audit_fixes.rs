@@ -32,7 +32,7 @@ fn files(dir: &Path) -> Vec<(String, Vec<u8>)> {
 /// A copy of a normal save of the PC, under a folder of its own.
 fn copy(label: &str) -> Option<(PathBuf, PathBuf)> {
     let installs = find_installs(&[]);
-    let folder = find_saves(&installs, Game::K1, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path))?;
+    let folder = find_saves(&installs, Game::K1, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok())?;
     let root = std::env::temp_dir().join("kmse-tests").join("audit").join(label);
     let _ = fs::remove_dir_all(&root);
     let work = root.join("000500 - Game499");
@@ -448,7 +448,7 @@ fn backups_stay_out_of_what_steam_syncs() {
 fn k2_start(label: &str) -> Option<(Save, GameData, Vec<serde_json::Value>)> {
     let installs = find_installs(&[]);
     let install = installs.iter().find(|i| i.game == Game::K2)?;
-    let folder = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path)).find(|f| {
+    let folder = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("101per"))
     })?;
     let work = std::env::temp_dir().join("kmse-tests").join("audit").join(label);

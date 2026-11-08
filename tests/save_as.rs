@@ -33,7 +33,7 @@ fn a_new_save_leaves_the_original_as_it_was() {
     let installs = find_installs(&[]);
     let mut done = 0;
     for game in [Game::K1, Game::K2] {
-        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).next() else { continue };
+        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).next() else { continue };
         let root: PathBuf = std::env::temp_dir().join("kmse-tests").join("save-as").join(format!("{:?}", game));
         let _ = fs::remove_dir_all(&root);
         let original = root.join("000500 - Game499");

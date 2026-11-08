@@ -247,7 +247,9 @@ fn finishing_carths_quest_from_the_leviathan_skips_his_talks() {
     let Some((data, saves)) = setup(Game::K1) else { return eprintln!("KotOR is not installed or has no saves here: nothing checked") };
     let tag = "k_swg_carthtalk";
     let mut checked = 0;
-    for original in saves.iter().filter(|s| s.player().is_some()).take(3) {
+    // saves with story values: a test save made by hand without GLOBALVARS.res (KMRP's, on
+    // the maintainer's Mac) has none for the talks to change
+    for original in saves.iter().filter(|s| s.player().is_some() && s.globals.is_some()).take(3) {
         // what finishing does: XP, credits and the story values (the talks give no XP or
         // credits, but each sets Carth's own values)
         let gain = |stage: i64| -> (i64, i64, Vec<String>) {

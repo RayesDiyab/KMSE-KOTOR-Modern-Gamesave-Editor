@@ -23,7 +23,7 @@ fn the_backup_is_made_on_opening_and_checked_on_saving() {
     let installs = find_installs(&[]);
     let mut done = 0;
     for game in [Game::K1, Game::K2] {
-        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path)).next() else { continue };
+        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).next() else { continue };
         let root: PathBuf = std::env::temp_dir().join("kmse-tests").join("backup-on-open").join(format!("{:?}", game));
         let _ = fs::remove_dir_all(&root);
         let original = root.join("saves").join("000500 - Game499");

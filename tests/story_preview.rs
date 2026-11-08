@@ -46,7 +46,7 @@ fn preview_matches_apply_and_preserves_pending_edits_and_files() {
     for game in [Game::K1, Game::K2] {
         let (Some(install), Some(folder)) = (
             installs.iter().find(|i| i.game == game),
-            find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+            find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
                 Save::open(&f.path)
                     .ok()
                     .and_then(|s| s.player().cloned())

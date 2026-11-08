@@ -50,6 +50,15 @@ fn every_save_round_trips() {
                 }
             }
             let opened = Save::open(&save.path).map(|s| s.npcs().len());
+            // A save folder Steam Cloud has not finished bringing down (seen on macOS
+            // 2026-11-08: Windows saves arriving one file at a time, some without SAVEGAME.sav)
+            // is refused by Save::open with the file it lacks, as it should be. Said, not failed.
+            if let Err(e) = &opened {
+                if e.ends_with(" is missing") {
+                    println!("{:?} {:?}: incomplete, not checked: {}", game, save.path.file_name().unwrap(), e);
+                    continue;
+                }
+            }
             println!(
                 "{:?} {:?}: {} GFFs, {} byte-identical, opens: {:?}",
                 game,

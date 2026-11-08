@@ -348,7 +348,9 @@ fn a_save_of_the_other_game_in_an_install_is_not_listed() {
     write_nfo(&dir.join("saves").join("000001 - K1"), Game::K1);
     write_nfo(&dir.join("saves").join("000002 - K2"), Game::K2);
     let install = Install { game: Game::K1, path: games::clean(&dir), source: "Test".into() };
-    let k1 = games::find_saves(&[install.clone()], Game::K1, &[]);
+    // only this test's folder: the Mac ports' own save folders are always searched too, and
+    // on a Mac that has played KotOR they hold real saves (macOS port, 2026-11-08)
+    let k1: Vec<_> = games::find_saves(&[install.clone()], Game::K1, &[]).into_iter().filter(|f| f.path.starts_with(&install.path)).collect();
     assert_eq!(k1.len(), 1, "{:?}", k1);
     assert!(k1[0].path.ends_with("000001 - K1"));
 }
@@ -369,7 +371,7 @@ fn an_added_save_spelled_differently_is_listed_once() {
         spellings.push(parent.to_lowercase());
     }
     for s in spellings {
-        let found = games::find_saves(&[install.clone()], Game::K1, &[PathBuf::from(&s)]);
+        let found: Vec<_> = games::find_saves(&[install.clone()], Game::K1, &[PathBuf::from(&s)]).into_iter().filter(|f| games::clean(&f.path).starts_with(&install.path)).collect();
         assert_eq!(found.len(), 1, "{} listed it {} times", s, found.len());
         assert_eq!(found[0].kind, SaveKind::Local, "{}", s);
     }

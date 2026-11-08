@@ -40,7 +40,7 @@ fn edits_survive_a_write() {
         let cat = Catalog::build(&data);
         let templates = catalog::item_templates(&data);
         assert!(!templates.is_empty(), "{:?}: no item templates", game);
-        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let work = scratch(&format!("{:?}-{}", game, name));
             copy_dir(&folder.path, &work);
@@ -114,7 +114,9 @@ fn edits_survive_a_write() {
             assert_eq!(creature::attribute(p, "Dex"), creature::attribute(before.player().unwrap(), "Dex"));
             assert_eq!(after.party_int("PT_PLAYEDSECONDS"), before.party_int("PT_PLAYEDSECONDS"));
             // The backup is the save as it was.
-            let backup = fs::read_dir(backups.join(work.file_name().unwrap())).unwrap().next().unwrap().unwrap().path();
+            // the backup's folder, not its `.source` record beside it: APFS lists a folder in no
+            // set order, where NTFS lists by name (the record came first on macOS)
+            let backup = fs::read_dir(backups.join(work.file_name().unwrap())).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).find(|p| p.is_dir()).unwrap();
             let old = Save::open(&backup).unwrap();
             assert_eq!(creature::attribute(old.player().unwrap(), "Str"), creature::attribute(before.player().unwrap(), "Str"));
             println!("{:?} {}: every change read back", game, name);
@@ -130,7 +132,7 @@ fn a_new_class_brings_its_level_record() {
     let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
     let data = GameData::open(Game::K1, &install.path);
     let cat = Catalog::build(&data);
-    for folder in find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+    for folder in find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
         let save = Save::open(&folder.path).unwrap();
         let mut pc = save.player().unwrap().clone();
         if creature::classes(&pc).len() != 1 {
@@ -158,7 +160,7 @@ fn kse_features_survive_a_write() {
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
         let cat = Catalog::build(&data);
-        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let work = scratch(&format!("kse-{:?}-{}", game, name));
             copy_dir(&folder.path, &work);
@@ -222,7 +224,7 @@ fn spawned_creatures_survive_a_write() {
         let data = GameData::open(game, &install.path);
         let resref = data.resource_names("utc", RES_TYPE_UTC).into_iter().next().expect("no creature templates");
         let utc = data.gff(&resref, "utc", RES_TYPE_UTC).unwrap();
-        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).take(4) {
+        for folder in find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).take(4) {
             let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
             let work = scratch(&format!("spawn-{:?}-{}", game, name));
             copy_dir(&folder.path, &work);
@@ -279,7 +281,7 @@ fn recruit_from_template_survives_a_write() {
     let data = GameData::open(Game::K1, &install.path);
     let Some(carth) = data.gff("p_carth", "utc", RES_TYPE_UTC) else { return };
     let mut checked = 0;
-    for folder in find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)) {
+    for folder in find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()) {
         let name = folder.path.file_name().unwrap().to_string_lossy().to_string();
         let work = scratch(&format!("recruit-{}", name));
         copy_dir(&folder.path, &work);
@@ -311,7 +313,7 @@ fn played_through_copies_of_every_module() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
     let data = GameData::open(Game::K1, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).next() else { return };
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).next() else { return };
     let save = Save::open(&folder.path).unwrap();
     let (ifo, base) = save.current_module_parts().unwrap();
     let mut built = 0;
@@ -378,7 +380,7 @@ fn skip_whole_game_on_each_side() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
     let data = GameData::open(Game::K1, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("end_m01"))
     }) else {
         return;
@@ -421,7 +423,7 @@ fn skip_whole_k2_game_on_each_side() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K2) else { return };
     let data = GameData::open(Game::K2, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+    let Some(folder) = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("101per"))
     }) else {
         return;
@@ -485,7 +487,7 @@ fn a_chapter_does_not_pay_twice() {
     for (game, start, chapter) in [(Game::K1, "end_m01", "Dantooine"), (Game::K2, "101per", "Telos")] {
         let Some(install) = installs.iter().find(|i| i.game == game) else { continue };
         let data = GameData::open(game, &install.path);
-        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+        let Some(folder) = find_saves(&installs, game, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
             Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with(start))
         }) else {
             continue;
@@ -512,7 +514,7 @@ fn skip_to_a_quest_stage() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
     let data = GameData::open(Game::K1, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("end_m01"))
     }) else {
         return;
@@ -544,7 +546,7 @@ fn go_back_to_a_chapter() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K1) else { return };
     let data = GameData::open(Game::K1, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+    let Some(folder) = find_saves(&installs, Game::K1, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("end_m01"))
     }) else {
         return;
@@ -591,7 +593,7 @@ fn go_back_takes_back_the_masters() {
     let installs = find_installs(&[]);
     let Some(install) = installs.iter().find(|i| i.game == Game::K2) else { return };
     let data = GameData::open(Game::K2, &install.path);
-    let Some(folder) = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path)).find(|f| {
+    let Some(folder) = find_saves(&installs, Game::K2, &[]).into_iter().filter(|f| !kse_core::save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).find(|f| {
         Save::open(&f.path).map_or(false, |s| s.module_name().to_ascii_lowercase().starts_with("101per"))
     }) else {
         return;

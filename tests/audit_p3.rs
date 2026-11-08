@@ -17,7 +17,7 @@ use kse_core::save::{self, Save, Who};
 
 fn first_save(game: Game, ok: &dyn Fn(&Save) -> bool) -> Option<Save> {
     let installs = find_installs(&[]);
-    find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path)).filter_map(|f| Save::open(&f.path).ok()).find(|s| ok(s))
+    find_saves(&installs, game, &[]).into_iter().filter(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok()).filter_map(|f| Save::open(&f.path).ok()).find(|s| ok(s))
 }
 
 #[test]

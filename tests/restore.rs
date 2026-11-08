@@ -46,7 +46,7 @@ struct Lab {
 
 fn lab(game: Game, test: &str) -> Option<Lab> {
     let installs = find_installs(&[]);
-    let folder = find_saves(&installs, game, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path))?;
+    let folder = find_saves(&installs, game, &[]).into_iter().find(|f| !save::player_outside_archive(&f.path) && kse_core::save::Save::open(&f.path).is_ok())?;
     let root = std::env::temp_dir().join("kmse-tests").join("restore").join(test).join(format!("{:?}", game));
     let _ = fs::remove_dir_all(&root);
     let save = root.join("saves").join("000500 - Game499");
