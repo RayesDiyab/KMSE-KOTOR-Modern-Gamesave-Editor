@@ -2,6 +2,7 @@
 # Builds the KOTOR Modern Gamesave Editor for Linux into dist/ beside this file:
 #   dist/kotor-modern-gamesave-editor
 # On macOS it runs build-macos.sh instead (dist/KMSE.app, a DMG and a ZIP; see there).
+# The Linux AppImage is made by build-linux.sh beside this file.
 #
 #   sh build.sh
 #

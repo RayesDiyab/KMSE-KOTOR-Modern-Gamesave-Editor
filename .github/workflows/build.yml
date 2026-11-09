@@ -1,4 +1,5 @@
-# Builds and tests the KOTOR Modern Gamesave Editor on Windows, Linux and macOS.
+# Builds and tests the KOTOR Modern Gamesave Editor on Windows, Linux and macOS, and makes
+# the macOS app and the Linux AppImage.
 #
 # The runners have no KotOR install, so the tests that read real saves find none and
 # pass empty. The window's fonts are committed (fonts/, OFL 1.1), so the
@@ -56,6 +57,25 @@ jobs:
             build/target/release/kotor-modern-gamesave-editor
             build/target/release/kotor-modern-gamesave-editor.exe
           if-no-files-found: ignore
+
+  # Linux: the AppImage as a player gets it, from the same script as a release. Built on the
+  # oldest Ubuntu GitHub offers, as the program runs on the glibc it was built with or newer
+  # (ubuntu-latest's build needs glibc 2.43, newer than most Linux desktops have). The tests
+  # run in the build job above.
+  appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Linux window libraries
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libfontconfig1-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev
+      - name: AppImage
+        run: sh build-linux.sh --no-tests
+      - uses: actions/upload-artifact@v7
+        with:
+          name: KMSE-Linux
+          path: dist/KMSE-Linux-*-x86_64.AppImage
+          if-no-files-found: error
 
   links:
     name: Documentation links

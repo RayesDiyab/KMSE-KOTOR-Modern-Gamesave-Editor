@@ -110,11 +110,14 @@ sh build-macos.sh
 ```sh
 # Linux: tests, then dist/kotor-modern-gamesave-editor.
 sh build.sh
+# Or as an AppImage: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage.
+sh build-linux.sh
 ```
 
 On Linux the window also needs the usual X11, Wayland and fontconfig development packages;
-the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux build has not been run by the
-maintainer yet. The macOS build and what was tested on a Mac are in
+the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux build has not been run on a
+Linux desktop by the maintainer yet; GitHub's workflow builds and tests it on Ubuntu and
+makes the AppImage. The macOS build and what was tested on a Mac are in
 [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md). The app it makes is
 signed ad hoc, not with a Developer ID, so it is not ready to hand out yet.
 

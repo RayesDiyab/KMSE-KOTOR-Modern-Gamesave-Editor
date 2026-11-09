@@ -6,6 +6,18 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **Linux AppImage** (2026-11-09). `sh build-linux.sh` runs the tests, builds the program and
+  packs it as `dist/KMSE-Linux-<version>-x86_64.AppImage`, the way KMRP packs its Linux
+  installer: the program, a launcher, a desktop entry and the window's icon, made into one
+  file by appimagetool 1.9.1 (its SHA-256 checked). It carries the program alone; fontconfig,
+  X11 or Wayland and xkbcommon come from the system ([CONTRIBUTING.md](CONTRIBUTING.md),
+  "Commands"). The GitHub workflow's new `appimage` job builds it on Ubuntu 22.04, so it runs
+  with glibc 2.35 or newer, and uploads it as `KMSE-Linux`. **Checked:** in WSL's Ubuntu
+  26.04, the script packed the program from the workflow's Linux build into a 10.1 MB
+  AppImage holding the same program byte for byte, and the AppImage opened the editor's
+  window under WSLg. **Not checked:** the `appimage` job itself (not pushed yet), a Linux
+  desktop, the file dialog (WSLg has no D-Bus session for the portal), Wayland.
+
 - **Character and Map tidied** (2026-11-08, the maintainer). An attribute's modifier has room
   for three characters at every text size ("+22" showed as "+2."). The level records' warning
   under Heal Everyone, one orange line cut off, is an orange "i" in a circle that shows the

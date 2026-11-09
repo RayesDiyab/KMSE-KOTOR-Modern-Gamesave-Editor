@@ -23,7 +23,7 @@ bugs they reported. Untested parts are marked **untested** where they are descri
 | Toolchain | rustc 1.99.1 (2026-10-13), cargo 1.99.1 |
 | Windows build | `dist\KOTOR Modern Gamesave Editor.exe` from `build.ps1` (size and SHA-256 printed by the script) |
 | macOS build | `dist/KMSE.app` from `build-macos.sh` (Universal 2); built and run on an Apple M5 Mac, macOS 27.0.1, 2026-11-08 ([macOS audit](audits/MACOS_PORT_AUDIT.md)). *Corrected 2026-11-08:* until then this row said the Linux and macOS builds were not built or run |
-| Linux build | `build.sh`; **not built or run yet** (no Linux machine here) |
+| Linux build | `build.sh`, or `build-linux.sh` for `dist/KMSE-Linux-<version>-x86_64.AppImage`; built and tested on GitHub's Ubuntu runner; the AppImage opened its window under WSLg (Ubuntu 26.04 in WSL, 2026-11-09) and was not used further; **not run on a Linux desktop**. *Corrected 2026-11-09:* until then this row said the Linux build was not built or run, though the GitHub workflow had built and tested it on every push |
 | Fonts | the KMRP Original HD fonts (KMRP's [fonts/](https://github.com/RayesDiyab/KMRP-KOTOR-Modern-Restoration-Patch/blob/master/fonts/README.md), SIL OFL 1.1, [licence](../fonts/OFL.txt)): Menu, MenuMedium, MenuSmallB and Descriptions, committed in `fonts/` and embedded at build time ([build.rs](../build.rs)). *Corrected 2026-10-22:* until then they were the traced OTFs from `tools/build_hd_original_otf.py`, made from the game's atlases and never committed |
 | KotOR 1 tested | Steam, `swkotor`, with KMRP and K1CP 1.10.0; and a KOTOR Patch Manager test copy of the game in KMRP's build folder |
 | KotOR 2 tested | Steam, German release, TSLRCM 1.8.6, saves in `cloudsaves\<account>` |

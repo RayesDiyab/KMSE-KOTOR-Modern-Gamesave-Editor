@@ -54,7 +54,7 @@ screenshot of the program. The source changes after the mockup is approved.
 | | |
 | --- | --- |
 | Rust | stable, through rustup. On Windows the MSVC toolchain (`x86_64-pc-windows-msvc`), whose linker takes `/Brepro` |
-| Linux | the window libraries the GitHub workflow installs: `libxkbcommon-dev libfontconfig1-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev` |
+| Linux | the window libraries the GitHub workflow installs: `libxkbcommon-dev libfontconfig1-dev libwayland-dev libx11-dev libxcursor-dev libxi-dev libxrandr-dev`. For the AppImage also curl and sha256sum, and binutils for its checks |
 | Fonts | nothing to do: the four KMRP Original HD fonts are committed in `fonts/`. `KMRP_FONTS` can name another folder that holds all four |
 | Optional: the game and ffmpeg | for the timeline's picture of Yavin Station, which `build.rs` makes from KotOR's movie `Live_1c.bik` (found through `KOTOR_DIR`, the Steam libraries or the usual GOG folder). Without them the build warns and the button shows the name alone |
 | Optional: Python 3 | only to rebuild the quest and XP data (`tools/questdb`, `tools/xp`, standard library only, and a KotOR install), or the icon (`assets/icon`, with numpy, scipy and Pillow) |
@@ -81,12 +81,43 @@ sh build-macos.sh            # --arm64-only, --no-tests
 sh build.sh
 ```
 
+```sh
+# Linux: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage.
+sh build-linux.sh            # --no-tests, --pack-only
+```
+
 `build-macos.sh` needs the Rust targets `aarch64-apple-darwin` and `x86_64-apple-darwin` and
 Xcode's command line tools. It signs ad hoc unless `KMSE_SIGN_IDENTITY` names a Developer ID,
 and it notarizes only when `KMSE_NOTARY_PROFILE` is set too. It was first run on 2026-11-08
-([macOS audit](docs/audits/MACOS_PORT_AUDIT.md)). The Linux build has not been run on a Linux
-machine by the maintainer. The GitHub workflow (`.github/workflows/build.yml`) is set up to test and
-build on Windows, Linux and macOS; it has not run in this repository yet (2026-10-24).
+([macOS audit](docs/audits/MACOS_PORT_AUDIT.md)).
+
+`build-linux.sh` packs the program the way KMRP packs its Linux installer
+(KMRP's `tools/build_linux_appimage.sh`): an AppDir with the program, a launcher (`AppRun`),
+a desktop entry and the window's icon (`assets/save-editor-icon.png`), made into one file by
+appimagetool 1.9.1, which it downloads once into `build/tools` and checks against its
+published SHA-256. It needs curl and sha256sum besides Rust; with binutils it also checks what
+the program links and prints the newest glibc it needs. `--pack-only` packs the program
+already in `build/target/release`.
+
+The AppImage carries the program alone, as the program is one file with its fonts and pictures
+inside. What it loads from the system is a Linux desktop's own, and AppImages leave those to
+the system:
+
+| Library | Loaded | For |
+| --- | --- | --- |
+| glibc (`libc`, `libm`), `libgcc_s` | linked | the program. It needs the glibc it was built with or newer, so CI builds the AppImage on Ubuntu 22.04 (glibc 2.35) |
+| `libfontconfig.so.1` | linked | finding the system's fonts (the window's own are inside the program) |
+| `libX11`, `libX11-xcb`, `libxcb`, `libXcursor`, `libXi`, `libxkbcommon`, `libxkbcommon-x11` | opened at start, on X11 | the window, cursor and keyboard |
+| `libwayland-client`, `libxkbcommon` | opened at start, on Wayland | the same |
+| xdg-desktop-portal, over D-Bus | when a file or folder is picked | the file dialog (rfd's portal backend) |
+
+The GitHub workflow (`.github/workflows/build.yml`) tests and builds on Windows, Linux and
+macOS, makes the macOS app, and, in its `appimage` job, the AppImage, uploaded as the
+`KMSE-Linux` artifact. *Corrected 2026-11-09:* until then this section said the Linux build had
+not been run on Linux and the workflow had not run in this repository (2026-10-24). The
+workflow runs on every push; its Ubuntu job builds the program and passes the tests (for
+example the run for `84eaeb2`, 2026-11-08). The maintainer has still not run the Linux build on
+a Linux desktop.
 
 ### Reproducible builds
 
