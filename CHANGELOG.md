@@ -6,6 +6,23 @@ CHANGELOG.
 
 ## [Unreleased]
 
+- **KMSE on the icon** (2026-11-09, the maintainer). The program's icon has KMSE under the
+  holocron, the letters over the art's bottom edge. They are made by the script that made the
+  crest's letters (KMRP's `tools/build_brand_image.py`: Georgia, the measured silver face and
+  bevel, the KMRP wordmark's spacing), not drawn again. The program file's 16 to 32 px icons,
+  where the word cannot be read, are the art alone. `assets/icon/letters.py` and
+  `make_icons.py` remake them.
+
+- **The Windows build is `KMSE-Windows-1.0.exe`** (2026-11-09, the maintainer), named as the Linux
+  AppImage is: KMSE, the system, the version (major and minor, from `Cargo.toml`). `build.ps1`
+  removes the old `KOTOR Modern Gamesave Editor.exe` from `dist`.
+
+- **The GitHub workflow only tests** (2026-11-09, the maintainer: making the releases there took
+  too long). It runs the tests on Windows, macOS and Ubuntu 22.04 and checks the documents'
+  links; it no longer builds or uploads the Windows program, the macOS app or the AppImage.
+  They are built on the maintainer's machines with `build.ps1`, `build-macos.sh` and
+  `build-linux.sh`. The AppImage should be built on Ubuntu 22.04 to run with glibc 2.35 or newer.
+
 - **Linux AppImage** (2026-11-09). `sh build-linux.sh` runs the tests, builds the program and
   packs it as `dist/KMSE-Linux-<version>-x86_64.AppImage`, the way KMRP packs its Linux
   installer: the program, a launcher, a desktop entry and the window's icon, made into one

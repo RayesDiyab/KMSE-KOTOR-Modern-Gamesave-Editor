@@ -68,7 +68,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 `build.ps1` runs `cargo build --release` and, beside it, `cargo test --profile tests` in
 `build\target-tests`. It stops if either fails, then copies the program to
-`dist\KOTOR Modern Gamesave Editor.exe` and prints its size and SHA-256. Do not edit a
+`dist\KMSE-Windows-<version>.exe` (`KMSE-Windows-1.0.exe` for 1.0.0) and prints its size and SHA-256. Do not edit a
 source file while it runs.
 
 ```sh
@@ -105,20 +105,20 @@ the system:
 
 | Library | Loaded | For |
 | --- | --- | --- |
-| glibc (`libc`, `libm`), `libgcc_s` | linked | the program. It needs the glibc it was built with or newer, so CI builds the AppImage on Ubuntu 22.04 (glibc 2.35) |
+| glibc (`libc`, `libm`), `libgcc_s` | linked | the program. It needs the glibc it was built with or newer, so build the AppImage on Ubuntu 22.04 (glibc 2.35), for example in WSL, for it to run on the most systems |
 | `libfontconfig.so.1` | linked | finding the system's fonts (the window's own are inside the program) |
 | `libX11`, `libX11-xcb`, `libxcb`, `libXcursor`, `libXi`, `libxkbcommon`, `libxkbcommon-x11` | opened at start, on X11 | the window, cursor and keyboard |
 | `libwayland-client`, `libxkbcommon` | opened at start, on Wayland | the same |
 | xdg-desktop-portal, over D-Bus | when a file or folder is picked | the file dialog (rfd's portal backend) |
 
-The GitHub workflow (`.github/workflows/build.yml`) tests and builds on Windows and macOS and
-makes the macOS app. On Linux its `appimage` job runs `build-linux.sh` on Ubuntu 22.04: the
-tests, then the AppImage, uploaded as the `KMSE-Linux` artifact. Since 2026-11-09 it replaces
-the `ubuntu-latest` build, which uploaded the plain program that the AppImage now holds. *Corrected 2026-11-09:* until then this section said the Linux build had
-not been run on Linux and the workflow had not run in this repository (2026-10-24). The
-workflow runs on every push; its Ubuntu job builds the program and passes the tests (for
-example the run for `84eaeb2`, 2026-11-08). The maintainer has still not run the Linux build on
-a Linux desktop.
+The GitHub workflow (`.github/workflows/build.yml`) only runs the tests, on Windows, macOS and
+Ubuntu 22.04, and checks the documents' links. It makes no releases: the Windows program, the
+macOS app and the AppImage are built on the maintainer's machines with `build.ps1`,
+`build-macos.sh` and `build-linux.sh` (2026-11-09: building them in CI took too long). Until then
+it built and uploaded all three. *Corrected 2026-11-09:* until then this section said the Linux
+build had not been run on Linux and the workflow had not run in this repository (2026-10-24);
+its Ubuntu job had built the program and passed the tests on every push (for example the run
+for `84eaeb2`, 2026-11-08). The maintainer has still not run the Linux build on a Linux desktop.
 
 ### Reproducible builds
 

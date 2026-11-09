@@ -1,4 +1,5 @@
-# Builds dist\KOTOR Modern Gamesave Editor.exe beside this file: one file, no installer, no other files.
+# Builds dist\KMSE-Windows-<version>.exe beside this file (KMSE-Windows-1.0.exe for 1.0.0: the major and
+# minor version from Cargo.toml, 2026-11-09, the maintainer): one file, no installer, no other files.
 #
 #   powershell -ExecutionPolicy Bypass -File build.ps1
 #
@@ -9,7 +10,8 @@ $ErrorActionPreference = "Stop"
 
 $here = $PSScriptRoot
 $dist = Join-Path $here "dist"
-$exe = Join-Path $dist "KOTOR Modern Gamesave Editor.exe"
+$version = (Select-String -Path (Join-Path $here "Cargo.toml") -Pattern '^version = "(\d+)\.(\d+)' | Select-Object -First 1).Matches[0]
+$exe = Join-Path $dist ("KMSE-Windows-{0}.{1}.exe" -f $version.Groups[1].Value, $version.Groups[2].Value)
 
 Push-Location $here
 try {
@@ -33,6 +35,8 @@ try {
 }
 
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
+# the name builds had until 2026-11-09: gone, so dist holds the one build
+Remove-Item -LiteralPath (Join-Path $dist "KOTOR Modern Gamesave Editor.exe") -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath (Join-Path $here "build\target\release\kotor-modern-gamesave-editor.exe") -Destination $exe -Force
 $item = Get-Item -LiteralPath $exe
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash

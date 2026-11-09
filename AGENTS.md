@@ -89,7 +89,7 @@ The one thing this program must never do is damage a player's save.
 - **Never edit a source file while a build runs.** `build.ps1` builds the program and the
   tests at the same time; an edit in the middle ships a program built from two versions of
   the source. Wait for the build to finish, then edit.
-- **The latest build is always in `dist\KOTOR Modern Gamesave Editor.exe`**, made by
+- **The latest build is always in `dist\KMSE-Windows-<version>.exe`**, made by
   `build.ps1`. After a change that is meant to be tried, run `build.ps1` so `dist` holds
   it, and launch the program from there.
 - **The release build stays reproducible.** `.cargo/config.toml` passes `/Brepro` to the

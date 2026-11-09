@@ -17,7 +17,8 @@
 # check what the program loads. The AppImage carries the program alone: the libraries it
 # loads (fontconfig; X11, xcb, Xcursor, Xi and xkbcommon, or Wayland and xkbcommon) are a
 # Linux desktop's own and are taken from the system, as AppImages do. It runs on Linux with
-# the glibc of the machine that built it or newer: CI builds it on Ubuntu 22.04 (glibc 2.35).
+# the glibc of the machine that built it or newer: build it on Ubuntu 22.04 (glibc 2.35), in WSL
+# for example, for it to run on the most systems.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)

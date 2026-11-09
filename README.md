@@ -87,7 +87,7 @@ the program can check by itself.
 ## Get it
 
 No release has been published yet (2026-10-24). Until then, build it from source as below.
-On Windows the result is one file, `KOTOR Modern Gamesave Editor.exe`, with no installer.
+On Windows the result is one file, `KMSE-Windows-1.0.exe`, with no installer.
 It keeps its settings in `%LOCALAPPDATA%\KOTOR Modern Gamesave Editor`
 (`~/Library/Application Support/...` on macOS, `~/.local/share/...` on Linux), never in
 the game's folder.
@@ -98,7 +98,7 @@ This folder builds on its own; nothing outside it is needed. Both scripts need R
 (stable, through rustup).
 
 ```powershell
-# Windows: makes dist\KOTOR Modern Gamesave Editor.exe and runs the tests beside it.
+# Windows: makes dist\KMSE-Windows-1.0.exe and runs the tests beside it.
 powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
@@ -116,8 +116,7 @@ sh build-linux.sh
 
 On Linux the window also needs the usual X11, Wayland and fontconfig development packages;
 the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux build has not been run on a
-Linux desktop by the maintainer yet; GitHub's workflow builds and tests it on Ubuntu and
-makes the AppImage. The macOS build and what was tested on a Mac are in
+Linux desktop by the maintainer yet; GitHub's workflow tests it on Ubuntu. The macOS build and what was tested on a Mac are in
 [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md). The app it makes is
 signed ad hoc, not with a Developer ID, so it is not ready to hand out yet.
 

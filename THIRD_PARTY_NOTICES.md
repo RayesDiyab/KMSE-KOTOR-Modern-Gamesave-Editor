@@ -75,7 +75,8 @@ with it). The font is committed but not carried in the program.
 | `assets/sigil.png` | the KMRP sigil | the maintainer's own artwork, from KMRP (`assets/branding/sigil.png`, the same file) |
 | `assets/kmse-logo.png` | the crest in the header: the sigil over "KMSE" | the maintainer's own artwork, made the way the KMRP crest is (2026-10-24) |
 | `assets/settings.png` | the settings gear | from the KMRP installer's gear (KMRP `assets/branding/ui-icons/Settings.png`), the maintainer's own |
-| `assets/icon/icon.png`, `assets/save-editor-icon.png`, `assets/save-editor.ico` | the program's icon | the maintainer's: a holocron with a datapad drawn from geometry in front of it (`assets/icon/README.md`) |
+| `assets/icon/icon.png`, `assets/icon/art.png`, `assets/save-editor-icon.png`, `assets/save-editor.ico` | the program's icon | the maintainer's: a holocron with a datapad drawn from geometry in front of it, KMSE under it (`assets/icon/README.md`) |
+| `assets/icon/kmse-letters.png` | the icon's KMSE letters | the maintainer's: made by KMRP's `tools/build_brand_image.py` as the crest's letters are, set in Georgia (2026-11-09) |
 | `assets/icon/holocron-clean.png` | the holocron the icon is made from | the maintainer's picture, its white fringe removed (`clean_holocron.py`). How the original picture was made is not recorded in this repository |
 
 ## Rust crates
