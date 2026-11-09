@@ -111,9 +111,10 @@ the system:
 | `libwayland-client`, `libxkbcommon` | opened at start, on Wayland | the same |
 | xdg-desktop-portal, over D-Bus | when a file or folder is picked | the file dialog (rfd's portal backend) |
 
-The GitHub workflow (`.github/workflows/build.yml`) tests and builds on Windows, Linux and
-macOS, makes the macOS app, and, in its `appimage` job, the AppImage, uploaded as the
-`KMSE-Linux` artifact. *Corrected 2026-11-09:* until then this section said the Linux build had
+The GitHub workflow (`.github/workflows/build.yml`) tests and builds on Windows and macOS and
+makes the macOS app. On Linux its `appimage` job runs `build-linux.sh` on Ubuntu 22.04: the
+tests, then the AppImage, uploaded as the `KMSE-Linux` artifact. Since 2026-11-09 it replaces
+the `ubuntu-latest` build, which uploaded the plain program that the AppImage now holds. *Corrected 2026-11-09:* until then this section said the Linux build had
 not been run on Linux and the workflow had not run in this repository (2026-10-24). The
 workflow runs on every push; its Ubuntu job builds the program and passes the tests (for
 example the run for `84eaeb2`, 2026-11-08). The maintainer has still not run the Linux build on

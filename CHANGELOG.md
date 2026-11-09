@@ -11,8 +11,9 @@ CHANGELOG.
   installer: the program, a launcher, a desktop entry and the window's icon, made into one
   file by appimagetool 1.9.1 (its SHA-256 checked). It carries the program alone; fontconfig,
   X11 or Wayland and xkbcommon come from the system ([CONTRIBUTING.md](CONTRIBUTING.md),
-  "Commands"). The GitHub workflow's new `appimage` job builds it on Ubuntu 22.04, so it runs
-  with glibc 2.35 or newer, and uploads it as `KMSE-Linux`. **Checked:** in WSL's Ubuntu
+  "Commands"). The GitHub workflow's new `appimage` job runs the tests and builds it on Ubuntu
+  22.04, so it runs with glibc 2.35 or newer, and uploads it as `KMSE-Linux`. It replaces the
+  workflow's `ubuntu-latest` build and its plain Linux program. **Checked:** in WSL's Ubuntu
   26.04, the script packed the program from the workflow's Linux build into a 10.1 MB
   AppImage holding the same program byte for byte, and the AppImage opened the editor's
   window under WSLg. **Not checked:** the `appimage` job itself (not pushed yet), a Linux
