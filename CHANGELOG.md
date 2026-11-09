@@ -13,15 +13,17 @@ CHANGELOG.
   where the word cannot be read, are the art alone. `assets/icon/letters.py` and
   `make_icons.py` remake them.
 
-- **The Windows build is `KMSE-Windows-1.0.exe`** (2026-11-09, the maintainer), named as the Linux
-  AppImage is: KMSE, the system, the version (major and minor, from `Cargo.toml`). `build.ps1`
-  removes the old `KOTOR Modern Gamesave Editor.exe` from `dist`.
+- **The builds are `KMSE-Windows-1.0.exe` and `KMSE-Linux-1.0-x86_64.AppImage`** (2026-11-09,
+  the maintainer): KMSE, the system, the version (major and minor, from `Cargo.toml`). The
+  AppImage was `KMSE-Linux-1.0.0-x86_64.AppImage`. `build.ps1` removes the old
+  `KOTOR Modern Gamesave Editor.exe` from `dist`.
 
 - **The GitHub workflow only tests** (2026-11-09, the maintainer: making the releases there took
   too long). It runs the tests on Windows, macOS and Ubuntu 22.04 and checks the documents'
   links; it no longer builds or uploads the Windows program, the macOS app or the AppImage.
   They are built on the maintainer's machines with `build.ps1`, `build-macos.sh` and
-  `build-linux.sh`. The AppImage should be built on Ubuntu 22.04 to run with glibc 2.35 or newer.
+  `build-linux.sh`. The AppImage should be built on an older Ubuntu to run on the most systems:
+  built with the tests on Ubuntu 20.04 in WSL, it needs glibc 2.30 and opened under WSLg.
 
 - **Linux AppImage** (2026-11-09). `sh build-linux.sh` runs the tests, builds the program and
   packs it as `dist/KMSE-Linux-<version>-x86_64.AppImage`, the way KMRP packs its Linux

@@ -110,7 +110,7 @@ sh build-macos.sh
 ```sh
 # Linux: tests, then dist/kotor-modern-gamesave-editor.
 sh build.sh
-# Or as an AppImage: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage.
+# Or as an AppImage: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage (KMSE-Linux-1.0-x86_64.AppImage).
 sh build-linux.sh
 ```
 

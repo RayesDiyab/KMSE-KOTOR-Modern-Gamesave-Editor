@@ -1,6 +1,8 @@
 #!/bin/sh
 # Builds KMSE for Linux as an AppImage, into dist/ beside this file:
 #   dist/KMSE-Linux-<version>-x86_64.AppImage    the program, one file to download and run
+#   (KMSE-Linux-1.0-x86_64.AppImage for 1.0.0: the major and minor version, as build.ps1 names
+#   KMSE-Windows-1.0.exe; 2026-11-09, the maintainer)
 #
 #   sh build-linux.sh               tests, then the release build, then the AppImage
 #   sh build-linux.sh --no-tests    skips the tests (the release build is the same)
@@ -17,8 +19,8 @@
 # check what the program loads. The AppImage carries the program alone: the libraries it
 # loads (fontconfig; X11, xcb, Xcursor, Xi and xkbcommon, or Wayland and xkbcommon) are a
 # Linux desktop's own and are taken from the system, as AppImages do. It runs on Linux with
-# the glibc of the machine that built it or newer: build it on Ubuntu 22.04 (glibc 2.35), in WSL
-# for example, for it to run on the most systems.
+# the glibc it was built against or newer: build it on an older Ubuntu, in WSL for example, for
+# it to run on the most systems (built on Ubuntu 20.04 it needs glibc 2.30, 2026-11-09).
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -134,7 +136,7 @@ cp "$appdir/$bin.desktop" "$appdir/usr/share/applications/$bin.desktop"
 
 echo "== AppImage"
 dist="$here/dist"
-target="$dist/KMSE-Linux-$version-x86_64.AppImage"
+target="$dist/KMSE-Linux-$(echo "$version" | cut -d. -f1,2)-x86_64.AppImage"
 mkdir -p "$dist"
 rm -f "$target"
 # The tool runs from its own extraction, so it needs no FUSE (WSL and CI have none).

@@ -82,7 +82,7 @@ sh build.sh
 ```
 
 ```sh
-# Linux: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage.
+# Linux: tests, then dist/KMSE-Linux-<version>-x86_64.AppImage (KMSE-Linux-1.0-x86_64.AppImage).
 sh build-linux.sh            # --no-tests, --pack-only
 ```
 
@@ -105,7 +105,7 @@ the system:
 
 | Library | Loaded | For |
 | --- | --- | --- |
-| glibc (`libc`, `libm`), `libgcc_s` | linked | the program. It needs the glibc it was built with or newer, so build the AppImage on Ubuntu 22.04 (glibc 2.35), for example in WSL, for it to run on the most systems |
+| glibc (`libc`, `libm`), `libgcc_s` | linked | the program. It needs the glibc it was built with or newer, so build the AppImage on an older Ubuntu, for example in WSL, for it to run on the most systems: built on Ubuntu 20.04 it needs glibc 2.30 (2026-11-09) |
 | `libfontconfig.so.1` | linked | finding the system's fonts (the window's own are inside the program) |
 | `libX11`, `libX11-xcb`, `libxcb`, `libXcursor`, `libXi`, `libxkbcommon`, `libxkbcommon-x11` | opened at start, on X11 | the window, cursor and keyboard |
 | `libwayland-client`, `libxkbcommon` | opened at start, on Wayland | the same |
