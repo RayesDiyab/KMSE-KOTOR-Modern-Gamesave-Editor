@@ -1,9 +1,10 @@
 #!/bin/sh
 # Builds KMSE for macOS into dist/ beside this file:
 #   dist/KMSE.app                     the program (Universal 2: Apple silicon and Intel)
-#   dist/KMSE-<version>-macOS.dmg     the app with a link to Applications, to drag across, on
-#                                     the KMSE background (assets/dmg)
-#   dist/KMSE-<version>-macOS.zip     the app alone
+#   dist/KMSE-macOS-<major.minor>.dmg the app with a link to Applications, to drag across, on
+#                                     the KMSE background (assets/dmg); KMSE-macOS-1.0.dmg for
+#                                     1.0.0, like KMSE-Windows-1.0.exe
+#   dist/KMSE-macOS-<major.minor>.zip the app alone
 #
 #   sh build-macos.sh                 tests, then both architectures
 #   sh build-macos.sh --arm64-only    Apple silicon only (no Intel half)
@@ -171,9 +172,12 @@ if command -v spctl >/dev/null 2>&1; then
 fi
 
 echo "== packages"
-dmg="$dist/$name-$version-macOS.dmg"
-zip="$dist/$name-$version-macOS.zip"
-rm -f "$dmg" "$zip"
+# Named like the other systems' builds: KMSE, the system, the major and minor version.
+short=$(echo "$version" | cut -d . -f 1-2)
+dmg="$dist/$name-macOS-$short.dmg"
+zip="$dist/$name-macOS-$short.zip"
+# the names until 2026-11-13: gone, so dist holds the one build
+rm -f "$dmg" "$zip" "$dist/$name-$version-macOS.dmg" "$dist/$name-$version-macOS.zip"
 stage="$here/build/dmg"
 rw="$here/build/dmg-rw.dmg"
 rm -rf "$stage" "$rw"

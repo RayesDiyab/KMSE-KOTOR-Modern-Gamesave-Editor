@@ -6,6 +6,24 @@ CHANGELOG.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-13
+
+The first release: `KMSE-Windows-1.0.exe`, `KMSE-macOS-1.0.dmg` and
+`KMSE-Linux-1.0-x86_64.AppImage`, with the press kit in `releases/v1.0/press-kit`.
+
+- **Released without paid signing** (2026-11-13, the maintainer). The Windows program is not
+  code signed and the Mac app is signed ad hoc and not notarized; the README's "Get it" says
+  what each system shows the first time and how to start it. Until then the README and the
+  macOS audit said the Mac app was not ready to hand out without Developer ID signing and
+  notarization; both now record the maintainer's decision. **Checked:** the Windows program
+  rebuilt from `bbf1d2d` is byte for byte the one released (SHA-256 `e89308e7...ccde0be`),
+  with every test passing; the AppImage runs on Ubuntu 20.04 in WSL (glibc 2.30 at most, no
+  missing libraries) and opened under WSLg; the DMG holds a Universal 2 app, version 1.0.0.
+
+- **The DMG is `KMSE-macOS-1.0.dmg`** (2026-11-13, the maintainer), and the ZIP
+  `KMSE-macOS-1.0.zip`, named like the Windows and Linux builds. They were
+  `KMSE-1.0.0-macOS.dmg` and `.zip`; `build-macos.sh` removes the old names from `dist`.
+
 - **KMSE on the icon** (2026-11-09, the maintainer). The program's icon has KMSE under the
   holocron, the letters over the art's bottom edge. They are made by the script that made the
   crest's letters (KMRP's `tools/build_brand_image.py`: Georgia, the measured silver face and

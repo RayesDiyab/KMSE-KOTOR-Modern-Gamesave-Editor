@@ -72,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 source file while it runs.
 
 ```sh
-# macOS: tests, then dist/KMSE.app (Universal 2), dist/KMSE-<version>-macOS.dmg and .zip.
+# macOS: tests, then dist/KMSE.app (Universal 2), dist/KMSE-macOS-<major.minor>.dmg and .zip (KMSE-macOS-1.0.dmg).
 sh build-macos.sh            # --arm64-only, --no-tests
 ```
 

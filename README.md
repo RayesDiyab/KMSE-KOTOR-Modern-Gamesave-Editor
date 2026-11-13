@@ -86,8 +86,22 @@ the program can check by itself.
 
 ## Get it
 
-No release has been published yet (2026-10-24). Until then, build it from source as below.
-On Windows the result is one file, `KMSE-Windows-1.0.exe`, with no installer.
+KMSE 1.0 is on the
+[Releases page](https://github.com/RayesDiyab/KMSE-KOTOR-Modern-Gamesave-Editor/releases)
+(2026-11-13; until then this said no release had been published). Each build is one file
+with no installer:
+
+| File | System | First start |
+| --- | --- | --- |
+| `KMSE-Windows-1.0.exe` | Windows 10 and 11, 64-bit | Not code signed: SmartScreen may warn. More info, then Run anyway. |
+| `KMSE-macOS-1.0.dmg` | macOS 11 or newer, Apple silicon and Intel | Signed ad hoc, not notarized: macOS refuses it the first time. System Settings, Privacy & Security, Open Anyway. |
+| `KMSE-Linux-1.0-x86_64.AppImage` | Linux x86-64, glibc 2.30 or newer | `chmod +x` the file, then run it. |
+
+Neither the Windows program nor the Mac app is signed with a certificate a publisher pays
+for. That was the maintainer's choice for 1.0 (2026-11-13): the warnings above are shown
+once, and the builds are what `build.ps1`, `build-macos.sh` and `build-linux.sh` make. To
+build it yourself, see below.
+
 It keeps its settings in `%LOCALAPPDATA%\KOTOR Modern Gamesave Editor`
 (`~/Library/Application Support/...` on macOS, `~/.local/share/...` on Linux), never in
 the game's folder.
@@ -118,7 +132,9 @@ On Linux the window also needs the usual X11, Wayland and fontconfig development
 the list is in [CONTRIBUTING.md](CONTRIBUTING.md). The Linux build has not been run on a
 Linux desktop by the maintainer yet; GitHub's workflow tests it on Ubuntu. The macOS build and what was tested on a Mac are in
 [docs/audits/MACOS_PORT_AUDIT.md](docs/audits/MACOS_PORT_AUDIT.md). The app it makes is
-signed ad hoc, not with a Developer ID, so it is not ready to hand out yet.
+signed ad hoc, not with a Developer ID, and is not notarized. Until 2026-11-13 this said the
+app was therefore not ready to hand out; the maintainer released 1.0 that way, with the Open
+Anyway step under [Get it](#get-it).
 
 The window is set in the KMRP Original HD fonts: the four it uses are in `fonts/`, copies
 of KMRP's own, under the SIL Open Font License 1.1 ([fonts/OFL.txt](fonts/OFL.txt)). A

@@ -190,6 +190,14 @@ game.
 - **Signing:** ad hoc. Gatekeeper does not accept the app (`spctl`). Before release it must
   be signed with a Developer ID (`KMSE_SIGN_IDENTITY`), notarized (`KMSE_NOTARY_PROFILE`)
   and stapled. The script does this when both are set. **Not run:** no identity on this Mac.
+  **2026-11-13, the maintainer:** KMSE 1.0 is released signed ad hoc and not notarized. On
+  first start macOS refuses it, and the user allows it once in System Settings, Privacy &
+  Security, Open Anyway (README, "Get it"). Developer ID signing and notarization are no
+  longer required for release; the script still does them when both are set.
+- **Names (2026-11-13):** the DMG and ZIP are now `KMSE-macOS-1.0.dmg` and
+  `KMSE-macOS-1.0.zip` (the major and minor version, like `KMSE-Windows-1.0.exe` and
+  `KMSE-Linux-1.0-x86_64.AppImage`). The `KMSE-1.0.0-macOS` names above are what the
+  script made when this audit was written.
 - **Reproducible:** yes for the program (two builds, one SHA-256; see the end of J).
 - Nothing was uploaded or published.
 
@@ -208,6 +216,9 @@ each game, edit it, Save Changes, Revert, restore from History, pick a game app 
 and press Command-Q with a change pending. Then load one edited save in each game. Once that
 passes, the port is ready for a limited macOS beta. A release candidate also needs Developer
 ID signing and notarization.
+
+**2026-11-13:** the maintainer judged KMSE 1.0 ready and released it for macOS signed ad hoc,
+not notarized (see I, Signing). The verdict above is kept as it was written.
 
 ### Reproducible build
 
