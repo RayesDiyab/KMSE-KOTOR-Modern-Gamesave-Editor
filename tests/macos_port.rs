@@ -172,6 +172,17 @@ fn alive(pid: u32) -> bool {
     })
 }
 
+/// Held by each test that starts a stand-in for a game, for as long as it runs. The tests of
+/// one file run side by side, and each checks that no game runs before and after its own:
+/// on 2026-11-13 the Wine test's KotOR II was still running when `a_running_port_is_seen`
+/// checked that its games had ended, and that test failed in the GitHub workflow. A test
+/// that panicked leaves the lock poisoned; the next one takes it anyway.
+#[cfg(target_os = "macos")]
+fn one_game_test_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg(target_os = "macos")]
 fn decoy(program: &Path) -> Decoy {
     fs::create_dir_all(program.parent().unwrap()).unwrap();
@@ -190,10 +201,12 @@ fn decoy(program: &Path) -> Decoy {
 }
 
 /// The programs running are listed on macOS, and a game started from its bundle is seen
-/// while it runs and not after. One test, so no other decoy runs beside it.
+/// while it runs and not after. One test, so its two decoys never run side by side, and it
+/// takes turns with the Wine test (`one_game_test_at_a_time`).
 #[cfg(target_os = "macos")]
 #[test]
 fn a_running_port_is_seen() {
+    let _turn = one_game_test_at_a_time();
     let before = games::running_games().expect("the programs running could be listed");
     if !before.is_empty() {
         return eprintln!("a KotOR is running on this Mac ({:?}): not checked", before);
@@ -383,6 +396,7 @@ fn a_windows_game_under_wine_is_told_by_its_arguments() {
 #[cfg(target_os = "macos")]
 #[test]
 fn a_running_wine_game_is_seen() {
+    let _turn = one_game_test_at_a_time();
     if games::running_games().map_or(true, |g| !g.is_empty()) {
         return eprintln!("a KotOR is running on this Mac: not checked");
     }
