@@ -79,6 +79,17 @@ CHANGELOG.
     over (macOS and Linux).
   - `build-macos.sh` makes `dist/KMSE.app` (Apple silicon and Intel), a DMG and a ZIP;
     `build.sh` runs it on macOS.
+  - The DMG opens on a KMSE background (2026-11-13, the maintainer): the star field, KMSE
+    in the crest's silver, the app and Applications in rings with a glowing arrow between
+    them, each name on a silver plate because Finder writes the names in black.
+    `tools/dmg/background.py` draws `assets/dmg/background.png` and `background@2x.png`, and
+    `build-macos.sh` lays the window out through Finder; where this Mac does not let it
+    control Finder, the DMG keeps a plain window and the build says so.
+  - The app's icon no longer sits on a grey-white plate on macOS 26 and later (2026-11-13,
+    the maintainer chose the star plate from two mock-ups). Finder puts an icon that is not
+    a full rounded square on one; the Mac icon is now the icon, KMSE included, on a rounded
+    square of the timeline's stars (`assets/icon/icon-macos.png`, by
+    `assets/icon/make_mac_icon.py`). The Windows icon is unchanged.
   - Go Back no longer changes the party table before refusing a save whose level history is
     damaged (both games; the window works on a copy, so no save took it).
   - KotOR II's Override subfolders are read in the order Windows lists them on every disk.

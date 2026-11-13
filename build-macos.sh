@@ -1,7 +1,8 @@
 #!/bin/sh
 # Builds KMSE for macOS into dist/ beside this file:
 #   dist/KMSE.app                     the program (Universal 2: Apple silicon and Intel)
-#   dist/KMSE-<version>-macOS.dmg     the app with a link to Applications, to drag across
+#   dist/KMSE-<version>-macOS.dmg     the app with a link to Applications, to drag across, on
+#                                     the KMSE background (assets/dmg)
 #   dist/KMSE-<version>-macOS.zip     the app alone
 #
 #   sh build-macos.sh                 tests, then both architectures
@@ -10,8 +11,8 @@
 #
 # Needs Rust (rustup, stable) with the aarch64-apple-darwin target, and x86_64-apple-darwin
 # for the Intel half (`rustup target add x86_64-apple-darwin`); Xcode's command line tools
-# (clang, lipo, codesign, iconutil, sips, hdiutil, plutil, ditto). ffmpeg and KotOR installed
-# are optional: with both, the timeline's Yavin Station is drawn from the game's movie
+# (clang, lipo, codesign, iconutil, sips, hdiutil, plutil, ditto, tiffutil). ffmpeg and KotOR
+# installed are optional: with both, the timeline's Yavin Station is drawn from the game's movie
 # (build.rs); without them it shows its name.
 #
 # Signing: with KMSE_SIGN_IDENTITY set to a "Developer ID Application: ..." identity in the
@@ -38,7 +39,7 @@ done
 fail() { echo "build-macos.sh: $*" >&2; exit 1; }
 
 [ "$(uname)" = "Darwin" ] || fail "this script builds the macOS app; on Linux use build.sh, on Windows build.ps1"
-for tool in cargo rustup lipo codesign iconutil sips hdiutil plutil ditto /usr/libexec/PlistBuddy; do
+for tool in cargo rustup lipo codesign iconutil sips hdiutil plutil ditto tiffutil osascript /usr/libexec/PlistBuddy; do
     command -v "$tool" >/dev/null 2>&1 || fail "$tool was not found"
 done
 targets="aarch64-apple-darwin"
@@ -94,11 +95,13 @@ else
 fi
 chmod 755 "$app/Contents/MacOS/$name"
 
-# The icon, from the 1024 px master (assets/icon/icon.png), at every size macOS asks for.
+# The icon, from the 1024 px macOS master (assets/icon/icon-macos.png: icon.png on a rounded
+# square of stars, by assets/icon/make_mac_icon.py, so macOS 26 and later show it without a
+# grey-white plate), at every size macOS asks for.
 iconset="$here/build/AppIcon.iconset"
 rm -rf "$iconset"
 mkdir -p "$iconset"
-master="$here/assets/icon/icon.png"
+master="$here/assets/icon/icon-macos.png"
 for s in 16 32 128 256 512; do
     sips -z "$s" "$s" "$master" --out "$iconset/icon_${s}x${s}.png" >/dev/null
     d=$((s * 2))
@@ -172,12 +175,57 @@ dmg="$dist/$name-$version-macOS.dmg"
 zip="$dist/$name-$version-macOS.zip"
 rm -f "$dmg" "$zip"
 stage="$here/build/dmg"
-rm -rf "$stage"
-mkdir -p "$stage"
+rw="$here/build/dmg-rw.dmg"
+rm -rf "$stage" "$rw"
+mkdir -p "$stage/.background"
 ditto "$app" "$stage/$name.app"
 ln -s /Applications "$stage/Applications"
-hdiutil create -quiet -volname "$name $version" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "$dmg"
+# The window's background (assets/dmg, drawn by tools/dmg/background.py): one TIFF holding the
+# 1x and 2x pictures, so a Retina screen gets the sharp one.
+tiffutil -cathidpicheck "$here/assets/dmg/background.png" "$here/assets/dmg/background@2x.png" \
+    -out "$stage/.background/background.tiff" >/dev/null 2>&1
+# A writable image first, so Finder can lay the window out; then compressed.
+hdiutil create -quiet -volname "$name $version" -srcfolder "$stage" -fs HFS+ -format UDRW -ov "$rw"
 rm -rf "$stage"
+mount=$(hdiutil attach -readwrite -noverify -noautoopen "$rw" | awk -F '\t' '/\/Volumes\// {print $NF; exit}')
+[ -d "$mount" ] || fail "the DMG did not mount"
+vol=$(basename "$mount")
+# The layout tools/dmg/background.py draws for: a 660 x 400 point window (the title bar is on
+# top of that), 128 point icons, the app at (170, 200) and Applications at (490, 200).
+# Finder needs this Mac's permission to be controlled; without it the DMG keeps a plain window.
+if osascript <<APPLESCRIPT
+tell application "Finder"
+    tell disk "$vol"
+        open
+        set current view of container window to icon view
+        set toolbar visible of container window to false
+        set statusbar visible of container window to false
+        set bounds of container window to {200, 120, 860, 548}
+        set opts to the icon view options of container window
+        set arrangement of opts to not arranged
+        set icon size of opts to 128
+        set text size of opts to 13
+        set background picture of opts to file ".background:background.tiff"
+        set position of item "$name.app" of container window to {170, 200}
+        set position of item "Applications" of container window to {490, 200}
+        update without registering applications
+        delay 1
+        close
+    end tell
+end tell
+APPLESCRIPT
+then
+    echo "DMG window laid out"
+else
+    echo "build-macos.sh: Finder could not lay out the DMG window (allow this terminal to control Finder in System Settings, Privacy & Security, Automation); the DMG has a plain window" >&2
+fi
+sync
+# Finder writes .DS_Store a moment after the window closes
+sleep 2
+rm -rf "$mount/.fseventsd"
+hdiutil detach -quiet "$mount" || { sleep 3; hdiutil detach -force -quiet "$mount"; }
+hdiutil convert -quiet "$rw" -format UDZO -imagekey zlib-level=9 -o "$dmg"
+rm -f "$rw"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$zip"
 if [ -n "$identity" ]; then
     codesign --force --timestamp --sign "$identity" "$dmg"

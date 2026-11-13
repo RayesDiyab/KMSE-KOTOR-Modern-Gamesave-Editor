@@ -74,8 +74,9 @@ with it). The font is committed but not carried in the program.
 | `assets/timeline/yavin-station-mask.png` | the outline of Yavin Station, a grey-scale mask | made once with rembg's BiRefNet model from a frame of the game's movie; an outline only, not the picture (see the games' own material above) |
 | `assets/sigil.png` | the KMRP sigil | the maintainer's own artwork, from KMRP (`assets/branding/sigil.png`, the same file) |
 | `assets/kmse-logo.png` | the crest in the header: the sigil over "KMSE" | the maintainer's own artwork, made the way the KMRP crest is (2026-10-24) |
+| `assets/dmg/background.png`, `assets/dmg/background@2x.png` | the DMG window's background | drawn by `tools/dmg/background.py` from `assets/timeline/stars.png`, the KMRP Original HD fonts above and Georgia (macOS's own, drawn into the picture; the font file is not in this repository) |
 | `assets/settings.png` | the settings gear | from the KMRP installer's gear (KMRP `assets/branding/ui-icons/Settings.png`), the maintainer's own |
-| `assets/icon/icon.png`, `assets/icon/art.png`, `assets/save-editor-icon.png`, `assets/save-editor.ico` | the program's icon | the maintainer's: a holocron with a datapad drawn from geometry in front of it, KMSE under it (`assets/icon/README.md`) |
+| `assets/icon/icon.png`, `assets/icon/art.png`, `assets/icon/icon-macos.png`, `assets/save-editor-icon.png`, `assets/save-editor.ico` | the program's icon (`icon-macos.png`: the same on a plate of `assets/timeline/stars.png`, for macOS) | the maintainer's: a holocron with a datapad drawn from geometry in front of it, KMSE under it (`assets/icon/README.md`) |
 | `assets/icon/kmse-letters.png` | the icon's KMSE letters | the maintainer's: made by KMRP's `tools/build_brand_image.py` as the crest's letters are, set in Georgia (2026-11-09) |
 | `assets/icon/holocron-clean.png` | the holocron the icon is made from | the maintainer's picture, its white fringe removed (`clean_holocron.py`). How the original picture was made is not recorded in this repository |
 

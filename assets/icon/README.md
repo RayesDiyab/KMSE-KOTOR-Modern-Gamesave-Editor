@@ -15,6 +15,7 @@ KMSE stands under it in the crest's letters, over the art's bottom edge.
 | `datapad.py` | the datapad: face texture (brushed obsidian, cracks, a height map lit from the upper left), Aurebesh screen, the wedge in 3D |
 | `render_icon.py` | the holocron and the datapad placed with the angles chosen in the 3D viewer: left/right -31°, up/down 46°, tilt 4°, size 52%, position 17% across, -14% up |
 | `make_icons.py` | crops and centres a render into `art.png`, puts the letters under it (the art's bottom 30% of the way down them), writes `icon.png`, `../save-editor-icon.png` (512, the window's icon; the header shows the KMSE crest, `../kmse-logo.png`, since 2026-10-24) and `../save-editor.ico` (16 to 256, the program file: 16 to 32 px the art alone, where the word cannot be read) |
+| `make_mac_icon.py` | writes `icon-macos.png` (1024): `icon.png` on a rounded square of the timeline's stars, the macOS master `build-macos.sh` makes `AppIcon.icns` from. Since macOS 26 Finder puts an icon that is not a full rounded square on a grey-white plate; this one fills Apple's grid (an 824 px plate, 100 px in), so it is shown as drawn (measured on macOS 27, 2026-11-13) |
 | `AurebeshAF-CanonTech.otf` | Aurebesh AF by AurekFonts, CC0 public domain (its name table: "CC-0 public domain, created by AurekFonts") |
 
 To remake it (Python with numpy, scipy, Pillow):
@@ -23,6 +24,7 @@ To remake it (Python with numpy, scipy, Pillow):
 python render_icon.py rendered.png 1024
 python letters.py "E:\KMRP - KOTOR Modern Restoration Patch"
 python make_icons.py rendered.png
+python make_mac_icon.py
 ```
 
 The render reproduces `art.png` to a mean difference of 1.2 of 255 (the holocron is
